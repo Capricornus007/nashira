@@ -47,7 +47,11 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(strings.appName, style = MaterialTheme.typography.headlineMedium)
+        Text(
+            strings.appName,
+            style = MaterialTheme.typography.headlineMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
         Text(
             strings.tagline,
             style = MaterialTheme.typography.titleSmall,

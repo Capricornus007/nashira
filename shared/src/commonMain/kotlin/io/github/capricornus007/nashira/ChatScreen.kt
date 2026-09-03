@@ -25,6 +25,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -32,6 +33,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import de.connect2x.trixnity.client.room
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -55,7 +57,15 @@ fun ChatScreen(
 ) {
     var language by remember { mutableStateOf(AppLanguage.ZH_TW) }
     val strings = stringsFor(language)
-    val summaries by roomRepository.roomSummaries().collectAsState(initial = emptyList())
+    var summaries by remember { mutableStateOf(emptyList<io.github.capricornus007.nashira.matrix.RoomSummary>()) }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        roomRepository.client.room.getAll().collect { roomFlows ->
+            println("NASHIRA_DIRECT getAll=${roomFlows.size}")
+            summaries = roomFlows.keys.map { roomId ->
+                io.github.capricornus007.nashira.matrix.RoomSummary(roomId, roomId.full, false)
+            }
+        }
+    }
     var selected by remember { mutableStateOf<RoomSummary?>(null) }
 
     Row(modifier = Modifier.fillMaxSize()) {
@@ -79,6 +89,7 @@ fun ChatScreen(
                     )
                 },
             )
+            println("NASHIRA_UI2 render summaries=${summaries.size}")
             if (summaries.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()

@@ -7,6 +7,7 @@ import de.connect2x.trixnity.client.RepositoriesModule
 import de.connect2x.trixnity.client.cryptodriver.vodozemac.vodozemac
 import de.connect2x.trixnity.client.media.inMemory
 import de.connect2x.trixnity.clientserverapi.client.MatrixClientAuthProviderData
+import de.connect2x.trixnity.clientserverapi.client.classic
 import de.connect2x.trixnity.clientserverapi.client.classicLogin
 import de.connect2x.trixnity.client.create
 import de.connect2x.trixnity.clientserverapi.model.authentication.IdentifierType
@@ -43,9 +44,34 @@ object MatrixEngine {
     private val _session = MutableStateFlow<MatrixSession?>(null)
     val session: StateFlow<MatrixSession?> = _session.asStateFlow()
 
+    private val storage = TokenStorage()
+
     fun logout() {
         _session.value?.close()
         _session.value = null
+        storage.clear()
+    }
+
+    /** 啟動恢復：磁碟有 token 則直接建 client（免密碼重登）；token 失效自動清除 */
+    suspend fun restoreFromDisk() {
+        if (_session.value != null) return
+        val stored = storage.load() ?: return
+        val client = MatrixClient.create(
+            repositoriesModule = RepositoriesModule.inMemory(),
+            mediaStoreModule = MediaStoreModule.inMemory(),
+            cryptoDriverModule = CryptoDriverModule.vodozemac(),
+            authProviderData = MatrixClientAuthProviderData.classic(
+                baseUrl = Url(stored.baseUrl),
+                accessToken = stored.accessToken,
+                refreshToken = null,
+            ),
+        ).getOrNull() ?: run {
+            storage.clear()
+            return
+        }
+        val session = MatrixSession(client)
+        session.start()
+        _session.value = session
     }
 
     /**
@@ -69,6 +95,12 @@ object MatrixEngine {
             authProviderData = authData,
         ).getOrElse { return Result.failure(it) }
 
+        storage.save(
+            baseUrl = baseUrl,
+            userId = client.userId.full,
+            deviceId = client.deviceId,
+            accessToken = authData.accessToken,
+        )
         val session = MatrixSession(client)
         session.start()
         _session.value = session

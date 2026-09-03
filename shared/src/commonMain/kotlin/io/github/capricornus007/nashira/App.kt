@@ -61,6 +61,7 @@ fun App(defaultDark: Boolean? = null) {
     val target = generated ?: if (dark) NashiraDarkColors else NashiraLightColors
     // 配色補間（照 InstallerX：每槽 animateColorAsState(spring()) 物理彈簧曲線）
     val session by MatrixEngine.session.collectAsState()
+    androidx.compose.runtime.LaunchedEffect(Unit) { MatrixEngine.restoreFromDisk() }
     NashiraTheme(colorScheme = target.animateAsState()) {
         if (session == null) {
             LoginScreen(onLoginSuccess = { })

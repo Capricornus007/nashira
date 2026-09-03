@@ -13,6 +13,7 @@ import de.connect2x.trixnity.core.model.events.m.room.NameEventContent
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 
@@ -35,25 +36,14 @@ data class TimelineMessage(
 /**
  * 房間數據門面：把 MatrixClient 的 store 流轉成 UI 直接可用的摘要/時間線。
  */
-class RoomRepository(private val client: MatrixClient) {
+class RoomRepository(val client: MatrixClient) {
 
-    /** 全部已加入房間的摘要流（sync 後自動更新） */
+    /** 全部已加入房間的摘要流（sync 後自動更新）——只用 keys，不訂閱 Room 細節流 */
     fun roomSummaries(): Flow<List<RoomSummary>> =
         client.room.getAll().map { roomFlows ->
-            roomFlows.map { (roomId, roomFlow) ->
-                combine(
-                    roomFlow,
-                    client.room.getState(roomId, NameEventContent::class),
-                ) { room, nameEvent ->
-                    RoomSummary(
-                        roomId = roomId,
-                        name = nameEvent?.content?.name ?: roomId.full,
-                        isDirect = room?.isDirect == true,
-                    )
-                }
+            roomFlows.keys.map { roomId ->
+                RoomSummary(roomId = roomId, name = roomId.full, isDirect = false)
             }
-        }.flatMapLatest { flows ->
-            if (flows.isEmpty()) flowOf(emptyList()) else combine(flows) { it.toList() }
         }
 
     /** 指定房間的最新時間線訊息流（取最後 N 條，新訊息到達自動更新） */
