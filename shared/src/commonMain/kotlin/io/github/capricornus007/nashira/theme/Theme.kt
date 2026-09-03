@@ -12,7 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 
-private val NashiraDarkColors = darkColorScheme(
+internal val NashiraDarkColors = darkColorScheme(
     primary = NashiraGold,
     onPrimary = NashiraIndigo,
     primaryContainer = NashiraGoldContainer,
@@ -42,7 +42,7 @@ private val NashiraDarkColors = darkColorScheme(
     outlineVariant = Color(0xFF44466F),
 )
 
-private val NashiraLightColors = lightColorScheme(
+internal val NashiraLightColors = lightColorScheme(
     primary = NashiraGoldDeep,
     onPrimary = NashiraLightBackground,
     primaryContainer = NashiraGold,

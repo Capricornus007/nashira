@@ -23,6 +23,7 @@ kotlin {
         commonMain.dependencies {
             implementation(compose.runtime)
             implementation(compose.foundation)
+            implementation(compose.animation)
             implementation(compose.ui)
             implementation(libs.cmp.material3)
             implementation(libs.material.kolor)
