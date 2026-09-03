@@ -25,6 +25,7 @@ kotlin {
             implementation(compose.foundation)
             implementation(compose.ui)
             implementation(libs.cmp.material3)
+            implementation(libs.material.kolor)
             // kotlin-wrappers:kotlin-browser 只有 js/wasm 變體，Android/JVM 解析會炸（Trixnity POM 傳遞帶入），排除
             implementation("de.connect2x.trixnity:trixnity-client:${libs.versions.trixnity.get()}") {
                 exclude(group = "org.jetbrains.kotlin-wrappers")

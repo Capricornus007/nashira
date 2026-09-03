@@ -27,6 +27,11 @@ interface Strings {
     val dynamicColorHint: String
     val paletteStyle: String
     val expressive: String
+    val colorSpec: String
+    val specM3: String
+    val specExpressive: String
+    val themeColor: String
+    val themeColorDefault: String
 }
 
 val StringsMap: Map<AppLanguage, Strings> = mapOf(
@@ -55,6 +60,11 @@ object ZhTwStrings : Strings {
     override val dynamicColorHint = "基於桌布的主題顏色（Material You）"
     override val paletteStyle = "調色盤樣式"
     override val expressive = "Expressive"
+    override val colorSpec = "顏色規格"
+    override val specM3 = "Material 3 (2021)"
+    override val specExpressive = "Expressive (2025)"
+    override val themeColor = "主題顏色"
+    override val themeColorDefault = "預設"
 }
 
 object EnStrings : Strings {
@@ -76,4 +86,9 @@ object EnStrings : Strings {
     override val dynamicColorHint = "Wallpaper-based theme colors (Material You)"
     override val paletteStyle = "Palette style"
     override val expressive = "Expressive"
+    override val colorSpec = "Color spec"
+    override val specM3 = "Material 3 (2021)"
+    override val specExpressive = "Expressive (2025)"
+    override val themeColor = "Theme color"
+    override val themeColorDefault = "Default"
 }

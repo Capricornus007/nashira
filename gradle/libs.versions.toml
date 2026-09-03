@@ -3,12 +3,14 @@ agp = "9.3.2"
 kotlin = "2.4.10"
 cmp = "1.12.0"
 cmpMaterial3 = "1.12.0-alpha03"
+materialKolor = "5.0.1"
 trixnity = "5.8.1"
 activityCompose = "1.13.0"
 
 [libraries]
 trixnity-client = { module = "de.connect2x.trixnity:trixnity-client", version.ref = "trixnity" }
 cmp-material3 = { module = "org.jetbrains.compose.material3:material3", version.ref = "cmpMaterial3" }
+material-kolor = { module = "com.materialkolor:material-kolor", version.ref = "materialKolor" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
 
 [plugins]

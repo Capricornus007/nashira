@@ -1,8 +1,8 @@
 package io.github.capricornus007.nashira.theme
 
-import androidx.compose.material3.ColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
 
-/** 非 Android 平台（Linux 桌面）：無動態取色，固定回退品牌色 */
+/** Linux 桌面：無桌布取色，回 null（用品牌色或種子覆寫） */
 @Composable
-actual fun dynamicColorSchemeIfAvailable(dark: Boolean, enabled: Boolean): ColorScheme? = null
+actual fun wallpaperSeedColor(enabled: Boolean): Color? = null

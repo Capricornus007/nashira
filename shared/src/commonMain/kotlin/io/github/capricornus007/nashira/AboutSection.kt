@@ -34,18 +34,6 @@ import io.github.capricornus007.nashira.theme.ThemeMode
 import io.github.capricornus007.nashira.theme.dynamicColorSupported
 
 @Composable
-internal fun InfoRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, color = MaterialTheme.colorScheme.onSurface)
-    }
-}
-
-@Composable
 fun LinkRow(label: String, value: String, url: String) {
     Row(
         modifier = Modifier

@@ -100,8 +100,51 @@ fun HomeScreen(dark: Boolean) {
                         Switch(checked = ui.dynamicColor, onCheckedChange = { ui.dynamicColor = it })
                     }
                 }
-                // 調色盤樣式（Expressive）
-                InfoRow(strings.paletteStyle, strings.expressive)
+                // 調色盤樣式（Material You 9 種）
+                var styleMenuOpen by remember { mutableStateOf(false) }
+                Text(strings.paletteStyle, style = MaterialTheme.typography.bodyMedium)
+                OutlinedButton(onClick = { styleMenuOpen = true }) {
+                    Text(ui.paletteStyle.displayLabel())
+                }
+                DropdownMenu(expanded = styleMenuOpen, onDismissRequest = { styleMenuOpen = false }) {
+                    com.materialkolor.PaletteStyle.entries.forEach { style ->
+                        DropdownMenuItem(
+                            text = { Text(style.displayLabel()) },
+                            onClick = { ui.paletteStyle = style; styleMenuOpen = false },
+                        )
+                    }
+                }
+                // 顏色規格：Material 3 (2021) / Expressive (2025)
+                var specMenuOpen by remember { mutableStateOf(false) }
+                Text(strings.colorSpec, style = MaterialTheme.typography.bodyMedium)
+                OutlinedButton(onClick = { specMenuOpen = true }) {
+                    Text(
+                        if (ui.specVersion == com.materialkolor.dynamiccolor.ColorSpec.SpecVersion.SPEC_2021) {
+                            strings.specM3
+                        } else {
+                            strings.specExpressive
+                        }
+                    )
+                }
+                DropdownMenu(expanded = specMenuOpen, onDismissRequest = { specMenuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text(strings.specM3) },
+                        onClick = {
+                            ui.specVersion = com.materialkolor.dynamiccolor.ColorSpec.SpecVersion.SPEC_2021
+                            specMenuOpen = false
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(strings.specExpressive) },
+                        onClick = {
+                            ui.specVersion = com.materialkolor.dynamiccolor.ColorSpec.SpecVersion.SPEC_2025
+                            specMenuOpen = false
+                        },
+                    )
+                }
+                // 主題顏色：預設 + Material 16 色系種子覆寫
+                Text(strings.themeColor, style = MaterialTheme.typography.bodyMedium)
+                AccentPicker(selected = ui.accent, language = language, onSelect = { ui.accent = it })
             }
             Section(title = strings.language) {
                 var menuOpen by remember { mutableStateOf(false) }
