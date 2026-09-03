@@ -15,6 +15,6 @@ fun main() = application {
         icon = painterResource("nashira-icon.png"),
         state = rememberWindowState(size = DpSize(1100.dp, 760.dp)),
     ) {
-        App(defaultDark = true)
+        App() // Linux 無動態取色；主題模式照常可用（追隨系統暫用深色，之後接 xdg 讀取）
     }
 }

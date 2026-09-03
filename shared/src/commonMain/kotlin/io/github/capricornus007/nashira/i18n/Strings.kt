@@ -21,6 +21,12 @@ interface Strings {
     val encryption: String
     val license: String
     val sourceCode: String
+    val themeMode: String
+    val followSystem: String
+    val dynamicColor: String
+    val dynamicColorHint: String
+    val paletteStyle: String
+    val expressive: String
 }
 
 val StringsMap: Map<AppLanguage, Strings> = mapOf(
@@ -43,6 +49,12 @@ object ZhTwStrings : Strings {
     override val encryption = "加密"
     override val license = "授權條款"
     override val sourceCode = "原始碼"
+    override val themeMode = "主題模式"
+    override val followSystem = "追隨系統主題"
+    override val dynamicColor = "動態顏色"
+    override val dynamicColorHint = "基於桌布的主題顏色（Material You）"
+    override val paletteStyle = "調色盤樣式"
+    override val expressive = "Expressive"
 }
 
 object EnStrings : Strings {
@@ -58,4 +70,10 @@ object EnStrings : Strings {
     override val encryption = "Encryption"
     override val license = "License"
     override val sourceCode = "Source code"
+    override val themeMode = "Theme mode"
+    override val followSystem = "Follow system theme"
+    override val dynamicColor = "Dynamic color"
+    override val dynamicColorHint = "Wallpaper-based theme colors (Material You)"
+    override val paletteStyle = "Palette style"
+    override val expressive = "Expressive"
 }

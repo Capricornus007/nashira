@@ -5,5 +5,10 @@ object AppInfo {
     const val engine = "Trixnity 5.8.1"
     const val crypto = "vodozemac (Rust)"
     const val license = "AGPL-3.0"
-    const val sourceUrl = "github.com/Capricornus007/nashira"
+    const val repo = "Capricornus007/nashira"
+
+    const val repoUrl = "https://github.com/Capricornus007/nashira"
+    const val engineUrl = "https://gitlab.com/connect2x/trixnity/trixnity"
+    const val cryptoUrl = "https://github.com/matrix-org/vodozemac"
+    const val licenseUrl = "https://www.gnu.org/licenses/agpl-3.0.txt"
 }

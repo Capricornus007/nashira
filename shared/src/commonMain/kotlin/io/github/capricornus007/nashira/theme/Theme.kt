@@ -1,5 +1,6 @@
 package io.github.capricornus007.nashira.theme
 
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MotionScheme
@@ -73,12 +74,24 @@ private val NashiraLightColors = lightColorScheme(
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun NashiraTheme(dark: Boolean, content: @Composable () -> Unit) {
+fun NashiraTheme(
+    colorScheme: ColorScheme,
+    content: @Composable () -> Unit,
+) {
     MaterialExpressiveTheme(
-        colorScheme = if (dark) NashiraDarkColors else NashiraLightColors,
+        colorScheme = colorScheme,
         shapes = Shapes(),
         motionScheme = remember { MotionScheme.expressive() },
         typography = Typography(),
+        content = content,
+    )
+}
+
+/** 品牌配色（Arcaea）：非動態取色時的預設來源 */
+@Composable
+fun NashiraBrandTheme(dark: Boolean, content: @Composable () -> Unit) {
+    NashiraTheme(
+        colorScheme = if (dark) NashiraDarkColors else NashiraLightColors,
         content = content,
     )
 }
