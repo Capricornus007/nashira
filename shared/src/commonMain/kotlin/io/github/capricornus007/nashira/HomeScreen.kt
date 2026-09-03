@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -20,6 +21,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -106,16 +108,32 @@ fun HomeScreen(dark: Boolean) {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
+                        // 標準 M3 規範配色（icon 與滑塊對比修正版）：
+                        // 開啟=primaryContainer 軌道 + onPrimaryContainer 滑塊 + primaryContainer 勾
+                        // 關閉=surfaceContainerHighest 軌道 + outline 滑塊 + surfaceContainerHighest 叉
                         Switch(
                             checked = ui.dynamicColor,
                             onCheckedChange = { ui.dynamicColor = it },
                             thumbContent = {
-                                androidx.compose.material3.Icon(
-                                    imageVector = Icons.Filled.Check,
+                                val icon = if (ui.dynamicColor) Icons.Filled.Check else Icons.Filled.Close
+                                Icon(
+                                    imageVector = icon,
                                     contentDescription = null,
                                     modifier = Modifier.size(SwitchDefaults.IconSize),
                                 )
                             },
+                            colors = SwitchDefaults.colors(
+                                // 開啟狀態（Checked）
+                                checkedTrackColor = MaterialTheme.colorScheme.primaryContainer,
+                                checkedThumbColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                checkedIconColor = MaterialTheme.colorScheme.primaryContainer,
+
+                                // 關閉狀態（Unchecked）— 圖標可見性修正
+                                uncheckedTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                uncheckedThumbColor = MaterialTheme.colorScheme.outline,
+                                uncheckedIconColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                uncheckedBorderColor = MaterialTheme.colorScheme.outline,
+                            ),
                         )
                     }
 
