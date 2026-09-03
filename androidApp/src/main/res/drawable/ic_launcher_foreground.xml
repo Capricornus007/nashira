@@ -5,47 +5,47 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- 背景微星（原稿 6 顆，r 3/512 等比） -->
+    <!-- 背景微星小圓點（原稿元素，加大加亮：r1.2、50%） -->
     <path
-        android:fillColor="#8FA3E0"
-        android:fillAlpha="0.35"
-        android:pathData="M22.6,25.3a0.6,0.6 0 1,0 1.2,0a0.6,0.6 0 1,0 -1.2,0 M88.1,63.3a0.5,0.5 0 1,0 1,0a0.5,0.5 0 1,0 -1,0 M18.4,80.2a0.6,0.6 0 1,0 1.2,0a0.6,0.6 0 1,0 -1.2,0 M79.7,19a0.5,0.5 0 1,0 1,0a0.5,0.5 0 1,0 -1,0 M31.2,92.9a0.5,0.5 0 1,0 1,0a0.5,0.5 0 1,0 -1,0 M92.7,90.7a0.4,0.4 0 1,0 0.8,0a0.4,0.4 0 1,0 -0.8,0" />
+        android:fillColor="#AEC1F5"
+        android:fillAlpha="0.55"
+        android:pathData="M31.3,33 a1.7,1.7 0 1,0 3.4,0 a1.7,1.7 0 1,0 -3.4,0 M77.4,70 a1.6,1.6 0 1,0 3.2,0 a1.6,1.6 0 1,0 -3.2,0 M31.3,76 a1.7,1.7 0 1,0 3.4,0 a1.7,1.7 0 1,0 -3.4,0 M29.4,54 a1.6,1.6 0 1,0 3.2,0 a1.6,1.6 0 1,0 -3.2,0 M49.4,79 a1.6,1.6 0 1,0 3.2,0 a1.6,1.6 0 1,0 -3.2,0 M75.5,74 a1.5,1.5 0 1,0 3.0,0 a1.5,1.5 0 1,0 -3.0,0" />
 
-    <!-- 金星光暈（原稿 r78 / 14% 透明） -->
+    <!-- 金星光暈（原稿 r78/512 → 16.4） -->
     <path
         android:fillColor="#F2B63C"
         android:fillAlpha="0.14"
         android:pathData="M50.3,35.4a16.4,16.4 0 1,0 32.8,0a16.4,16.4 0 1,0 -32.8,0" />
 
-    <!-- N 星圖三線（原稿 stroke 14/512 = 3） -->
+    <!-- N 星圖三線（縮小至 50% 佈局佔比，線寬 3） -->
     <path
-        android:pathData="M41.3,35.4 L41.3,72.6"
+        android:pathData="M44.4,39.9 L44.4,68.1"
         android:strokeColor="#AEC1F5"
         android:strokeWidth="3"
         android:strokeLineCap="round" />
     <path
-        android:pathData="M41.3,35.4 L66.7,72.6"
+        android:pathData="M44.4,39.9 L63.6,68.1"
         android:strokeColor="#AEC1F5"
         android:strokeWidth="3"
         android:strokeLineCap="round" />
     <path
-        android:pathData="M66.7,35.4 L66.7,72.6"
+        android:pathData="M63.6,39.9 L63.6,68.1"
         android:strokeColor="#AEC1F5"
         android:strokeWidth="3"
         android:strokeLineCap="round" />
 
-    <!-- 白星點（原稿 r16/512 = 3.4） -->
+    <!-- 白星點 -->
     <path
         android:fillColor="#EAF0FF"
-        android:pathData="M37.9,35.4a3.4,3.4 0 1,0 6.8,0a3.4,3.4 0 1,0 -6.8,0" />
+        android:pathData="M41.8,39.9a2.6,2.6 0 1,0 5.2,0a2.6,2.6 0 1,0 -5.2,0" />
     <path
         android:fillColor="#EAF0FF"
-        android:pathData="M37.9,72.6a3.4,3.4 0 1,0 6.8,0a3.4,3.4 0 1,0 -6.8,0" />
+        android:pathData="M41.8,68.1a2.6,2.6 0 1,0 5.2,0a2.6,2.6 0 1,0 -5.2,0" />
     <path
         android:fillColor="#EAF0FF"
-        android:pathData="M63.3,72.6a3.4,3.4 0 1,0 6.8,0a3.4,3.4 0 1,0 -6.8,0" />
+        android:pathData="M61,68.1a2.6,2.6 0 1,0 5.2,0a2.6,2.6 0 1,0 -5.2,0" />
 
-    <!-- 金星（原稿尺寸 112/512，掛在 N 右上角外側，同原稿） -->
+    <!-- 金星（原稿尺寸） -->
     <path
         android:fillColor="#F2B63C"
         android:pathData="M66.7,23.6 L69.7,32.4 L78.5,35.4 L69.7,38.4 L66.7,47.2 L63.7,38.4 L54.9,35.4 L63.7,32.4 Z" />
