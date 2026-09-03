@@ -38,6 +38,10 @@ data class TimelineMessage(
  */
 class RoomRepository(val client: MatrixClient) {
 
+    /** 列表只顯示已加入的房間（invite 由通知處理，left 隱藏） */
+    fun shouldShow(summary: RoomSummary): Boolean = true // membership 過濾 P1 後續接
+
+
     /** 全部已加入房間的摘要流（sync 後自動更新）——只用 keys，不訂閱 Room 細節流 */
     fun roomSummaries(): Flow<List<RoomSummary>> =
         client.room.getAll().map { roomFlows ->

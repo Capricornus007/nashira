@@ -33,6 +33,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.firstOrNull
 import de.connect2x.trixnity.client.room
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -59,10 +63,25 @@ fun ChatScreen(
     val strings = stringsFor(language)
     var summaries by remember { mutableStateOf(emptyList<io.github.capricornus007.nashira.matrix.RoomSummary>()) }
     androidx.compose.runtime.LaunchedEffect(Unit) {
-        roomRepository.client.room.getAll().collect { roomFlows ->
-            println("NASHIRA_DIRECT getAll=${roomFlows.size}")
-            summaries = roomFlows.keys.map { roomId ->
-                io.github.capricornus007.nashira.matrix.RoomSummary(roomId, roomId.full, false)
+        roomRepository.client.room.getAll().collectLatest { roomFlows: Map<de.connect2x.trixnity.core.model.RoomId, kotlinx.coroutines.flow.Flow<de.connect2x.trixnity.client.store.Room?>> ->
+            val nameFlows: List<kotlinx.coroutines.flow.Flow<io.github.capricornus007.nashira.matrix.RoomSummary>> =
+                roomFlows.map { (roomId: de.connect2x.trixnity.core.model.RoomId, roomFlow: kotlinx.coroutines.flow.Flow<de.connect2x.trixnity.client.store.Room?>) ->
+                    roomFlow.map { room: de.connect2x.trixnity.client.store.Room? ->
+                        val display = room?.name
+                        val explicit = display?.explicitName
+                        val heroes = display?.heroes?.joinToString(", ") { h -> h.full.substringBefore(':') }.orEmpty()
+                        val name = explicit ?: heroes.ifBlank { null } ?: roomId.full
+                        io.github.capricornus007.nashira.matrix.RoomSummary(roomId, name, room?.isDirect == true)
+                    }
+                }
+            if (nameFlows.isEmpty()) {
+                summaries = emptyList()
+            } else {
+                combine(nameFlows) { list: Array<io.github.capricornus007.nashira.matrix.RoomSummary> ->
+                    list.toList()
+                }.collect { list ->
+                    summaries = list
+                }
             }
         }
     }
@@ -166,6 +185,11 @@ private fun RoomListItem(room: RoomSummary, selected: Boolean, onClick: () -> Un
 @Composable
 private fun TimelinePane(roomRepository: RoomRepository, room: RoomSummary) {
     val messages by roomRepository.timeline(room.roomId).collectAsState(initial = emptyList())
+    androidx.compose.runtime.LaunchedEffect(room.roomId) {
+        val lastFlow = roomRepository.client.room.getLastTimelineEvent(room.roomId).firstOrNull()
+        val last = lastFlow?.firstOrNull()
+        println("NASHIRA_TL roomId=${room.roomId.full.take(24)} lastEvent=${last != null} content=${last?.event?.content?.javaClass?.simpleName}")
+    }
     var draft by remember(room.roomId) { mutableStateOf("") }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
@@ -174,7 +198,7 @@ private fun TimelinePane(roomRepository: RoomRepository, room: RoomSummary) {
         // 房間標題
         Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
             Text(
-                room.name,
+                room.name + " [${messages.size} msgs]",
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier
                     .fillMaxWidth()
