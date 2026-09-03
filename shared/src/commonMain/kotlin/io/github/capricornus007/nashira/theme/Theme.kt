@@ -2,12 +2,13 @@ package io.github.capricornus007.nashira.theme
 
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialExpressiveTheme
+import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
-import androidx.compose.material3.motion.rememberDefaultMotionScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 
 private val NashiraDarkColors = darkColorScheme(
@@ -76,7 +77,7 @@ fun NashiraTheme(dark: Boolean, content: @Composable () -> Unit) {
     MaterialExpressiveTheme(
         colorScheme = if (dark) NashiraDarkColors else NashiraLightColors,
         shapes = Shapes(),
-        motionScheme = rememberDefaultMotionScheme(),
+        motionScheme = remember { MotionScheme.expressive() },
         typography = Typography(),
         content = content,
     )

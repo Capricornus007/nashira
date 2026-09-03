@@ -10,7 +10,7 @@ plugins {
 kotlin {
     android {
         namespace = "io.github.capricornus007.nashira.shared"
-        compileSdk = 36
+        compileSdk = 37
         minSdk = 26
     }
     jvm("desktop") {
@@ -24,8 +24,11 @@ kotlin {
             implementation(compose.runtime)
             implementation(compose.foundation)
             implementation(compose.ui)
-            implementation(compose.material3)
-            implementation(libs.trixnity.client)
+            implementation(libs.cmp.material3)
+            // kotlin-wrappers:kotlin-browser 只有 js/wasm 變體，Android/JVM 解析會炸（Trixnity POM 傳遞帶入），排除
+            implementation("de.connect2x.trixnity:trixnity-client:${libs.versions.trixnity.get()}") {
+                exclude(group = "org.jetbrains.kotlin-wrappers")
+            }
         }
     }
 }
