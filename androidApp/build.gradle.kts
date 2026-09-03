@@ -19,6 +19,16 @@ android {
         compose = true
     }
 
+    buildTypes {
+        release {
+            // 對齊 InstallerX 流暢度的關鍵：R8 全優化 + debug 簽名（自用分發）
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.getByName("debug")
+        }
+    }
+
     packaging {
         // Trixnity JAR 內帶 kotlin/native linkdata 檔（Android 用不到），多模組撞名
         resources.excludes += listOf("**/linkdata/**", "**/default/manifest", "META-INF/kotlin-project-structure-metadata.json")

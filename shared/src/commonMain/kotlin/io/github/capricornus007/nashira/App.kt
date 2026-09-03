@@ -43,19 +43,18 @@ fun App(defaultDark: Boolean? = null) {
     }
 
     // 種子來源（僅動態顏色開啟時）：色系覆寫 > 桌布種子；關閉＝品牌 Arcaea
+    // （wallpaperSeedColor 內部已 remember 緩存；accent 是純值）
     val seed = if (ui.dynamicColor) {
         ui.accent?.color ?: wallpaperSeedColor(enabled = true)
     } else {
         null
     }
-    val generated = seed?.let {
-        rememberDynamicColorScheme(
-            seedColor = it,
-            isDark = dark,
-            style = ui.paletteStyle,
-            specVersion = ui.specVersion,
-        )
-    }
+    val generated = rememberDynamicColorScheme(
+        seedColor = seed ?: androidx.compose.ui.graphics.Color(0xFF1F1E33),
+        isDark = dark,
+        style = ui.paletteStyle,
+        specVersion = ui.specVersion,
+    )
     // 目標配色：動態生成或品牌色
     val target = generated ?: if (dark) NashiraDarkColors else NashiraLightColors
     // 配色補間（照 InstallerX：每槽 animateColorAsState(spring()) 物理彈簧曲線）
