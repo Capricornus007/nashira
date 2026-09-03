@@ -90,5 +90,3 @@ private fun AccentSwatch(
 
 
 /** PaletteStyle 顯示名（PascalCase → 空格分詞）：TonalSpot → Tonal Spot */
-internal fun com.materialkolor.PaletteStyle.displayLabel(): String =
-    name.replace(Regex("(?<=[a-z])(?=[A-Z])"), " ")

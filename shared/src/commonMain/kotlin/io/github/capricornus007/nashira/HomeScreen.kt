@@ -1,6 +1,12 @@
 package io.github.capricornus007.nashira
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,9 +20,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -26,8 +29,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.materialkolor.PaletteStyle
+import com.materialkolor.dynamiccolor.ColorSpec
 import io.github.capricornus007.nashira.i18n.AppLanguage
 import io.github.capricornus007.nashira.i18n.stringsFor
 import io.github.capricornus007.nashira.theme.ThemeMode
@@ -58,36 +64,35 @@ fun HomeScreen(dark: Boolean) {
             )
             Section(title = strings.appearance) {
                 // 主題模式：追隨系統 / 深 / 淺（三段）
-                var modeMenuOpen by remember { mutableStateOf(false) }
-                OutlinedButton(onClick = { modeMenuOpen = true }) {
-                    Text(
-                        when (ui.themeMode) {
-                            ThemeMode.FOLLOW_SYSTEM -> strings.followSystem
-                            ThemeMode.DARK -> strings.darkTheme
-                            ThemeMode.LIGHT -> strings.lightTheme
-                        }
-                    )
-                }
-                DropdownMenu(expanded = modeMenuOpen, onDismissRequest = { modeMenuOpen = false }) {
+                DropdownAnchor(
+                    label = strings.themeMode,
+                    current = when (ui.themeMode) {
+                        ThemeMode.FOLLOW_SYSTEM -> strings.followSystem
+                        ThemeMode.DARK -> strings.darkTheme
+                        ThemeMode.LIGHT -> strings.lightTheme
+                        else -> strings.followSystem
+                    },
+                ) { close ->
                     DropdownMenuItem(
                         text = { Text(strings.followSystem) },
-                        onClick = { ui.themeMode = ThemeMode.FOLLOW_SYSTEM; modeMenuOpen = false },
+                        onClick = { ui.themeMode = ThemeMode.FOLLOW_SYSTEM; close() },
                     )
                     DropdownMenuItem(
                         text = { Text(strings.darkTheme) },
-                        onClick = { ui.themeMode = ThemeMode.DARK; modeMenuOpen = false },
+                        onClick = { ui.themeMode = ThemeMode.DARK; close() },
                     )
                     DropdownMenuItem(
                         text = { Text(strings.lightTheme) },
-                        onClick = { ui.themeMode = ThemeMode.LIGHT; modeMenuOpen = false },
+                        onClick = { ui.themeMode = ThemeMode.LIGHT; close() },
                     )
                 }
-                // 動態顏色（Android 12+ Material You 桌布取色；桌面端自動隱藏）
+
+                // 動態顏色（Android 12+ Material You；桌面端不顯示）
                 if (dynamicColorSupported) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(strings.dynamicColor)
@@ -99,63 +104,61 @@ fun HomeScreen(dark: Boolean) {
                         }
                         Switch(checked = ui.dynamicColor, onCheckedChange = { ui.dynamicColor = it })
                     }
-                }
-                // 調色盤樣式（Material You 9 種）
-                var styleMenuOpen by remember { mutableStateOf(false) }
-                Text(strings.paletteStyle, style = MaterialTheme.typography.bodyMedium)
-                OutlinedButton(onClick = { styleMenuOpen = true }) {
-                    Text(ui.paletteStyle.displayLabel())
-                }
-                DropdownMenu(expanded = styleMenuOpen, onDismissRequest = { styleMenuOpen = false }) {
-                    com.materialkolor.PaletteStyle.entries.forEach { style ->
-                        DropdownMenuItem(
-                            text = { Text(style.displayLabel()) },
-                            onClick = { ui.paletteStyle = style; styleMenuOpen = false },
-                        )
+
+                    // Material You 配置抽屜：開關切換時收起/放出（expand/shrink 動畫）
+                    AnimatedVisibility(
+                        visible = ui.dynamicColor,
+                        enter = expandVertically() + fadeIn(),
+                        exit = shrinkVertically() + fadeOut(),
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            DropdownAnchor(
+                                label = strings.paletteStyle,
+                                current = ui.paletteStyle.displayLabel(),
+                            ) { close ->
+                                PaletteStyle.entries.forEach { style ->
+                                    DropdownMenuItem(
+                                        text = { Text(style.displayLabel()) },
+                                        onClick = { ui.paletteStyle = style; close() },
+                                    )
+                                }
+                            }
+                            DropdownAnchor(
+                                label = strings.colorSpec,
+                                current = if (ui.specVersion == ColorSpec.SpecVersion.SPEC_2021) {
+                                    strings.specM3
+                                } else {
+                                    strings.specExpressive
+                                },
+                            ) { close ->
+                                DropdownMenuItem(
+                                    text = { Text(strings.specM3) },
+                                    onClick = { ui.specVersion = ColorSpec.SpecVersion.SPEC_2021; close() },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(strings.specExpressive) },
+                                    onClick = { ui.specVersion = ColorSpec.SpecVersion.SPEC_2025; close() },
+                                )
+                            }
+                            Text(strings.themeColor, style = MaterialTheme.typography.bodyMedium)
+                            AccentPicker(
+                                selected = ui.accent,
+                                language = language,
+                                onSelect = { ui.accent = it },
+                            )
+                        }
                     }
                 }
-                // 顏色規格：Material 3 (2021) / Expressive (2025)
-                var specMenuOpen by remember { mutableStateOf(false) }
-                Text(strings.colorSpec, style = MaterialTheme.typography.bodyMedium)
-                OutlinedButton(onClick = { specMenuOpen = true }) {
-                    Text(
-                        if (ui.specVersion == com.materialkolor.dynamiccolor.ColorSpec.SpecVersion.SPEC_2021) {
-                            strings.specM3
-                        } else {
-                            strings.specExpressive
-                        }
-                    )
-                }
-                DropdownMenu(expanded = specMenuOpen, onDismissRequest = { specMenuOpen = false }) {
-                    DropdownMenuItem(
-                        text = { Text(strings.specM3) },
-                        onClick = {
-                            ui.specVersion = com.materialkolor.dynamiccolor.ColorSpec.SpecVersion.SPEC_2021
-                            specMenuOpen = false
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text(strings.specExpressive) },
-                        onClick = {
-                            ui.specVersion = com.materialkolor.dynamiccolor.ColorSpec.SpecVersion.SPEC_2025
-                            specMenuOpen = false
-                        },
-                    )
-                }
-                // 主題顏色：預設 + Material 16 色系種子覆寫
-                Text(strings.themeColor, style = MaterialTheme.typography.bodyMedium)
-                AccentPicker(selected = ui.accent, language = language, onSelect = { ui.accent = it })
             }
             Section(title = strings.language) {
-                var menuOpen by remember { mutableStateOf(false) }
-                OutlinedButton(onClick = { menuOpen = true }) {
-                    Text(language.displayName)
-                }
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownAnchor(
+                    label = strings.language,
+                    current = language.displayName,
+                ) { close ->
                     AppLanguage.entries.forEach { candidate ->
                         DropdownMenuItem(
                             text = { Text(candidate.displayName) },
-                            onClick = { language = candidate; menuOpen = false },
+                            onClick = { language = candidate; close() },
                         )
                     }
                 }
@@ -170,6 +173,34 @@ fun HomeScreen(dark: Boolean) {
         }
     }
 }
+
+/**
+ * 錨定式下拉：按鈕與選單同包一個 Box——Compose 的 DropdownMenu 錨定父容器，
+ * 不包 Box 會錨到整個 Section 頂部飄走（真機實測 bug）。
+ */
+@Composable
+private fun DropdownAnchor(
+    label: String,
+    current: String,
+    menuContent: @Composable (close: () -> Unit) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+        Box {
+            OutlinedButton(onClick = { open = true }) {
+                Text(current)
+            }
+            DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                menuContent { open = false }
+            }
+        }
+    }
+}
+
+/** PaletteStyle 顯示名（PascalCase 分詞）：TonalSpot → Tonal Spot */
+internal fun PaletteStyle.displayLabel(): String =
+    name.replace(Regex("(?<=[a-z])(?=[A-Z])"), " ")
 
 @Composable
 private fun Section(title: String, content: @Composable () -> Unit) {
