@@ -2,6 +2,7 @@ package io.github.capricornus007.nashira
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -9,6 +10,7 @@ import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.ktx.animateColorScheme
 import com.materialkolor.rememberDynamicColorScheme
+import io.github.capricornus007.nashira.matrix.MatrixEngine
 import io.github.capricornus007.nashira.theme.NashiraDarkColors
 import io.github.capricornus007.nashira.theme.NashiraLightColors
 import io.github.capricornus007.nashira.theme.NashiraTheme
@@ -58,7 +60,17 @@ fun App(defaultDark: Boolean? = null) {
     // 目標配色：動態生成或品牌色
     val target = generated ?: if (dark) NashiraDarkColors else NashiraLightColors
     // 配色補間（照 InstallerX：每槽 animateColorAsState(spring()) 物理彈簧曲線）
-    NashiraTheme(colorScheme = target.animateAsState()) { HomeScreen(dark = dark) }
+    val session by MatrixEngine.session.collectAsState()
+    NashiraTheme(colorScheme = target.animateAsState()) {
+        if (session == null) {
+            LoginScreen(onLoginSuccess = { })
+        } else {
+            ChatScreen(
+                roomRepository = io.github.capricornus007.nashira.matrix.RoomRepository(session!!.client),
+                onLogout = { MatrixEngine.logout() },
+            )
+        }
+    }
 }
 
 /** ColorScheme 逐槽 spring 補間（照 InstallerX ThemeExt.animateAsState，含 M3 fixed roles） */

@@ -32,6 +32,12 @@ interface Strings {
     val specExpressive: String
     val themeColor: String
     val themeColorDefault: String
+    val loginUsername: String
+    val loginPassword: String
+    val loginSubmit: String
+    val logout: String
+    val noRoomSelected: String
+    val messageHint: String
 }
 
 val StringsMap: Map<AppLanguage, Strings> = mapOf(
@@ -65,6 +71,12 @@ object ZhTwStrings : Strings {
     override val specExpressive = "Expressive (2025)"
     override val themeColor = "主題顏色"
     override val themeColorDefault = "預設"
+    override val loginUsername = "用戶名"
+    override val loginPassword = "密碼"
+    override val loginSubmit = "登入"
+    override val logout = "登出"
+    override val noRoomSelected = "選擇一個房間開始"
+    override val messageHint = "輸入訊息…"
 }
 
 object EnStrings : Strings {
@@ -91,4 +103,10 @@ object EnStrings : Strings {
     override val specExpressive = "Expressive (2025)"
     override val themeColor = "Theme color"
     override val themeColorDefault = "Default"
+    override val loginUsername = "Username"
+    override val loginPassword = "Password"
+    override val loginSubmit = "Log in"
+    override val logout = "Log out"
+    override val noRoomSelected = "Select a room to start"
+    override val messageHint = "Message…"
 }
