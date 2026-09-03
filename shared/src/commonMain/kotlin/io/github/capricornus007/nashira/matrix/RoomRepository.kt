@@ -71,7 +71,9 @@ class RoomRepository(val client: MatrixClient) {
 
     /** 發送文字訊息 */
     suspend fun sendText(roomId: RoomId, body: String): Result<String> =
-        client.room.sendMessage(roomId) {
-            text(body)
-        }.let { Result.success(it) }
+        runCatching {
+            client.room.sendMessage(roomId) {
+                text(body)
+            }
+        }
 }

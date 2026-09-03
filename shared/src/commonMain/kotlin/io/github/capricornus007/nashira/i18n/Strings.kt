@@ -38,6 +38,7 @@ interface Strings {
     val logout: String
     val noRoomSelected: String
     val messageHint: String
+    val sendFailed: String
 }
 
 val StringsMap: Map<AppLanguage, Strings> = mapOf(
@@ -77,6 +78,7 @@ object ZhTwStrings : Strings {
     override val logout = "登出"
     override val noRoomSelected = "選擇一個房間開始"
     override val messageHint = "輸入訊息…"
+    override val sendFailed = "發送失敗"
 }
 
 object EnStrings : Strings {
@@ -109,4 +111,5 @@ object EnStrings : Strings {
     override val logout = "Log out"
     override val noRoomSelected = "Select a room to start"
     override val messageHint = "Message…"
+    override val sendFailed = "Send failed"
 }

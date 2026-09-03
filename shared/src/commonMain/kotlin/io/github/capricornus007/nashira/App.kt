@@ -57,12 +57,15 @@ fun App(defaultDark: Boolean? = null) {
         style = ui.paletteStyle,
         specVersion = ui.specVersion,
     )
-    // 目標配色：動態生成或品牌色
-    val target = generated ?: if (dark) NashiraDarkColors else NashiraLightColors
+    // 目標配色：動態開啟且種子存在 → material-kolor 生成；否則手調品牌 Arcaea 色板
+    val target = if (seed != null) generated
+        else if (dark) NashiraDarkColors else NashiraLightColors
     // 配色補間（照 InstallerX：每槽 animateColorAsState(spring()) 物理彈簧曲線）
     val session by MatrixEngine.session.collectAsState()
     androidx.compose.runtime.LaunchedEffect(Unit) { MatrixEngine.restoreFromDisk() }
-    NashiraTheme(colorScheme = target.animateAsState()) {
+    val animatedScheme = target.animateAsState()
+
+    NashiraTheme(colorScheme = animatedScheme) {
         if (session == null) {
             LoginScreen(onLoginSuccess = { })
         } else {

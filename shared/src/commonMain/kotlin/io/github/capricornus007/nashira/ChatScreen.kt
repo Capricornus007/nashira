@@ -191,8 +191,11 @@ private fun TimelinePane(roomRepository: RoomRepository, room: RoomSummary) {
         println("NASHIRA_TL roomId=${room.roomId.full.take(24)} lastEvent=${last != null} content=${last?.event?.content?.javaClass?.simpleName}")
     }
     var draft by remember(room.roomId) { mutableStateOf("") }
+    var sending by remember(room.roomId) { mutableStateOf(false) }
+    var sendError by remember(room.roomId) { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
+    val strings = io.github.capricornus007.nashira.i18n.stringsFor(AppLanguage.ZH_TW)
 
     Column(modifier = Modifier.fillMaxSize()) {
         // 房間標題
@@ -231,15 +234,41 @@ private fun TimelinePane(roomRepository: RoomRepository, room: RoomSummary) {
                 placeholder = { Text(io.github.capricornus007.nashira.i18n.stringsFor(AppLanguage.ZH_TW).messageHint) },
                 maxLines = 4,
             )
+            if (sendError != null) {
+                Text(
+                    "${strings.sendFailed}: $sendError",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
             androidx.compose.material3.FilledIconButton(
                 onClick = {
                     val body = draft.trim()
-                    if (body.isEmpty()) return@FilledIconButton
+                    if (body.isEmpty() || sending) return@FilledIconButton
                     draft = ""
-                    scope.launch { roomRepository.sendText(room.roomId, body) }
+                    sending = true
+                    sendError = null
+                    scope.launch {
+                        roomRepository.sendText(room.roomId, body)
+                            .onSuccess { println("NASHIRA_SEND ok $it") }
+                            .onFailure { e ->
+                                println("NASHIRA_SEND FAIL ${e.message}")
+                                draft = body // 失敗時文字留在輸入框
+                                sendError = e.message ?: e.toString()
+                            }
+                        sending = false
+                    }
                 },
+                enabled = !sending,
             ) {
-                Text("→")
+                if (sending) {
+                    androidx.compose.material3.CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    Text("→")
+                }
             }
         }
     }
