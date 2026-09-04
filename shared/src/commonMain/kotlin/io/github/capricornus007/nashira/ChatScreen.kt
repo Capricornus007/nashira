@@ -449,15 +449,22 @@ private fun RailSlot(
         if (pillHeight > 0.dp) {
             Box(
                 Modifier.align(Alignment.CenterStart)
-                    .padding(start = 0.dp)
                     .width(4.dp)
                     .height(pillHeight)
                     .clip(RoundedCornerShape(topEnd = 4.dp, bottomEnd = 4.dp))
                     .background(MaterialTheme.colorScheme.onSurface),
             )
         }
-        Box(Modifier.clickable(onClick = onClick), contentAlignment = Alignment.Center) {
-            content(RoundedCornerShape(corner))
+        val shape = RoundedCornerShape(corner)
+        Box(contentAlignment = Alignment.Center) {
+            // clip 必須在 clickable 之前：否則點擊漣漪畫在未裁切的方形 Box 上，
+            // 圓形圖示按下去會冒出一個方塊（用戶回報「動畫是方的」）。
+            Box(
+                Modifier.size(RailIconSize).clip(shape).clickable(onClick = onClick),
+                contentAlignment = Alignment.Center,
+            ) {
+                content(shape)
+            }
             if (unread.count > 0) {
                 UnreadBadge(
                     count = unread.count,

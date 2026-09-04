@@ -57,12 +57,51 @@ interface Strings {
     val spaceRoomAvatars: String
     val restoringSession: String
     val chatList: String
+    val personalization: String
+    val appearanceHint: String
+    val chatListHint: String
     val unreadIndicators: String
     val unreadIndicatorsHint: String
     val messagePreview: String
     val messagePreviewHint: String
     val updatingRooms: String
     val membersCount: String
+    val verificationDoneHint: String
+    val verificationLoading: String
+    val verificationNotReady: String
+    val verificationCancelled: String
+    val verificationInProgressShort: String
+    val verificationWaitingOtherDevice: String
+    val deviceUnverified: String
+    val deviceUnverifiedHint: String
+    val verifyWithRecoveryKey: String
+    val verifyWithRecoveryKeyHint: String
+    val verifyWithPassphrase: String
+    val verifyWithPassphraseHint: String
+    val verifyWithOtherDevice: String
+    val verifyWithOtherDeviceHint: String
+    val crossSigningMissing: String
+    val crossSigningMissingHint: String
+    val bootstrapCrossSigning: String
+    val bootstrapCrossSigningHint: String
+    val bootstrapFailed: String
+    val recoveryKey: String
+    val passphrase: String
+    val recoveryKeyCreated: String
+    val recoveryKeyCreatedHint: String
+    val recoveryKeySaved: String
+    val compareEmojiHint: String
+    val sessions: String
+    val sessionsLoadFailed: String
+    val sessionLogoutFailed: String
+    val sessionVerified: String
+    val sessionUnverified: String
+    val sessionBlocked: String
+    val sessionUnknown: String
+    val sessionCurrent: String
+    val verifySession: String
+    val logoutSession: String
+    val cancel: String
     val loginUsername: String
     val today: String
     val yesterday: String
@@ -156,6 +195,9 @@ object ZhTwStrings : Strings {
     override val unreadIndicators = "未讀提示"
     override val unreadIndicatorsHint = "側欄顯示未讀白條，清單顯示紅圈數字"
     override val messagePreview = "訊息預覽"
+    override val personalization = "個人化"
+    override val appearanceHint = "主題模式、動態顏色與色板"
+    override val chatListHint = "清單樣式、未讀提示與訊息預覽"
     override val messagePreviewHint = "清單第二行顯示最後一則訊息"
     override val specM3 = "Material 3 (2021)"
     override val specExpressive = "Expressive (2025)"
@@ -167,6 +209,42 @@ object ZhTwStrings : Strings {
     override val restoringSession = "正在載入本機資料…"
     override val updatingRooms = "正在更新訊息…"
     override val membersCount = "成員 · %d"
+    override val verificationDoneHint = "此裝置已交叉簽署，其他客戶端會顯示為已驗證。"
+    override val verificationLoading = "正在讀取驗證狀態…"
+    override val verificationNotReady = "尚未就緒"
+    override val verificationCancelled = "驗證已取消"
+    override val verificationInProgressShort = "驗證進行中…"
+    override val verificationWaitingOtherDevice = "已發出請求，請在另一台裝置確認。"
+    override val deviceUnverified = "此裝置尚未驗證"
+    override val deviceUnverifiedHint = "驗證後才能讀取加密歷史訊息，其他客戶端也不再顯示警告。"
+    override val verifyWithRecoveryKey = "用復原金鑰驗證"
+    override val verifyWithRecoveryKeyHint = "貼上建立帳戶安全備份時取得的金鑰"
+    override val verifyWithPassphrase = "用安全密語驗證"
+    override val verifyWithPassphraseHint = "輸入設定安全備份時自訂的密語"
+    override val verifyWithOtherDevice = "用另一台裝置驗證"
+    override val verifyWithOtherDeviceHint = "在已驗證的裝置上比對表情符號"
+    override val crossSigningMissing = "帳戶尚未啟用交叉簽署"
+    override val crossSigningMissingHint = "先在此裝置初始化，會產生一次性的復原金鑰。"
+    override val bootstrapCrossSigning = "建立交叉簽署與安全備份"
+    override val bootstrapCrossSigningHint = "產生復原金鑰並簽署此裝置"
+    override val bootstrapFailed = "建立交叉簽署失敗"
+    override val recoveryKey = "復原金鑰"
+    override val passphrase = "安全密語"
+    override val recoveryKeyCreated = "已建立復原金鑰"
+    override val recoveryKeyCreatedHint = "請立刻抄下來並妥善保存——關閉後就看不到了。"
+    override val recoveryKeySaved = "我已保存"
+    override val compareEmojiHint = "確認兩台裝置顯示的表情符號完全相同。"
+    override val sessions = "工作階段"
+    override val sessionsLoadFailed = "無法讀取工作階段清單"
+    override val sessionLogoutFailed = "登出此工作階段失敗"
+    override val sessionVerified = "已驗證"
+    override val sessionUnverified = "未驗證"
+    override val sessionBlocked = "已封鎖"
+    override val sessionUnknown = "狀態未知"
+    override val sessionCurrent = "目前裝置"
+    override val verifySession = "驗證此裝置"
+    override val logoutSession = "登出"
+    override val cancel = "取消"
     override val loginUsername = "用戶名"
     override val homeserver = "Homeserver"
     override val loginPassword = "密碼"
@@ -258,12 +336,51 @@ object EnStrings : Strings {
     override val restoringSession = "Loading local data…"
     override val updatingRooms = "Updating messages…"
     override val membersCount = "Members · %d"
+    override val verificationDoneHint = "This device is cross-signed and shows as verified elsewhere."
+    override val verificationLoading = "Loading verification state…"
+    override val verificationNotReady = "Not ready yet"
+    override val verificationCancelled = "Verification cancelled"
+    override val verificationInProgressShort = "Verification in progress…"
+    override val verificationWaitingOtherDevice = "Request sent. Confirm it on the other device."
+    override val deviceUnverified = "This device is not verified"
+    override val deviceUnverifiedHint = "Verify to read encrypted history and clear warnings in other clients."
+    override val verifyWithRecoveryKey = "Verify with recovery key"
+    override val verifyWithRecoveryKeyHint = "Paste the key from your account's secure backup"
+    override val verifyWithPassphrase = "Verify with security passphrase"
+    override val verifyWithPassphraseHint = "Enter the passphrase you set for secure backup"
+    override val verifyWithOtherDevice = "Verify with another device"
+    override val verifyWithOtherDeviceHint = "Compare emoji on an already verified device"
+    override val crossSigningMissing = "Cross-signing is not set up"
+    override val crossSigningMissingHint = "Set it up here first; a one-time recovery key will be generated."
+    override val bootstrapCrossSigning = "Set up cross-signing and backup"
+    override val bootstrapCrossSigningHint = "Generates a recovery key and signs this device"
+    override val bootstrapFailed = "Failed to set up cross-signing"
+    override val recoveryKey = "Recovery key"
+    override val passphrase = "Security passphrase"
+    override val recoveryKeyCreated = "Recovery key created"
+    override val recoveryKeyCreatedHint = "Write it down now and keep it safe — it cannot be shown again."
+    override val recoveryKeySaved = "I saved it"
+    override val compareEmojiHint = "Check that both devices show exactly the same emoji."
+    override val sessions = "Sessions"
+    override val sessionsLoadFailed = "Could not load sessions"
+    override val sessionLogoutFailed = "Could not sign out this session"
+    override val sessionVerified = "Verified"
+    override val sessionUnverified = "Unverified"
+    override val sessionBlocked = "Blocked"
+    override val sessionUnknown = "Unknown"
+    override val sessionCurrent = "This device"
+    override val verifySession = "Verify"
+    override val logoutSession = "Sign out"
+    override val cancel = "Cancel"
     override val loginUsername = "Username"
     override val chatList = "Chat list"
     override val unreadIndicators = "Unread indicators"
     override val unreadIndicatorsHint = "Show the unread bar in the rail and count badges in the list"
     override val messagePreview = "Message preview"
     override val messagePreviewHint = "Show the latest message on the list's second line"
+    override val personalization = "Personalization"
+    override val appearanceHint = "Theme mode, dynamic color, and palette"
+    override val chatListHint = "List style, unread indicators, and previews"
     override val homeserver = "Homeserver"
     override val loginPassword = "Password"
     override val loginSubmit = "Log in"

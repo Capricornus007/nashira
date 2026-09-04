@@ -1,41 +1,44 @@
 package io.github.capricornus007.nashira
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Create
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -43,239 +46,398 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
+import androidx.compose.ui.unit.IntOffset
+import io.github.capricornus007.nashira.i18n.AppLanguage
 import io.github.capricornus007.nashira.i18n.stringsFor
 import io.github.capricornus007.nashira.matrix.MatrixSession
+import io.github.capricornus007.nashira.settings.SettingsDropdownItem
+import io.github.capricornus007.nashira.settings.SettingsGroup
+import io.github.capricornus007.nashira.settings.SettingsItem
+import io.github.capricornus007.nashira.settings.SettingsMenuOption
+import io.github.capricornus007.nashira.settings.SettingsNavigationItem
+import io.github.capricornus007.nashira.settings.SettingsSwitchItem
 import io.github.capricornus007.nashira.theme.ThemeMode
 import io.github.capricornus007.nashira.theme.dynamicColorSupported
 
-/** 完整設定入口：帳戶、安全性、外觀、語言與關於。 */
+/** 設定的子頁。用單一 enum 表示，返回鍵逐層退回。 */
+private enum class SettingsPage { ROOT, ACCOUNT, APPEARANCE, CHAT_LIST, ABOUT }
+
+/** 完整設定入口：帳戶、外觀、聊天室清單、語言與關於。 */
 @Composable
 fun SettingsScreen(
     session: MatrixSession,
     onBack: () -> Unit,
     onLogout: () -> Unit,
 ) {
-    var accountOpen by remember { mutableStateOf(false) }
-    PlatformBackHandler(enabled = accountOpen) { accountOpen = false }
-    PlatformBackHandler(enabled = !accountOpen) { onBack() }
-    if (accountOpen) {
-        SecurityAndAccountScreen(session = session, onBack = { accountOpen = false }, onLogout = onLogout)
-    } else {
-        SettingsContent(onBack = onBack, onOpenAccount = { accountOpen = true }, hasAccount = true)
+    var page by remember { mutableStateOf(SettingsPage.ROOT) }
+    PlatformBackHandler(enabled = page != SettingsPage.ROOT) { page = SettingsPage.ROOT }
+    PlatformBackHandler(enabled = page == SettingsPage.ROOT) { onBack() }
+    SettingsNavHost(
+        page = page,
+        onNavigate = { page = it },
+        onBack = onBack,
+        session = session,
+        onLogout = onLogout,
+    )
+}
+
+/** 未登入時的預覽入口（沒有帳戶區）。 */
+@Composable
+fun HomeScreen(dark: Boolean) {
+    var page by remember { mutableStateOf(SettingsPage.ROOT) }
+    PlatformBackHandler(enabled = page != SettingsPage.ROOT) { page = SettingsPage.ROOT }
+    SettingsNavHost(page = page, onNavigate = { page = it }, onBack = null, session = null, onLogout = {})
+}
+
+/**
+ * 設定的子頁導航。子頁從右側滑入、返回時滑出（對齊 InstallerX 與 Discord 的設定子頁）。
+ */
+@Composable
+private fun SettingsNavHost(
+    page: SettingsPage,
+    onNavigate: (SettingsPage) -> Unit,
+    onBack: (() -> Unit)?,
+    session: MatrixSession?,
+    onLogout: () -> Unit,
+) {
+    AnimatedContent(
+        targetState = page,
+        transitionSpec = {
+            // 進子頁：新頁從右滑入、舊頁略往左退；返回相反
+            val forward = targetState != SettingsPage.ROOT
+            if (forward) {
+                slideInHorizontally(PageSlide) { it } togetherWith slideOutHorizontally(PageSlide) { -it / 6 }
+            } else {
+                slideInHorizontally(PageSlide) { -it / 6 } togetherWith slideOutHorizontally(PageSlide) { it }
+            }
+        },
+        label = "settings_pages",
+    ) { current ->
+        when (current) {
+            SettingsPage.ROOT -> SettingsRoot(
+                onBack = onBack,
+                hasAccount = session != null,
+                onNavigate = onNavigate,
+            )
+            SettingsPage.ACCOUNT -> if (session != null) {
+                SecurityAndAccountScreen(
+                    session = session,
+                    onBack = { onNavigate(SettingsPage.ROOT) },
+                    onLogout = onLogout,
+                )
+            } else {
+                SettingsRoot(onBack = onBack, hasAccount = false, onNavigate = onNavigate)
+            }
+            SettingsPage.APPEARANCE -> AppearancePage { onNavigate(SettingsPage.ROOT) }
+            SettingsPage.CHAT_LIST -> ChatListPage { onNavigate(SettingsPage.ROOT) }
+            SettingsPage.ABOUT -> AboutPage { onNavigate(SettingsPage.ROOT) }
+        }
     }
 }
 
-/** 舊入口保留給未登入的預覽與既有呼叫端。 */
-@Composable
-fun HomeScreen(dark: Boolean) {
-    SettingsContent(onBack = null, onOpenAccount = null, hasAccount = false)
-}
+private val PageSlide = tween<IntOffset>(260, easing = FastOutSlowInEasing)
 
+/** 設定頁的共用骨架：可摺疊大標題 + 群組清單。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SettingsContent(
+private fun SettingsScaffold(
+    title: String,
     onBack: (() -> Unit)?,
-    onOpenAccount: (() -> Unit)?,
-    hasAccount: Boolean,
+    content: @Composable () -> Unit,
 ) {
-    val ui = LocalUiState.current
-    val strings = stringsFor(ui.language)
+    val appBarState = rememberTopAppBarState()
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(appBarState)
     Scaffold(
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
             TopAppBar(
-                navigationIcon = { if (onBack != null) IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, contentDescription = strings.back) } },
-                title = { Text(strings.settings) },
+                navigationIcon = {
+                    if (onBack != null) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                        }
+                    }
+                },
+                title = { Text(title, fontWeight = FontWeight.Bold) },
+                scrollBehavior = scrollBehavior,
             )
         },
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 16.dp)
-                .navigationBarsPadding(),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(bottom = 24.dp),
         ) {
-            if (hasAccount && onOpenAccount != null) {
-                Section(title = strings.account) {
-                    SettingRow(
+            item { Column(Modifier.navigationBarsPadding()) { content() } }
+        }
+    }
+}
+
+@Composable
+private fun SettingsRoot(
+    onBack: (() -> Unit)?,
+    hasAccount: Boolean,
+    onNavigate: (SettingsPage) -> Unit,
+) {
+    val ui = LocalUiState.current
+    val strings = stringsFor(ui.language)
+    SettingsScaffold(title = strings.settings, onBack = onBack) {
+        if (hasAccount) {
+            SettingsGroup(title = strings.account) {
+                item { shape ->
+                    SettingsNavigationItem(
+                        shape = shape,
                         icon = Icons.Filled.Lock,
                         title = strings.accountAndSecurity,
-                        subtitle = strings.accountAndSecurityHint,
-                        onClick = onOpenAccount,
+                        description = strings.accountAndSecurityHint,
+                        onClick = { onNavigate(SettingsPage.ACCOUNT) },
                     )
                 }
             }
-            Section(title = strings.appearance) {
-                DropdownAnchor(
-                    label = strings.themeMode,
+        }
+        SettingsGroup(title = strings.personalization) {
+            item { shape ->
+                SettingsNavigationItem(
+                    shape = shape,
+                    icon = Icons.Filled.Star,
+                    title = strings.appearance,
+                    description = strings.appearanceHint,
+                    onClick = { onNavigate(SettingsPage.APPEARANCE) },
+                )
+            }
+            item { shape ->
+                SettingsNavigationItem(
+                    shape = shape,
+                    icon = Icons.AutoMirrored.Filled.List,
+                    title = strings.chatList,
+                    description = strings.chatListHint,
+                    onClick = { onNavigate(SettingsPage.CHAT_LIST) },
+                )
+            }
+            item { shape ->
+                SettingsDropdownItem(
+                    shape = shape,
+                    icon = Icons.Filled.Create,
+                    title = strings.language,
+                    current = ui.language.displayName,
+                ) { close ->
+                    AppLanguage.entries.forEach { candidate ->
+                        SettingsMenuOption(candidate.displayName, ui.language == candidate) {
+                            ui.language = candidate
+                            close()
+                        }
+                    }
+                }
+            }
+        }
+        SettingsGroup(title = strings.about) {
+            item { shape ->
+                SettingsNavigationItem(
+                    shape = shape,
+                    icon = Icons.Filled.Info,
+                    title = strings.about,
+                    description = "${strings.appName} ${AppInfo.version}",
+                    onClick = { onNavigate(SettingsPage.ABOUT) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AppearancePage(onBack: () -> Unit) {
+    val ui = LocalUiState.current
+    val strings = stringsFor(ui.language)
+    SettingsScaffold(title = strings.appearance, onBack = onBack) {
+        SettingsGroup(title = strings.themeMode) {
+            item { shape ->
+                SettingsDropdownItem(
+                    shape = shape,
+                    icon = Icons.Filled.Settings,
+                    title = strings.themeMode,
                     current = when (ui.themeMode) {
                         ThemeMode.FOLLOW_SYSTEM -> strings.followSystem
                         ThemeMode.DARK -> strings.darkTheme
                         ThemeMode.LIGHT -> strings.lightTheme
                     },
                 ) { close ->
-                    DropdownMenuItem(text = { Text(strings.followSystem) }, onClick = { ui.themeMode = ThemeMode.FOLLOW_SYSTEM; close() })
-                    DropdownMenuItem(text = { Text(strings.darkTheme) }, onClick = { ui.themeMode = ThemeMode.DARK; close() })
-                    DropdownMenuItem(text = { Text(strings.lightTheme) }, onClick = { ui.themeMode = ThemeMode.LIGHT; close() })
+                    SettingsMenuOption(strings.followSystem, ui.themeMode == ThemeMode.FOLLOW_SYSTEM) {
+                        ui.themeMode = ThemeMode.FOLLOW_SYSTEM; close()
+                    }
+                    SettingsMenuOption(strings.darkTheme, ui.themeMode == ThemeMode.DARK) {
+                        ui.themeMode = ThemeMode.DARK; close()
+                    }
+                    SettingsMenuOption(strings.lightTheme, ui.themeMode == ThemeMode.LIGHT) {
+                        ui.themeMode = ThemeMode.LIGHT; close()
+                    }
                 }
-
-                if (dynamicColorSupported) {
-                    SettingSwitch(
+            }
+        }
+        if (dynamicColorSupported) {
+            SettingsGroup(title = strings.themeColor) {
+                item { shape ->
+                    SettingsSwitchItem(
+                        shape = shape,
+                        icon = Icons.Filled.Star,
                         title = strings.dynamicColor,
-                        subtitle = strings.dynamicColorHint,
+                        description = strings.dynamicColorHint,
                         checked = ui.dynamicColor,
                         onCheckedChange = { ui.dynamicColor = it },
                     )
-                    AnimatedVisibility(visible = ui.dynamicColor, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
-                        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                            DropdownAnchor(label = strings.paletteStyle, current = ui.paletteStyle.displayLabel()) { close ->
-                                PaletteStyle.entries.forEach { style ->
-                                    DropdownMenuItem(text = { Text(style.displayLabel()) }, onClick = { ui.paletteStyle = style; close() })
-                                }
+                }
+                item { shape ->
+                    SettingsDropdownItem(
+                        shape = shape,
+                        title = strings.paletteStyle,
+                        current = ui.paletteStyle.displayLabel(),
+                    ) { close ->
+                        PaletteStyle.entries.forEach { style ->
+                            SettingsMenuOption(style.displayLabel(), ui.paletteStyle == style) {
+                                ui.paletteStyle = style; close()
                             }
-                            DropdownAnchor(
-                                label = strings.colorSpec,
-                                current = if (ui.specVersion == ColorSpec.SpecVersion.SPEC_2021) strings.specM3 else strings.specExpressive,
-                            ) { close ->
-                                DropdownMenuItem(text = { Text(strings.specM3) }, onClick = { ui.specVersion = ColorSpec.SpecVersion.SPEC_2021; close() })
-                                DropdownMenuItem(text = { Text(strings.specExpressive) }, onClick = { ui.specVersion = ColorSpec.SpecVersion.SPEC_2025; close() })
-                            }
-                            Text(strings.themeColor, style = MaterialTheme.typography.bodyMedium)
-                            AccentPicker(selected = ui.accent, language = ui.language, onSelect = { ui.accent = it })
                         }
                     }
                 }
-
+                item { shape ->
+                    SettingsDropdownItem(
+                        shape = shape,
+                        title = strings.colorSpec,
+                        current = if (ui.specVersion == ColorSpec.SpecVersion.SPEC_2021) strings.specM3 else strings.specExpressive,
+                    ) { close ->
+                        SettingsMenuOption(strings.specM3, ui.specVersion == ColorSpec.SpecVersion.SPEC_2021) {
+                            ui.specVersion = ColorSpec.SpecVersion.SPEC_2021; close()
+                        }
+                        SettingsMenuOption(strings.specExpressive, ui.specVersion == ColorSpec.SpecVersion.SPEC_2025) {
+                            ui.specVersion = ColorSpec.SpecVersion.SPEC_2025; close()
+                        }
+                    }
+                }
             }
-            Section(title = strings.chatList) {
-                DropdownAnchor(
-                    label = strings.spaceIconMode,
+            // 色票是自由排布的方格，塞進列元件會擠壓；獨立成一塊，跟著動態顏色開關收放
+            AnimatedVisibility(
+                visible = ui.dynamicColor,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut(),
+            ) {
+                Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(strings.themeColor, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                    AccentPicker(selected = ui.accent, language = ui.language, onSelect = { ui.accent = it })
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChatListPage(onBack: () -> Unit) {
+    val ui = LocalUiState.current
+    val strings = stringsFor(ui.language)
+    SettingsScaffold(title = strings.chatList, onBack = onBack) {
+        SettingsGroup {
+            item { shape ->
+                SettingsDropdownItem(
+                    shape = shape,
+                    title = strings.spaceIconMode,
                     current = when (ui.spaceIconMode) {
                         SpaceIconMode.SPACE_AVATAR -> strings.spaceAvatar
                         SpaceIconMode.ROOM_PREVIEWS -> strings.spaceRoomAvatars
                     },
                 ) { close ->
-                    DropdownMenuItem(text = { Text(strings.spaceAvatar) }, onClick = { ui.spaceIconMode = SpaceIconMode.SPACE_AVATAR; close() })
-                    DropdownMenuItem(text = { Text(strings.spaceRoomAvatars) }, onClick = { ui.spaceIconMode = SpaceIconMode.ROOM_PREVIEWS; close() })
+                    SettingsMenuOption(strings.spaceAvatar, ui.spaceIconMode == SpaceIconMode.SPACE_AVATAR) {
+                        ui.spaceIconMode = SpaceIconMode.SPACE_AVATAR; close()
+                    }
+                    SettingsMenuOption(strings.spaceRoomAvatars, ui.spaceIconMode == SpaceIconMode.ROOM_PREVIEWS) {
+                        ui.spaceIconMode = SpaceIconMode.ROOM_PREVIEWS; close()
+                    }
                 }
-                SettingSwitch(
+            }
+            item { shape ->
+                SettingsSwitchItem(
+                    shape = shape,
                     title = strings.unreadIndicators,
-                    subtitle = strings.unreadIndicatorsHint,
+                    description = strings.unreadIndicatorsHint,
                     checked = ui.showUnreadIndicators,
                     onCheckedChange = { ui.showUnreadIndicators = it },
                 )
-                SettingSwitch(
+            }
+            item { shape ->
+                SettingsSwitchItem(
+                    shape = shape,
                     title = strings.messagePreview,
-                    subtitle = strings.messagePreviewHint,
+                    description = strings.messagePreviewHint,
                     checked = ui.showMessagePreview,
                     onCheckedChange = { ui.showMessagePreview = it },
                 )
             }
-            Section(title = strings.language) {
-                DropdownAnchor(label = strings.language, current = ui.language.displayName) { close ->
-                    io.github.capricornus007.nashira.i18n.AppLanguage.entries.forEach { candidate ->
-                        DropdownMenuItem(text = { Text(candidate.displayName) }, onClick = { ui.language = candidate; close() })
-                    }
-                }
-            }
-            Section(title = strings.about) {
-                LinkRow(strings.version, AppInfo.version, AppInfo.repoUrl)
-                LinkRow(strings.engine, AppInfo.engine, AppInfo.engineUrl)
-                LinkRow(strings.encryption, AppInfo.crypto, AppInfo.cryptoUrl)
-                LinkRow(strings.license, AppInfo.license, AppInfo.licenseUrl)
-                LinkRow(strings.sourceCode, AppInfo.repo, AppInfo.repoUrl)
-                Spacer(Modifier.size(8.dp))
-                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(strings.appName, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                    Text(strings.tagline, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
         }
     }
 }
 
 @Composable
-private fun SettingRow(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    title: String,
-    subtitle: String,
-    onClick: () -> Unit,
-) {
-    Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
-/** 設定頁的標題＋說明＋M3 Expressive icon-thumb 開關。 */
-@Composable
-private fun SettingSwitch(
-    title: String,
-    subtitle: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(title)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-            thumbContent = {
-                Icon(
-                    if (checked) Icons.Filled.Check else Icons.Filled.Close,
-                    contentDescription = null,
-                    modifier = Modifier.size(SwitchDefaults.IconSize),
+private fun AboutPage(onBack: () -> Unit) {
+    val strings = stringsFor(LocalUiState.current.language)
+    SettingsScaffold(title = strings.about, onBack = onBack) {
+        SettingsGroup {
+            item { shape ->
+                SettingsItem(
+                    shape = shape,
+                    icon = Icons.Filled.Info,
+                    title = strings.version,
+                    description = AppInfo.version,
+                    onClick = { openLink(AppInfo.repoUrl) },
                 )
-            },
-            colors = SwitchDefaults.colors(
-                checkedTrackColor = MaterialTheme.colorScheme.primaryContainer,
-                checkedThumbColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                checkedIconColor = MaterialTheme.colorScheme.primaryContainer,
-                uncheckedTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                uncheckedThumbColor = MaterialTheme.colorScheme.outline,
-                uncheckedIconColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                uncheckedBorderColor = MaterialTheme.colorScheme.outline,
-            ),
-        )
-    }
-}
-
-@Composable
-private fun DropdownAnchor(label: String, current: String, menuContent: @Composable (close: () -> Unit) -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(label, style = MaterialTheme.typography.bodyMedium)
-        Box {
-            OutlinedButton(onClick = { open = true }) { Text(current) }
-            DropdownMenu(expanded = open, onDismissRequest = { open = false }) { menuContent { open = false } }
+            }
+            item { shape ->
+                SettingsItem(
+                    shape = shape,
+                    icon = Icons.Filled.Build,
+                    title = strings.engine,
+                    description = AppInfo.engine,
+                    onClick = { openLink(AppInfo.engineUrl) },
+                )
+            }
+            item { shape ->
+                SettingsItem(
+                    shape = shape,
+                    icon = Icons.Filled.Lock,
+                    title = strings.encryption,
+                    description = AppInfo.crypto,
+                    onClick = { openLink(AppInfo.cryptoUrl) },
+                )
+            }
+            item { shape ->
+                SettingsItem(
+                    shape = shape,
+                    icon = Icons.Filled.Info,
+                    title = strings.license,
+                    description = AppInfo.license,
+                    onClick = { openLink(AppInfo.licenseUrl) },
+                )
+            }
+            item { shape ->
+                SettingsItem(
+                    shape = shape,
+                    icon = Icons.Filled.Person,
+                    title = strings.sourceCode,
+                    description = AppInfo.repo,
+                    onClick = { openLink(AppInfo.repoUrl) },
+                )
+            }
+        }
+        Column(
+            Modifier.fillMaxWidth().padding(top = 28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(strings.appName, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+            Text(strings.tagline, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
 
 internal fun PaletteStyle.displayLabel(): String = name.replace(Regex("(?<=[a-z])(?=[A-Z])"), " ")
-
-@Composable
-private fun Section(title: String, content: @Composable () -> Unit) {
-    Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-            content()
-        }
-    }
-}

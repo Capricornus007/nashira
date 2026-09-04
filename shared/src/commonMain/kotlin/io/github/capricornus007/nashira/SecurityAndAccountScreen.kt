@@ -2,19 +2,24 @@ package io.github.capricornus007.nashira
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -26,8 +31,10 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,15 +45,26 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import de.connect2x.trixnity.client.verification.ActiveVerificationState
 import de.connect2x.trixnity.client.verification.ActiveSasVerificationMethod
 import de.connect2x.trixnity.client.verification.ActiveSasVerificationState
+import de.connect2x.trixnity.client.verification.ActiveVerificationState
+import io.github.capricornus007.nashira.i18n.Strings
 import io.github.capricornus007.nashira.i18n.stringsFor
+import io.github.capricornus007.nashira.matrix.DeviceSession
 import io.github.capricornus007.nashira.matrix.MatrixSession
+import io.github.capricornus007.nashira.matrix.SelfVerificationOption
+import io.github.capricornus007.nashira.matrix.SelfVerificationStatus
+import io.github.capricornus007.nashira.matrix.SessionTrust
 import io.github.capricornus007.nashira.matrix.VerificationRepository
+import io.github.capricornus007.nashira.settings.SettingsGroup
+import io.github.capricornus007.nashira.settings.SettingsItem
+import io.github.capricornus007.nashira.settings.SettingsNavigationItem
 import kotlinx.coroutines.launch
 
-/** Discord 使用者設定中的安全性頁：顯示本機裝置與真正的 Matrix 驗證工作階段。 */
+/**
+ * 帳戶與安全性頁：帳戶資訊、本裝置的自我驗證（復原金鑰／密語／另一台裝置）、
+ * 工作階段清單與登出。
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SecurityAndAccountScreen(
@@ -57,148 +75,470 @@ fun SecurityAndAccountScreen(
     val strings = stringsFor(LocalUiState.current.language)
     val repository = remember(session) { VerificationRepository(session) }
     val scope = rememberCoroutineScope()
-    val activeDevice = repository.activeDeviceVerification.collectAsState().value
-    val activeUsers = repository.activeUserVerifications.collectAsState().value
+    val selfStatus by repository.selfVerification.collectAsState(initial = null)
+    val activeDevice by repository.activeDeviceVerification.collectAsState()
     val activeState = activeDevice?.state?.collectAsState()?.value
-    var deviceId by remember(session) { mutableStateOf("") }
-    var requestBusy by remember { mutableStateOf(false) }
-    var requestMessage by remember { mutableStateOf<String?>(null) }
+    val bootstrapping by repository.bootstrapRunning.collectAsState()
+
+    var sessions by remember(session) { mutableStateOf<List<DeviceSession>>(emptyList()) }
+    var sessionsError by remember { mutableStateOf<String?>(null) }
+    var secretPrompt by remember { mutableStateOf<SelfVerificationOption?>(null) }
+    var recoveryKeyToShow by remember { mutableStateOf<String?>(null) }
+    var busyMessage by remember { mutableStateOf<String?>(null) }
+    var actionError by remember { mutableStateOf<String?>(null) }
+
+    suspend fun reloadSessions() {
+        repository.sessions()
+            .onSuccess { sessions = it; sessionsError = null }
+            .onFailure { sessionsError = it.message ?: strings.sessionsLoadFailed }
+    }
+
+    LaunchedEffect(repository, selfStatus) { reloadSessions() }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
             TopAppBar(
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, contentDescription = strings.back) } },
-                title = { Text(strings.account) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = strings.back)
+                    }
+                },
+                title = { Text(strings.accountAndSecurity, fontWeight = FontWeight.Bold) },
             )
         },
     ) { padding ->
-        Column(
-            Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(bottom = 24.dp),
         ) {
-            Text(strings.account, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            AccountValue(strings.accountId, session.client.userId.full)
-            AccountValue(strings.deviceId, session.client.deviceId)
-            SecurityCard(
-                title = strings.security,
-                icon = Icons.Filled.Lock,
-                body = strings.securityHint,
-            )
-            Text(strings.deviceVerification, style = MaterialTheme.typography.titleLarge)
-            Text(strings.verificationHint, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            OutlinedTextField(
-                value = deviceId,
-                onValueChange = { deviceId = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(strings.targetDeviceId) },
-                singleLine = true,
-                placeholder = { Text(strings.targetDeviceIdExample) },
-            )
-            Button(
-                enabled = !requestBusy && deviceId.isNotBlank(),
-                onClick = {
-                    requestBusy = true
-                    requestMessage = null
-                    scope.launch {
-                        repository.requestDeviceVerification(deviceId.trim())
-                            .onSuccess { requestMessage = strings.verificationCreated }
-                            .onFailure { requestMessage = it.message ?: strings.verificationFailed }
-                        requestBusy = false
+            item {
+                Column(Modifier.navigationBarsPadding()) {
+                    SettingsGroup(title = strings.account) {
+                        item { shape ->
+                            SettingsItem(
+                                shape = shape,
+                                icon = Icons.Filled.Person,
+                                title = strings.accountId,
+                                description = session.client.userId.full,
+                            )
+                        }
+                        item { shape ->
+                            SettingsItem(
+                                shape = shape,
+                                icon = Icons.Filled.Lock,
+                                title = strings.deviceId,
+                                description = session.client.deviceId,
+                            )
+                        }
                     }
-                },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                if (requestBusy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                else Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.size(18.dp))
-                Text(strings.verifyThisDevice, modifier = Modifier.padding(start = 8.dp))
+
+                    SelfVerificationSection(
+                        strings = strings,
+                        status = selfStatus,
+                        bootstrapping = bootstrapping,
+                        onUseSecret = { secretPrompt = it },
+                        onUseOtherDevice = { option ->
+                            scope.launch {
+                                busyMessage = strings.verificationWaitingOtherDevice
+                                repository.startOtherDeviceVerification(option)
+                                    .onFailure { actionError = it.message ?: strings.verificationFailed }
+                                busyMessage = null
+                            }
+                        },
+                        onBootstrap = {
+                            scope.launch {
+                                repository.bootstrapCrossSigning()
+                                    .onSuccess { recoveryKeyToShow = it }
+                                    .onFailure { actionError = it.message ?: strings.bootstrapFailed }
+                            }
+                        },
+                    )
+
+                    // 進行中的 SAS 工作階段：接受請求、比對表情符號
+                    if (activeState != null) {
+                        SettingsGroup(title = strings.verificationState) {
+                            item { shape ->
+                                ActiveVerificationItem(shape, strings, activeState, scope)
+                            }
+                        }
+                    }
+
+                    SessionsSection(
+                        strings = strings,
+                        sessions = sessions,
+                        error = sessionsError,
+                        onRefresh = { scope.launch { reloadSessions() } },
+                        onVerify = { deviceId ->
+                            scope.launch {
+                                repository.requestDeviceVerification(deviceId)
+                                    .onFailure { actionError = it.message ?: strings.verificationFailed }
+                            }
+                        },
+                        onLogoutSession = { deviceId ->
+                            scope.launch {
+                                repository.logoutSession(deviceId)
+                                    .onSuccess { reloadSessions() }
+                                    .onFailure { actionError = it.message ?: strings.sessionLogoutFailed }
+                            }
+                        },
+                    )
+
+                    busyMessage?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                        )
+                    }
+                    actionError?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                        )
+                    }
+
+                    OutlinedButton(
+                        onClick = onLogout,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 20.dp),
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Text(strings.logoutDevice, modifier = Modifier.padding(start = 8.dp))
+                    }
+                }
             }
-            requestMessage?.let { Text(it, color = if (it == strings.verificationCreated) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error) }
-            VerificationStatusCard(strings, activeState, activeUsers.size, scope)
-            Spacer(Modifier.size(8.dp))
-            OutlinedButton(onClick = onLogout, modifier = Modifier.fillMaxWidth()) { Text(strings.logoutDevice) }
+        }
+    }
+
+    secretPrompt?.let { option ->
+        SecretPromptDialog(
+            strings = strings,
+            option = option,
+            onDismiss = { secretPrompt = null },
+            onConfirm = { secret ->
+                secretPrompt = null
+                scope.launch {
+                    busyMessage = strings.verificationInProgressShort
+                    repository.verifyWithSecret(option, secret)
+                        .onFailure { actionError = it.message ?: strings.verificationFailed }
+                    busyMessage = null
+                }
+            },
+        )
+    }
+
+    recoveryKeyToShow?.let { key ->
+        RecoveryKeyDialog(strings = strings, recoveryKey = key, onDismiss = { recoveryKeyToShow = null })
+    }
+}
+
+/** 自我驗證區：依帳戶狀態給出可用的驗證方式。 */
+@Composable
+private fun SelfVerificationSection(
+    strings: Strings,
+    status: SelfVerificationStatus?,
+    bootstrapping: Boolean,
+    onUseSecret: (SelfVerificationOption) -> Unit,
+    onUseOtherDevice: (SelfVerificationOption.OtherDevice) -> Unit,
+    onBootstrap: () -> Unit,
+) {
+    SettingsGroup(title = strings.deviceVerification) {
+        when (status) {
+            null -> item { shape ->
+                SettingsItem(shape = shape, icon = Icons.Filled.Refresh, title = strings.verificationLoading)
+            }
+            SelfVerificationStatus.Verified -> item { shape ->
+                SettingsItem(
+                    shape = shape,
+                    icon = Icons.Filled.CheckCircle,
+                    title = strings.verificationDone,
+                    description = strings.verificationDoneHint,
+                )
+            }
+            SelfVerificationStatus.NeedsBootstrap -> {
+                item { shape ->
+                    SettingsItem(
+                        shape = shape,
+                        icon = Icons.Filled.Warning,
+                        title = strings.crossSigningMissing,
+                        description = strings.crossSigningMissingHint,
+                    )
+                }
+                item { shape ->
+                    SettingsItem(
+                        shape = shape,
+                        icon = Icons.Filled.Lock,
+                        title = strings.bootstrapCrossSigning,
+                        description = strings.bootstrapCrossSigningHint,
+                        enabled = !bootstrapping,
+                        onClick = onBootstrap,
+                    ) {
+                        if (bootstrapping) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    }
+                }
+            }
+            is SelfVerificationStatus.NotReady -> item { shape ->
+                SettingsItem(
+                    shape = shape,
+                    icon = Icons.Filled.Refresh,
+                    title = strings.verificationNotReady,
+                    description = status.reasons.joinToString(", "),
+                )
+            }
+            is SelfVerificationStatus.NeedsVerification -> {
+                item { shape ->
+                    SettingsItem(
+                        shape = shape,
+                        icon = Icons.Filled.Warning,
+                        title = strings.deviceUnverified,
+                        description = strings.deviceUnverifiedHint,
+                    )
+                }
+                status.options.forEach { option ->
+                    item { shape ->
+                        when (option) {
+                            is SelfVerificationOption.RecoveryKey -> SettingsNavigationItem(
+                                shape = shape,
+                                icon = Icons.Filled.Lock,
+                                title = strings.verifyWithRecoveryKey,
+                                description = strings.verifyWithRecoveryKeyHint,
+                                onClick = { onUseSecret(option) },
+                            )
+                            is SelfVerificationOption.Passphrase -> SettingsNavigationItem(
+                                shape = shape,
+                                icon = Icons.Filled.Lock,
+                                title = strings.verifyWithPassphrase,
+                                description = strings.verifyWithPassphraseHint,
+                                onClick = { onUseSecret(option) },
+                            )
+                            is SelfVerificationOption.OtherDevice -> SettingsNavigationItem(
+                                shape = shape,
+                                icon = Icons.Filled.Person,
+                                title = strings.verifyWithOtherDevice,
+                                description = strings.verifyWithOtherDeviceHint,
+                                onClick = { onUseOtherDevice(option) },
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
+/** 進行中的驗證：依 Trixnity 的狀態機給出下一步按鈕。 */
 @Composable
-private fun AccountValue(label: String, value: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, style = MaterialTheme.typography.bodyLarge)
-    }
-}
-
-@Composable
-private fun SecurityCard(title: String, icon: androidx.compose.ui.graphics.vector.ImageVector, body: String) {
-    Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(title, style = MaterialTheme.typography.titleMedium)
-                Text(body, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
-            }
-        }
-    }
-}
-
-@Composable
-private fun VerificationStatusCard(
-    strings: io.github.capricornus007.nashira.i18n.Strings,
-    state: ActiveVerificationState?,
-    userCount: Int,
+private fun ActiveVerificationItem(
+    shape: androidx.compose.ui.graphics.Shape,
+    strings: Strings,
+    state: ActiveVerificationState,
     scope: kotlinx.coroutines.CoroutineScope,
 ) {
-    Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Icon(if (state is ActiveVerificationState.Done) Icons.Filled.CheckCircle else Icons.Filled.Refresh, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                Text(strings.verificationState, style = MaterialTheme.typography.titleMedium)
-            }
+    val sasState = (state as? ActiveVerificationState.Start)
+        ?.let { it.method as? ActiveSasVerificationMethod }
+        ?.state?.collectAsState()?.value
+    Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = shape, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
                 when {
                     state is ActiveVerificationState.Done -> strings.verificationDone
-                    state == null && userCount == 0 -> strings.noVerification
-                    else -> strings.verificationInProgress.format(state?.javaClass?.simpleName ?: strings.waitingAnotherDevice)
+                    state is ActiveVerificationState.Cancel -> strings.verificationCancelled
+                    else -> strings.verificationInProgressShort
                 },
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.titleMedium,
             )
             when (state) {
-                is ActiveVerificationState.TheirRequest -> {
-                    Button(onClick = { scope.launch { state.ready() } }, modifier = Modifier.fillMaxWidth()) {
-                        Text(strings.acceptVerification)
-                    }
-                }
-                is ActiveVerificationState.Ready -> {
-                    Button(
-                        onClick = { state.methods.firstOrNull()?.let { method -> scope.launch { state.start(method) } } },
+                is ActiveVerificationState.TheirRequest -> Button(
+                    onClick = { scope.launch { state.ready() } },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(strings.acceptVerification) }
+                is ActiveVerificationState.Ready -> Button(
+                    onClick = { state.methods.firstOrNull()?.let { m -> scope.launch { state.start(m) } } },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(strings.startSasVerification) }
+                is ActiveVerificationState.Start -> when (sasState) {
+                    is ActiveSasVerificationState.TheirSasStart -> Button(
+                        onClick = { scope.launch { sasState.accept() } },
                         modifier = Modifier.fillMaxWidth(),
-                    ) { Text(strings.startSasVerification) }
-                }
-                is ActiveVerificationState.Start -> {
-                    val sas = state.method as? ActiveSasVerificationMethod
-                    val sasState = sas?.state?.collectAsState()?.value
-                    when (sasState) {
-                        is ActiveSasVerificationState.TheirSasStart -> {
-                            Button(onClick = { scope.launch { sasState.accept() } }, modifier = Modifier.fillMaxWidth()) {
-                                Text(strings.acceptSas)
+                    ) { Text(strings.acceptSas) }
+                    is ActiveSasVerificationState.ComparisonByUser -> {
+                        Text(strings.compareEmojiHint, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (sasState.emojis.isNotEmpty()) {
+                            Text(
+                                sasState.emojis.joinToString("   ") { it.second },
+                                style = MaterialTheme.typography.headlineSmall,
+                            )
+                        } else {
+                            Text(sasState.decimal.joinToString(" "), style = MaterialTheme.typography.headlineSmall)
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = { scope.launch { sasState.match() } }, modifier = Modifier.weight(1f)) {
+                                Text(strings.match)
+                            }
+                            OutlinedButton(onClick = { scope.launch { sasState.noMatch() } }, modifier = Modifier.weight(1f)) {
+                                Text(strings.noMatch)
                             }
                         }
-                        is ActiveSasVerificationState.ComparisonByUser -> {
-                            if (sasState.emojis.isNotEmpty()) {
-                                Text(sasState.emojis.joinToString("  ") { it.second }, style = MaterialTheme.typography.headlineSmall)
-                            } else {
-                                Text(sasState.decimal.joinToString(" "), style = MaterialTheme.typography.headlineSmall)
-                            }
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Button(onClick = { scope.launch { sasState.match() } }, modifier = Modifier.weight(1f)) { Text(strings.match) }
-                                OutlinedButton(onClick = { scope.launch { sasState.noMatch() } }, modifier = Modifier.weight(1f)) { Text(strings.noMatch) }
-                            }
-                        }
-                        else -> Unit
                     }
+                    else -> Unit
                 }
                 else -> Unit
             }
         }
     }
+}
+
+/** 工作階段清單：本裝置置頂，其他裝置可發起驗證或登出。 */
+@Composable
+private fun SessionsSection(
+    strings: Strings,
+    sessions: List<DeviceSession>,
+    error: String?,
+    onRefresh: () -> Unit,
+    onVerify: (String) -> Unit,
+    onLogoutSession: (String) -> Unit,
+) {
+    SettingsGroup(title = strings.sessions) {
+        if (error != null) {
+            item { shape ->
+                SettingsItem(
+                    shape = shape,
+                    icon = Icons.Filled.Warning,
+                    title = strings.sessionsLoadFailed,
+                    description = error,
+                    onClick = onRefresh,
+                )
+            }
+            return@SettingsGroup
+        }
+        if (sessions.isEmpty()) {
+            item { shape ->
+                SettingsItem(shape = shape, icon = Icons.Filled.Refresh, title = strings.verificationLoading)
+            }
+            return@SettingsGroup
+        }
+        sessions.forEach { device ->
+            item { shape ->
+                SessionRow(shape, strings, device, onVerify, onLogoutSession)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SessionRow(
+    shape: androidx.compose.ui.graphics.Shape,
+    strings: Strings,
+    device: DeviceSession,
+    onVerify: (String) -> Unit,
+    onLogoutSession: (String) -> Unit,
+) {
+    var expanded by remember(device.deviceId) { mutableStateOf(false) }
+    val trustLabel = when (device.trust) {
+        SessionTrust.VERIFIED -> strings.sessionVerified
+        SessionTrust.UNVERIFIED -> strings.sessionUnverified
+        SessionTrust.BLOCKED -> strings.sessionBlocked
+        SessionTrust.UNKNOWN -> strings.sessionUnknown
+    }
+    val subtitle = buildString {
+        append(device.deviceId)
+        append(" · ")
+        append(trustLabel)
+        if (device.isCurrent) {
+            append(" · ")
+            append(strings.sessionCurrent)
+        }
+        device.lastSeenIp?.let { append(" · $it") }
+    }
+    Column {
+        SettingsItem(
+            shape = shape,
+            icon = if (device.trust == SessionTrust.VERIFIED) Icons.Filled.CheckCircle else Icons.Filled.Warning,
+            title = device.displayName?.takeIf { it.isNotBlank() } ?: device.deviceId,
+            description = subtitle,
+            onClick = { expanded = !expanded },
+        ) {
+            if (device.trust == SessionTrust.VERIFIED) {
+                Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            }
+        }
+        if (expanded && !device.isCurrent) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (device.trust != SessionTrust.VERIFIED) {
+                    Button(onClick = { onVerify(device.deviceId) }, modifier = Modifier.weight(1f)) {
+                        Text(strings.verifySession)
+                    }
+                }
+                OutlinedButton(onClick = { onLogoutSession(device.deviceId) }, modifier = Modifier.weight(1f)) {
+                    Text(strings.logoutSession)
+                }
+            }
+        }
+    }
+}
+
+/** 輸入復原金鑰或密語的對話框。 */
+@Composable
+private fun SecretPromptDialog(
+    strings: Strings,
+    option: SelfVerificationOption,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var secret by remember { mutableStateOf("") }
+    val isPassphrase = option is SelfVerificationOption.Passphrase
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (isPassphrase) strings.verifyWithPassphrase else strings.verifyWithRecoveryKey) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    if (isPassphrase) strings.verifyWithPassphraseHint else strings.verifyWithRecoveryKeyHint,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = secret,
+                    onValueChange = { secret = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = !isPassphrase,
+                    label = { Text(if (isPassphrase) strings.passphrase else strings.recoveryKey) },
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = secret.isNotBlank(), onClick = { onConfirm(secret) }) {
+                Text(strings.verifyThisDevice)
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(strings.cancel) } },
+    )
+}
+
+/** 顯示剛產生的復原金鑰。這是唯一一次能看到它。 */
+@Composable
+private fun RecoveryKeyDialog(strings: Strings, recoveryKey: String, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(strings.recoveryKeyCreated) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(strings.recoveryKeyCreatedHint, style = MaterialTheme.typography.bodyMedium)
+                Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = MaterialTheme.shapes.medium) {
+                    Text(
+                        recoveryKey,
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.padding(12.dp),
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(strings.recoveryKeySaved) } },
+    )
 }
