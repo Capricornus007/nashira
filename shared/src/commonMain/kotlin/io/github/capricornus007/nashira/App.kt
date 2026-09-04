@@ -26,23 +26,56 @@ enum class SpaceIconMode {
 
 
 
-/** 全域 UI 狀態（記憶體態；P1 接 DataStore 持久化） */
-class UiState {
-    var language by mutableStateOf(AppLanguage.ZH_TW)
-    var themeMode by mutableStateOf(ThemeMode.FOLLOW_SYSTEM)
-    var dynamicColor by mutableStateOf(false)
+/**
+ * 全域 UI 狀態。每次變更都寫回磁碟（十來個純量，同步寫沒有負擔），
+ * 建構時先從磁碟載入，重啟後設定不再回到預設。
+ */
+class UiState(private val storage: SettingsStorage = SettingsStorage()) {
+    private val stored: Map<String, String> = runCatching { storage.load() }.getOrDefault(emptyMap())
+    private var loaded = false
+
+    var language by mutableStateOf(stored.enumOr("language", AppLanguage.ZH_TW))
+    var themeMode by mutableStateOf(stored.enumOr("themeMode", ThemeMode.FOLLOW_SYSTEM))
+    var dynamicColor by mutableStateOf(stored["dynamicColor"]?.toBooleanStrictOrNull() ?: false)
 
     /** Material You 配置（僅 Android 顯示；動態顏色開啟時以抽屜動畫展開） */
-    var paletteStyle by mutableStateOf(PaletteStyle.Expressive)
-    var specVersion by mutableStateOf(ColorSpec.SpecVersion.SPEC_2025)
-    var accent by mutableStateOf<ThemeAccent?>(null)
-    var spaceIconMode by mutableStateOf(SpaceIconMode.ROOM_PREVIEWS)
+    var paletteStyle by mutableStateOf(stored.enumOr("paletteStyle", PaletteStyle.Expressive))
+    var specVersion by mutableStateOf(stored.enumOr("specVersion", ColorSpec.SpecVersion.SPEC_2025))
+    var accent by mutableStateOf(stored["accent"]?.let { name -> ThemeAccent.entries.firstOrNull { it.name == name } })
+    var spaceIconMode by mutableStateOf(stored.enumOr("spaceIconMode", SpaceIconMode.ROOM_PREVIEWS))
 
     /** 聊天室列表與 Space 圖示上的未讀提示（白條／紅圈數字） */
-    var showUnreadIndicators by mutableStateOf(true)
+    var showUnreadIndicators by mutableStateOf(stored["showUnreadIndicators"]?.toBooleanStrictOrNull() ?: true)
     /** 聊天室列表第二行的最後一則訊息預覽 */
-    var showMessagePreview by mutableStateOf(true)
+    var showMessagePreview by mutableStateOf(stored["showMessagePreview"]?.toBooleanStrictOrNull() ?: true)
+
+    init {
+        loaded = true
+    }
+
+    /** 由 App 在每次重組時呼叫；值有變才寫磁碟。 */
+    internal fun persist() {
+        if (!loaded) return
+        val snapshot = mapOf(
+            "language" to language.name,
+            "themeMode" to themeMode.name,
+            "dynamicColor" to dynamicColor.toString(),
+            "paletteStyle" to paletteStyle.name,
+            "specVersion" to specVersion.name,
+            "spaceIconMode" to spaceIconMode.name,
+            "showUnreadIndicators" to showUnreadIndicators.toString(),
+            "showMessagePreview" to showMessagePreview.toString(),
+        ) + (accent?.let { mapOf("accent" to it.name) } ?: emptyMap())
+        if (snapshot == lastPersisted) return
+        lastPersisted = snapshot
+        runCatching { storage.save(snapshot) }
+    }
+
+    private var lastPersisted: Map<String, String>? = null
 }
+
+private inline fun <reified E : Enum<E>> Map<String, String>.enumOr(key: String, fallback: E): E =
+    this[key]?.let { name -> enumValues<E>().firstOrNull { entry -> entry.name == name } } ?: fallback
 
 val LocalUiState = staticCompositionLocalOf { UiState() }
 
@@ -55,6 +88,8 @@ fun App(defaultDark: Boolean? = null) {
         ThemeMode.DARK -> true
         ThemeMode.LIGHT -> false
     }
+    // 任一設定變更就寫回磁碟（persist 內部比對快照，值沒變不落盤）
+    ui.persist()
 
     // 種子來源（僅動態顏色開啟時）：色系覆寫 > 桌布種子；關閉＝品牌 Arcaea
     // （wallpaperSeedColor 內部已 remember 緩存；accent 是純值）
