@@ -2,7 +2,12 @@ package io.github.capricornus007.nashira
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.AnchoredDraggableDefaults
+import androidx.compose.foundation.gestures.AnchoredDraggableState
+import androidx.compose.foundation.gestures.DraggableAnchors
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.anchoredDraggable
+import androidx.compose.foundation.gestures.animateTo
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -16,24 +21,29 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.MutableStateFlow
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.AnimationSpec
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -43,6 +53,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.MoreVert
@@ -94,6 +106,13 @@ import kotlinx.coroutines.launch
 
 private val DiscordRailWidth = 72.dp
 private val DiscordChannelWidth = 286.dp
+
+/**
+ * 手機版訊息頁推進／退出的補間。用 spring 而不是 tween：手指放開時要接著當下的甩動速度收尾，
+ * 這樣「拖到一半放手」和「直接快滑」看起來是同一個動作。
+ */
+private val PaneSlideSpec: AnimationSpec<Float> =
+    spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow, visibilityThreshold = 0.5f)
 private val DiscordMemberWidth = 224.dp
 private val MessageGutterWidth = 52.dp
 
@@ -194,6 +213,7 @@ fun ChatScreen(
                     selected = selected,
                     mobileRoomOpen = mobileRoomOpen,
                     onSelect = { selected = it; mobileRoomOpen = true },
+                    onOpen = { mobileRoomOpen = true },
                     onBack = { mobileRoomOpen = false },
                     onSettings = { settingsOpen = true },
                     channelTitle = channelTitle,
@@ -264,6 +284,7 @@ private fun MobileChatShell(
     selected: RoomSummary?,
     mobileRoomOpen: Boolean,
     onSelect: (RoomSummary) -> Unit,
+    onOpen: () -> Unit,
     onBack: () -> Unit,
     onSettings: () -> Unit,
     channelTitle: String,
@@ -276,10 +297,53 @@ private fun MobileChatShell(
     // 退場動畫期間 selected 可能已清空；記住最後一間房間讓滑出動畫有內容
     var lastRoom by remember { mutableStateOf<RoomSummary?>(null) }
     if (selected != null) lastRoom = selected
-    Box(Modifier.fillMaxSize()) {
-        // 底層：Space 窄欄 + 聊天室清單 + 浮動帳號列
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val fullWidth = with(LocalDensity.current) { maxWidth.toPx() }
+        // 訊息頁的水平位移：0 = 完全蓋住清單，fullWidth = 收在右邊界外。
+        // 一定要用 AnchoredDraggableState：拖曳、甩動、收尾都跑在同一個 mutation scope 裡。
+        // 先前自己用 Animatable + draggable，每個 delta 都 launch 一次 snapTo，
+        // 放手瞬間殘留的 snapTo 會搶走 mutex 把收尾動畫取消，畫面就卡在半路——就是那個粘滯感。
+        val anchors = remember(fullWidth) {
+            DraggableAnchors {
+                ChatPane.Room at 0f
+                ChatPane.List at fullWidth
+            }
+        }
+        val paneState = remember {
+            AnchoredDraggableState(if (showTimeline) ChatPane.Room else ChatPane.List, anchors)
+        }
+        LaunchedEffect(anchors) { paneState.updateAnchors(anchors, paneState.targetValue) }
+        // 甩動交給 Foundation 的 fling behavior：帶速度衰減，快滑一下就過去，不必拖到一半
+        val paneFling = AnchoredDraggableDefaults.flingBehavior(paneState, { it * 0.4f }, PaneSlideSpec)
+        // 點選房間、返回鍵造成的狀態變化走補間；手勢自己的收尾由 fling behavior 負責
+        LaunchedEffect(showTimeline) {
+            val target = if (showTimeline) ChatPane.Room else ChatPane.List
+            if (paneState.targetValue != target) paneState.animateTo(target, PaneSlideSpec)
+        }
+        // 手勢把頁面推到底之後，把結果寫回外層狀態（返回鍵與已讀標記都看它）
+        LaunchedEffect(paneState) {
+            snapshotFlow { paneState.settledValue }
+                .distinctUntilChanged()
+                .collect { if (it == ChatPane.Room) onOpen() else onBack() }
+        }
+        // 訊息頁只在「還沒完全收回右邊界外」時組合。這個開關必須先用 snapshotFlow 收斂成布林，
+        // 直接在組合期讀 offset 會讓整個外殼每一幀重組（清單與時間線全部重跑）。
+        var timelineAttached by remember { mutableStateOf(showTimeline) }
+        LaunchedEffect(fullWidth) {
+            snapshotFlow { paneState.targetValue == ChatPane.Room || paneState.offset < fullWidth }
+                .distinctUntilChanged()
+                .collect { timelineAttached = it }
+        }
         Box(Modifier.fillMaxSize()) {
-            Row(Modifier.fillMaxSize()) {
+            // 底層：Space 窄欄 + 聊天室清單。手勢掛在這一層，浮動帳號底欄疊在它上面，所以底欄不吃手勢
+            Row(
+                Modifier.fillMaxSize().anchoredDraggable(
+                    state = paneState,
+                    orientation = Orientation.Horizontal,
+                    enabled = selected != null,
+                    flingBehavior = paneFling,
+                ),
+            ) {
                 ServerRail(
                     client = roomRepository.client,
                     spaces = spaces,
@@ -311,36 +375,34 @@ private fun MobileChatShell(
                 onSettings = onSettings,
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
-        }
-        // 上層：訊息時間線佔滿整個畫面（含 Space 欄），像 Discord／Telegram 那樣整頁推進
-        AnimatedVisibility(
-            visible = showTimeline,
-            enter = slideInHorizontally(animationSpec = tween(260, easing = FastOutSlowInEasing)) { it },
-            exit = slideOutHorizontally(animationSpec = tween(240, easing = FastOutSlowInEasing)) { it },
-        ) {
-            var dragDistance by remember(selected?.roomId) { mutableStateOf(0f) }
-            Box(
-                Modifier.fillMaxSize()
-                    .background(MaterialTheme.colorScheme.surface)
-                    .pointerInput(selected?.roomId) {
-                        // 右滑返回清單，和 Discord／Telegram 的手勢一致
-                        detectHorizontalDragGestures(
-                            onHorizontalDrag = { _, amount -> dragDistance += amount },
-                            onDragEnd = {
-                                if (dragDistance > 90f) onBack()
-                                dragDistance = 0f
-                            },
-                            onDragCancel = { dragDistance = 0f },
-                        )
-                    },
-            ) {
-                // 退場動畫期間 selected 可能已被清掉，用最後一個非空值維持畫面
+            // 上層：訊息頁整頁覆蓋（含 Space 欄），像 Discord／Telegram 那樣推上來
+            if (timelineAttached) {
                 val room = selected ?: lastRoom
-                if (room != null) TimelinePane(roomRepository, room, onBack = onBack)
+                if (room != null) {
+                    Box(
+                        Modifier.fillMaxSize()
+                            // translationX 只在繪製階段讀，位移不會觸發重組
+                            .graphicsLayer {
+                                translationX = paneState.offset.takeIf { !it.isNaN() } ?: fullWidth
+                                shadowElevation = 16.dp.toPx()
+                            }
+                            .background(MaterialTheme.colorScheme.surface)
+                            .anchoredDraggable(
+                                state = paneState,
+                                orientation = Orientation.Horizontal,
+                                flingBehavior = paneFling,
+                            ),
+                    ) {
+                        TimelinePane(roomRepository, room, onBack = onBack)
+                    }
+                }
             }
         }
     }
 }
+
+/** 手機版只有兩個定格位置：聊天室清單、訊息頁。 */
+private enum class ChatPane { List, Room }
 
 /**
  * Discord 式左側窄欄。每一格由「選取指示條 + 圖示」組成：
@@ -698,58 +760,98 @@ private fun RoomListItem(
     strings: io.github.capricornus007.nashira.i18n.Strings,
     onSelect: (RoomSummary) -> Unit,
 ) {
-    // 關閉預覽時不訂閱最後訊息流，省掉每個房間一條 timeline 收集
-    val preview = if (!showPreview) {
+    // 邀請中的房間不訂閱時間線（還沒加入，取不到訊息），也不能點進去
+    val preview = if (!showPreview || room.isInvite) {
         null
     } else {
         val previewFlow = remember(roomRepository, room.roomId) { roomRepository.lastMessage(room.roomId) }
         previewFlow.collectAsState(initial = null).value
     }
     val now = remember(room.lastActivity) { kotlin.time.Clock.System.now().toEpochMilliseconds() }
-    Row(
+    val scope = rememberCoroutineScope()
+    var inviteBusy by remember(room.roomId) { mutableStateOf(false) }
+    Column(
         Modifier.fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 2.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(if (selected) MaterialTheme.colorScheme.surfaceContainerHighest else Color.Transparent)
-            .clickable { onSelect(room) }
-            .padding(horizontal = 8.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .background(
+                when {
+                    room.isInvite -> MaterialTheme.colorScheme.surfaceContainer
+                    selected -> MaterialTheme.colorScheme.surfaceContainerHighest
+                    else -> Color.Transparent
+                },
+            )
+            .then(if (room.isInvite) Modifier else Modifier.clickable { onSelect(room) }),
     ) {
-        RoomAvatar(roomRepository, room, Modifier.size(44.dp).clip(CircleShape))
-        Column(Modifier.padding(start = 12.dp).weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    room.name,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = if (unread.unread) FontWeight.SemiBold else FontWeight.Normal,
-                    color = if (unread.unread) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    formatRelative(preview?.timestamp ?: room.lastActivity, now, strings),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                )
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                val line = preview?.let { "${it.senderName}: ${it.content}" }
-                    ?: strings.privateMessage.takeIf { room.isDirect && showPreview }
-                Text(
-                    line.orEmpty(),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
-                if (unread.count > 0) {
-                    Spacer(Modifier.width(8.dp))
-                    UnreadBadge(unread.count)
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RoomAvatar(roomRepository, room, Modifier.size(44.dp).clip(CircleShape))
+            Column(Modifier.padding(start = 12.dp).weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        room.name,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = if (unread.unread || room.isInvite) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (unread.unread || room.isInvite) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (!room.isInvite) {
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            formatRelative(preview?.timestamp ?: room.lastActivity, now, strings),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                    }
                 }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val line = when {
+                        room.isInvite -> strings.invited
+                        preview != null -> "${preview.senderName}: ${preview.content}"
+                        room.isDirect && showPreview -> strings.privateMessage
+                        else -> null
+                    }
+                    Text(
+                        line.orEmpty(),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (room.isInvite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (unread.count > 0 && !room.isInvite) {
+                        Spacer(Modifier.width(8.dp))
+                        UnreadBadge(unread.count)
+                    }
+                }
+            }
+        }
+        if (room.isInvite) {
+            Row(
+                Modifier.fillMaxWidth().padding(start = 68.dp, end = 12.dp, bottom = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    enabled = !inviteBusy,
+                    onClick = {
+                        inviteBusy = true
+                        scope.launch { roomRepository.acceptInvite(room.roomId); inviteBusy = false }
+                    },
+                    modifier = Modifier.weight(1f),
+                ) { Text(strings.acceptInvite) }
+                OutlinedButton(
+                    enabled = !inviteBusy,
+                    onClick = {
+                        inviteBusy = true
+                        scope.launch { roomRepository.declineInvite(room.roomId); inviteBusy = false }
+                    },
+                    modifier = Modifier.weight(1f),
+                ) { Text(strings.declineInvite) }
             }
         }
     }
@@ -836,9 +938,12 @@ private fun EmptyTimeline(message: String) {
 @Composable
 private fun TimelinePane(roomRepository: RoomRepository, room: RoomSummary, onBack: (() -> Unit)? = null) {
     val strings = stringsFor(LocalUiState.current.language)
-    // 時間線流一定要 remember：每次重組重建 Flow 會重啟收集，訊息瞬間清空就是進房閃爍的來源
-    val timeline = remember(roomRepository, room.roomId) { roomRepository.timeline(room.roomId) }
-    val messages by timeline.collectAsState(initial = null)
+    // 頁大小由畫面持有：往上滾到頭時加大，Trixnity 會自己往伺服器補抓更早的事件。
+    // 兩者都一定要 remember：重建 Flow 會重啟收集，訊息瞬間清空就是進房閃爍的來源
+    val maxSize = remember(room.roomId) { MutableStateFlow(TimelinePageSize) }
+    val timeline = remember(roomRepository, room.roomId) { roomRepository.timeline(room.roomId, maxSize) }
+    val page by timeline.collectAsState(initial = null)
+    val messages = page?.messages
     // 標題副行與輸入框都用房間真正的別名，沒有別名就用房間名，不再假造 "#一般"
     val aliasFlow = remember(roomRepository, room.roomId) { roomRepository.canonicalAlias(room.roomId) }
     val alias by aliasFlow.collectAsState(initial = null)
@@ -850,9 +955,36 @@ private fun TimelinePane(roomRepository: RoomRepository, room: RoomSummary, onBa
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
-    LaunchedEffect(messages?.size) {
-        val last = messages?.lastIndex ?: -1
-        if (last >= 0) listState.scrollToItem(last)
+    // reverseLayout 下 index 0 就是最新訊息（畫在最底部），新訊息到達時跳回底部
+    LaunchedEffect(messages?.firstOrNull()?.eventId) {
+        if (messages?.isNotEmpty() == true) listState.scrollToItem(0)
+    }
+
+    // 滾到最舊的一端（reverseLayout 下是視覺最上方）就再要一頁歷史。
+    // 判斷要用原始事件數（page.eventCount）而不是可顯示訊息數：房間裡的加入／改名事件會被過濾掉，
+    // 拿過濾後的數量比對 maxSize 永遠比不到，換頁條件就再也不會成立。
+    // 也必須用 snapshotFlow：derivedStateOf 搭 remember 會把當下的數量凍結在閉包裡，之後永遠拿舊值。
+    var loadingMore by remember(room.roomId) { mutableStateOf(false) }
+    LaunchedEffect(room.roomId, listState) {
+        snapshotFlow {
+            val events = page?.eventCount ?: 0
+            val shown = page?.messages?.size ?: 0
+            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            Triple(events, shown, lastVisible)
+        }
+            .distinctUntilChanged()
+            .collect { (events, shown, lastVisible) ->
+                val atOldest = shown > 0 && lastVisible >= shown - PrefetchThreshold
+                when {
+                    // 這一頁已被事件填滿（還有更早的）而且看到底了 → 加大視窗
+                    atOldest && events >= maxSize.value -> {
+                        loadingMore = true
+                        maxSize.value = events + TimelinePageSize
+                    }
+                    // 拿到的事件數少於要求數 = 已經到房間開頭，沒有更早的了
+                    events in 1 until maxSize.value -> loadingMore = false
+                }
+            }
     }
 
     // 日期分隔線需要「今天」的基準；房間切換時重算即可，不必每分鐘更新
@@ -889,26 +1021,37 @@ private fun TimelinePane(roomRepository: RoomRepository, room: RoomSummary, onBa
         bottomBar = {
             Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).navigationBarsPadding()) {
                 sendError?.let {
-                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp))
+                    Text(
+                        it,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
+                    )
                 }
-                // Discord 的輸入列是一顆圓角膠囊，左邊「+」、右邊送出，沒有外框線
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    shape = RoundedCornerShape(24.dp),
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                // Discord/SchildiChat 的輸入列：整條膠囊，左「+」右送出。
+                // 有草稿時送出鍵變成 primary 實心圓，空著時只是灰色圖示。
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = { }, modifier = Modifier.size(36.dp)) {
-                            Icon(Icons.Filled.Add, contentDescription = strings.add, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
+                    IconButton(onClick = { }, modifier = Modifier.size(44.dp)) {
+                        Icon(Icons.Filled.Add, contentDescription = strings.add, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        shape = RoundedCornerShape(22.dp),
+                        modifier = Modifier.weight(1f),
+                    ) {
                         BasicTextField(
                             value = draft,
                             onValueChange = { draft = it; sendError = null },
-                            modifier = Modifier.weight(1f).padding(horizontal = 6.dp),
+                            modifier = Modifier.fillMaxWidth()
+                                .heightIn(min = 44.dp)
+                                .padding(horizontal = 16.dp, vertical = 11.dp),
                             textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
                             cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                            maxLines = 5,
+                            maxLines = 6,
                             decorationBox = { inner ->
                                 if (draft.isEmpty()) {
                                     Text(
@@ -922,25 +1065,44 @@ private fun TimelinePane(roomRepository: RoomRepository, room: RoomSummary, onBa
                                 inner()
                             },
                         )
-                        IconButton(enabled = !sending && draft.isNotBlank(), onClick = {
-                            val body = draft.trim(); draft = ""; sending = true
-                            scope.launch {
-                                roomRepository.sendText(room.roomId, body).onFailure { draft = body; sendError = it.message ?: strings.sendFailed }
-                                sending = false
-                            }
-                        }, modifier = Modifier.size(36.dp)) {
-                            if (sending) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                            else Icon(Icons.Filled.Send, contentDescription = strings.send, tint = if (draft.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary)
+                    }
+                    val canSend = !sending && draft.isNotBlank()
+                    Box(
+                        Modifier.size(44.dp)
+                            .clip(CircleShape)
+                            .background(if (canSend) MaterialTheme.colorScheme.primary else Color.Transparent)
+                            .clickable(enabled = canSend) {
+                                val body = draft.trim(); draft = ""; sending = true
+                                scope.launch {
+                                    roomRepository.sendText(room.roomId, body)
+                                        .onFailure { draft = body; sendError = it.message ?: strings.sendFailed }
+                                    sending = false
+                                }
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (sending) {
+                            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(
+                                Icons.Filled.Send,
+                                contentDescription = strings.send,
+                                modifier = Modifier.size(20.dp),
+                                tint = if (canSend) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                     }
                 }
             }
         },
     ) { padding ->
+        // Trixnity 的 getLastTimelineEvents 回傳「新→舊」，所以用 reverseLayout：
+        // index 0（最新）畫在最底部，新訊息自然從下方長出來，跟 Discord/Telegram 一致。
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(bottom = 12.dp),
+            contentPadding = PaddingValues(vertical = 12.dp),
+            reverseLayout = true,
         ) {
             val loaded = messages
             when {
@@ -954,18 +1116,34 @@ private fun TimelinePane(roomRepository: RoomRepository, room: RoomSummary, onBa
                     )
                 }
                 else -> itemsIndexed(loaded, key = { _, msg -> msg.eventId?.full ?: msg.timestamp }) { index, msg ->
-                    val previous = loaded.getOrNull(index - 1)
-                    val newDay = previous == null || localDateOf(previous.timestamp) != localDateOf(msg.timestamp)
+                    // reverseLayout 下視覺上「上一則」是索引 +1（時間更早的那一則）
+                    val earlier = loaded.getOrNull(index + 1)
+                    val newDay = earlier == null || localDateOf(earlier.timestamp) != localDateOf(msg.timestamp)
                     // Discord 的分組規則：同一人連續發言且未跨日、間隔小於 7 分鐘 → 只顯示訊息本體
-                    val grouped = !newDay && previous != null && previous.sender == msg.sender &&
-                        msg.timestamp - previous.timestamp < GroupingWindowMillis
-                    if (newDay) DateDivider(formatDateDivider(msg.timestamp, today, strings))
+                    val grouped = !newDay && earlier != null && earlier.sender == msg.sender &&
+                        msg.timestamp - earlier.timestamp < GroupingWindowMillis
                     MessageRow(
                         client = roomRepository.client,
                         msg = msg,
                         grouped = grouped,
                         strings = strings,
                     )
+                    // 分隔線畫在這則訊息「上方」，reverseLayout 下要在 MessageRow 之後發出
+                    if (newDay) DateDivider(formatDateDivider(msg.timestamp, today, strings))
+                }
+            }
+            // reverseLayout 下最後發出的項目在視覺最上方：正在補歷史時擺一顆轉圈
+            if (loadingMore && messages?.isNotEmpty() == true) {
+                item {
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text(strings.loadingMore, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
         }
@@ -974,6 +1152,12 @@ private fun TimelinePane(roomRepository: RoomRepository, room: RoomSummary, onBa
 
 /** 兩則訊息合併顯示的最大間隔，對齊 Discord 的 7 分鐘。 */
 private const val GroupingWindowMillis = 7 * 60 * 1000L
+
+/** 一次要幾則訊息；往上滾到頭就再加一頁。 */
+private const val TimelinePageSize = 50
+
+/** 還剩幾則就開始預抓下一頁，避免滾到底才卡一下。 */
+private const val PrefetchThreshold = 10
 
 /** Discord 式日期分隔線：兩側細線、中央日期。 */
 @Composable

@@ -66,6 +66,13 @@ interface Strings {
     val messagePreviewHint: String
     val updatingRooms: String
     val membersCount: String
+    val showSecret: String
+    val hideSecret: String
+    val acceptInvite: String
+    val declineInvite: String
+    val invited: String
+    val loadMore: String
+    val loadingMore: String
     val verificationDoneHint: String
     val verificationLoading: String
     val verificationNotReady: String
@@ -209,6 +216,13 @@ object ZhTwStrings : Strings {
     override val restoringSession = "正在載入本機資料…"
     override val updatingRooms = "正在更新訊息…"
     override val membersCount = "成員 · %d"
+    override val showSecret = "顯示內容"
+    override val hideSecret = "隱藏內容"
+    override val acceptInvite = "接受邀請"
+    override val declineInvite = "拒絕"
+    override val invited = "邀請你加入"
+    override val loadMore = "載入更早的訊息"
+    override val loadingMore = "正在載入…"
     override val verificationDoneHint = "此裝置已交叉簽署，其他客戶端會顯示為已驗證。"
     override val verificationLoading = "正在讀取驗證狀態…"
     override val verificationNotReady = "尚未就緒"
@@ -336,6 +350,13 @@ object EnStrings : Strings {
     override val restoringSession = "Loading local data…"
     override val updatingRooms = "Updating messages…"
     override val membersCount = "Members · %d"
+    override val showSecret = "Show"
+    override val hideSecret = "Hide"
+    override val acceptInvite = "Accept"
+    override val declineInvite = "Decline"
+    override val invited = "Invited you"
+    override val loadMore = "Load earlier messages"
+    override val loadingMore = "Loading…"
     override val verificationDoneHint = "This device is cross-signed and shows as verified elsewhere."
     override val verificationLoading = "Loading verification state…"
     override val verificationNotReady = "Not ready yet"

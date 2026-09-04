@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
@@ -43,6 +44,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import de.connect2x.trixnity.client.verification.ActiveSasVerificationMethod
@@ -492,6 +496,8 @@ private fun SecretPromptDialog(
     onConfirm: (String) -> Unit,
 ) {
     var secret by remember { mutableStateOf("") }
+    // 密語與復原金鑰預設遮蔽，右側眼睛可切明文
+    var revealed by remember { mutableStateOf(false) }
     val isPassphrase = option is SelfVerificationOption.Passphrase
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -507,8 +513,17 @@ private fun SecretPromptDialog(
                     value = secret,
                     onValueChange = { secret = it },
                     modifier = Modifier.fillMaxWidth(),
-                    singleLine = !isPassphrase,
+                    singleLine = true,
                     label = { Text(if (isPassphrase) strings.passphrase else strings.recoveryKey) },
+                    visualTransformation = if (revealed) VisualTransformation.None else PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    trailingIcon = {
+                        PasswordVisibilityToggle(
+                            visible = revealed,
+                            contentDescription = if (revealed) strings.hideSecret else strings.showSecret,
+                            onToggle = { revealed = !revealed },
+                        )
+                    },
                 )
             }
         },

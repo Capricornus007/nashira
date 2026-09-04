@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.first
 import de.connect2x.trixnity.core.model.EventId
 import de.connect2x.trixnity.core.model.RoomId
 import de.connect2x.trixnity.core.model.UserId
+import kotlinx.coroutines.flow.MutableStateFlow
 import de.connect2x.trixnity.core.model.events.m.room.CanonicalAliasEventContent
 import de.connect2x.trixnity.core.model.events.m.room.CreateEventContent
 import de.connect2x.trixnity.core.model.events.m.room.Membership
@@ -38,6 +39,8 @@ data class RoomSummary(
     val roomId: RoomId,
     val name: String,
     val isDirect: Boolean,
+    /** 只是被邀請、還沒加入；清單上顯示接受／拒絕 */
+    val isInvite: Boolean = false,
     val avatarUrl: String? = null,
     /** 房間沒有自己的頭像時，用這些成員的頭像代替（私訊就是對方） */
     val heroes: List<UserId> = emptyList(),
@@ -82,12 +85,22 @@ data class TimelineMessage(
 )
 
 /**
+ * 時間線的一頁。[eventCount] 是這一頁實際拿到的原始事件數（含不可顯示的成員／狀態事件）：
+ * 它到頂了才代表還有更早的歷史可以要，比對 [messages].size 會因為過濾而永遠不成立。
+ */
+data class TimelinePage(
+    val messages: List<TimelineMessage>,
+    val eventCount: Int,
+)
+
+/**
  * 房間數據門面：把 MatrixClient 的 store 流轉成 UI 直接可用的摘要/時間線。
  */
 class RoomRepository(val client: MatrixClient) {
 
-    /** 已加入的房間才進清單；invite 待通知處理，leave/ban 不顯示。 */
-    private fun visible(room: Room): Boolean = room.membership == Membership.JOIN
+    /** 清單顯示已加入與被邀請的房間；leave/ban/knock 不顯示。 */
+    private fun visible(room: Room): Boolean =
+        room.membership == Membership.JOIN || room.membership == Membership.INVITE
 
     private fun isSpace(room: Room): Boolean = room.type is CreateEventContent.RoomType.Space
 
@@ -99,6 +112,18 @@ class RoomRepository(val client: MatrixClient) {
 
     private fun joinedRooms(): Flow<List<Room>> =
         client.room.getAll().flattenValues().map { rooms -> rooms.filter(::visible) }
+
+    /** 接受邀請。加入後 sync 會把房間轉成 JOIN，清單自動更新。 */
+    suspend fun acceptInvite(roomId: RoomId): Result<Unit> = runCatching {
+        client.api.room.joinRoom(roomId).getOrThrow()
+        Unit
+    }
+
+    /** 拒絕邀請：離開房間並忘記它，避免它繼續留在清單裡。 */
+    suspend fun declineInvite(roomId: RoomId): Result<Unit> = runCatching {
+        client.api.room.leaveRoom(roomId).getOrThrow()
+        client.room.forgetRoom(roomId)
+    }
 
     /**
      * 房間與 Matrix Space 的從屬關係。
@@ -187,6 +212,7 @@ class RoomRepository(val client: MatrixClient) {
         roomId = room.roomId,
         name = displayNameOf(room),
         isDirect = room.isDirect,
+        isInvite = room.membership == Membership.INVITE,
         avatarUrl = room.avatarUrl,
         heroes = room.name?.heroes.orEmpty(),
         lastActivity = room.lastRelevantEventTimestamp?.toEpochMilliseconds() ?: 0L,
@@ -241,30 +267,37 @@ class RoomRepository(val client: MatrixClient) {
             .flowOn(Dispatchers.Default)
 
     /**
-     * 指定房間的最新時間線訊息流。發送者顯示名與頭像來自房間成員狀態，
+     * 指定房間的最新時間線。發送者顯示名與頭像來自房間成員狀態，
      * 成員資料補齊後訊息會自動換上真名，不再只顯示 Matrix ID 的 localpart。
+     *
+     * 回傳順序是「新 → 舊」（索引 0 最新）。[maxSize] 由呼叫端持有：往上滾到頭時把它加大，
+     * Trixnity 會自己往伺服器補抓更早的事件，這就是「載入更多歷史」。
      */
-    fun timeline(roomId: RoomId, limit: Int = 50): Flow<List<TimelineMessage>> =
+    fun timeline(roomId: RoomId, maxSize: MutableStateFlow<Int>): Flow<TimelinePage> =
         combine(
-            client.room.getLastTimelineEvents(roomId)
-                .toFlowList(kotlinx.coroutines.flow.MutableStateFlow(limit)),
+            client.room.getLastTimelineEvents(roomId).toFlowList(maxSize),
             memberMap(roomId),
         ) { eventFlows, members ->
-            eventFlows.mapNotNull { eventFlow ->
-                val timelineEvent = eventFlow.first()
-                val roomEvent = timelineEvent.event
-                val member = members[roomEvent.sender]
-                TimelineMessage(
-                    eventId = roomEvent.id,
-                    roomId = roomId,
-                    sender = roomEvent.sender,
-                    senderName = member?.name.visibleNameOrNull()
-                        ?: roomEvent.sender.full.removePrefix("@").substringBefore(':'),
-                    senderAvatarUrl = member?.event?.content?.avatarUrl,
-                    content = timelineEvent.bodyOrNull() ?: return@mapNotNull null,
-                    timestamp = roomEvent.originTimestamp,
-                )
-            }
+            TimelinePage(
+                // 原始事件數要在過濾前算：房間裡大量加入／改名事件不可顯示，
+                // 用過濾後的訊息數去比對 maxSize 永遠比不到，換頁條件就再也不會成立。
+                eventCount = eventFlows.size,
+                messages = eventFlows.mapNotNull { eventFlow ->
+                    val timelineEvent = eventFlow.first()
+                    val roomEvent = timelineEvent.event
+                    val member = members[roomEvent.sender]
+                    TimelineMessage(
+                        eventId = roomEvent.id,
+                        roomId = roomId,
+                        sender = roomEvent.sender,
+                        senderName = member?.name.visibleNameOrNull()
+                            ?: roomEvent.sender.full.removePrefix("@").substringBefore(':'),
+                        senderAvatarUrl = member?.event?.content?.avatarUrl,
+                        content = timelineEvent.bodyOrNull() ?: return@mapNotNull null,
+                        timestamp = roomEvent.originTimestamp,
+                    )
+                },
+            )
         }.flowOn(Dispatchers.Default)
 
     /** 聊天室清單的最後一則訊息預覽（含發送者），對齊 Discord 的兩行列。 */

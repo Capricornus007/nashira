@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import io.github.capricornus007.nashira.i18n.stringsFor
 import io.github.capricornus007.nashira.matrix.MatrixEngine
@@ -36,6 +37,7 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
     var password by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var passwordRevealed by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     Column(
@@ -76,8 +78,15 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
             label = { Text(strings.loginPassword) },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
+            visualTransformation = if (passwordRevealed) VisualTransformation.None else PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            trailingIcon = {
+                PasswordVisibilityToggle(
+                    visible = passwordRevealed,
+                    contentDescription = if (passwordRevealed) strings.hideSecret else strings.showSecret,
+                    onToggle = { passwordRevealed = !passwordRevealed },
+                )
+            },
         )
         error?.let {
             Text(
