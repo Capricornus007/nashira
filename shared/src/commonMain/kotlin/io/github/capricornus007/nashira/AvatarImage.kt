@@ -2,7 +2,7 @@ package io.github.capricornus007.nashira
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -15,6 +15,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.min
+import androidx.compose.ui.unit.sp
 import de.connect2x.trixnity.client.MatrixClient
 import de.connect2x.trixnity.client.media.MediaService
 
@@ -44,14 +48,24 @@ fun AvatarImage(
     val loaded = bitmap
     if (loaded != null) {
         Image(bitmap = loaded, contentDescription = null, modifier = modifier, contentScale = ContentScale.Crop)
-    } else {
-        Box(modifier = modifier.background(MaterialTheme.colorScheme.secondaryContainer), contentAlignment = Alignment.Center) {
-            Text(
-                fallback.trimStart('#', '!', '@').take(1).uppercase(),
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                style = MaterialTheme.typography.labelLarge,
-            )
-        }
+        return
+    }
+    // 字母佔位的字級必須跟著容器縮放：固定 labelLarge 在 17dp 的資料夾預覽格裡會被裁掉半個字
+    BoxWithConstraints(
+        modifier = modifier.background(MaterialTheme.colorScheme.secondaryContainer),
+        contentAlignment = Alignment.Center,
+    ) {
+        val diameter = min(maxWidth, maxHeight)
+        Text(
+            fallback.trimStart('#', '!', '@').take(1).uppercase(),
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+            fontSize = (diameter.value * 0.44f).sp,
+            lineHeight = (diameter.value * 0.52f).sp,
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            softWrap = false,
+        )
     }
 }
 

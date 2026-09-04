@@ -37,6 +37,11 @@ class UiState {
     var specVersion by mutableStateOf(ColorSpec.SpecVersion.SPEC_2025)
     var accent by mutableStateOf<ThemeAccent?>(null)
     var spaceIconMode by mutableStateOf(SpaceIconMode.ROOM_PREVIEWS)
+
+    /** 聊天室列表與 Space 圖示上的未讀提示（白條／紅圈數字） */
+    var showUnreadIndicators by mutableStateOf(true)
+    /** 聊天室列表第二行的最後一則訊息預覽 */
+    var showMessagePreview by mutableStateOf(true)
 }
 
 val LocalUiState = staticCompositionLocalOf { UiState() }

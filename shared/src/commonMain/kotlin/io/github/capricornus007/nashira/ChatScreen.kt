@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -20,13 +21,24 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.offset
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -39,6 +51,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -60,6 +73,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -69,6 +83,8 @@ import io.github.capricornus007.nashira.i18n.stringsFor
 import io.github.capricornus007.nashira.matrix.MatrixSession
 import io.github.capricornus007.nashira.matrix.RoomRepository
 import io.github.capricornus007.nashira.matrix.RoomSummary
+import de.connect2x.trixnity.core.model.RoomId
+import io.github.capricornus007.nashira.matrix.UnreadState
 import io.github.capricornus007.nashira.matrix.SpaceSummary
 import io.github.capricornus007.nashira.matrix.SpacesSnapshot
 import io.github.capricornus007.nashira.matrix.TimelineMessage
@@ -79,6 +95,7 @@ import kotlinx.coroutines.launch
 private val DiscordRailWidth = 72.dp
 private val DiscordChannelWidth = 286.dp
 private val DiscordMemberWidth = 224.dp
+private val MessageGutterWidth = 52.dp
 
 /** Discord／Matrix Spaces 式主畫面：Space 欄、聊天室欄、訊息區與成員欄。 */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -109,6 +126,9 @@ fun ChatScreen(
             }
         }
     }
+    // 未讀提示與訊息預覽都可在設定關掉
+    val showUnread = LocalUiState.current.showUnreadIndicators
+    val showPreview = LocalUiState.current.showMessagePreview
     val summaries = selectedSpace?.let { space -> snapshot.rooms.filter { space.roomId in it.spaceIds } }
         ?: snapshot.rooms
     val channelTitle = selectedSpace?.name ?: strings.allRooms
@@ -119,69 +139,110 @@ fun ChatScreen(
                 .take(4)
         }
     }
+    // Space 的徽章是其子聊天室未讀的總和；首頁格顯示所有房間的總和（對齊 Discord 資料夾）
+    val unreadFlow = remember(roomRepository) { roomRepository.unreadByRoom() }
+    val allUnread by unreadFlow.collectAsState(initial = emptyMap())
+    // 關閉未讀提示時直接給空 map，白條與紅圈就都不畫
+    val unreadByRoom = if (showUnread) allUnread else emptyMap()
+    val unreadBySpace = remember(snapshot, unreadByRoom) {
+        snapshot.spaces.associate { space ->
+            space.roomId to snapshot.rooms
+                .filter { space.roomId in it.spaceIds }
+                .fold(UnreadState()) { acc, room ->
+                    val state = unreadByRoom[room.roomId] ?: UnreadState()
+                    UnreadState(acc.unread || state.unread, acc.count + state.count)
+                }
+        }
+    }
+    val homeUnread = remember(unreadByRoom) {
+        unreadByRoom.values.fold(UnreadState()) { acc, state ->
+            UnreadState(acc.unread || state.unread, acc.count + state.count)
+        }
+    }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val compact = maxWidth < 720.dp
         PlatformBackHandler(enabled = settingsOpen) { settingsOpen = false }
         PlatformBackHandler(enabled = !settingsOpen && compact && mobileRoomOpen) { mobileRoomOpen = false }
-        if (settingsOpen) {
-            SettingsScreen(session, { settingsOpen = false }, onLogout)
-        } else if (compact) {
-            MobileChatShell(
-                roomRepository = roomRepository,
-                spaces = snapshot.spaces,
-                spaceRooms = spaceRooms,
-                selectedSpace = selectedSpace,
-                spaceIconMode = spaceIconMode,
-                onSelectSpace = { selectedSpace = it; selected = null; mobileRoomOpen = false },
-                summaries = summaries,
-                selected = selected,
-                mobileRoomOpen = mobileRoomOpen,
-                onSelect = { selected = it; mobileRoomOpen = true },
-                onBack = { mobileRoomOpen = false },
-                onSettings = { settingsOpen = true },
-                channelTitle = channelTitle,
-                accountId = accountId,
-                strings = strings,
-                syncState = syncState,
-                initialSyncDone = initialSyncDone,
-            )
-        } else {
-            Row(Modifier.fillMaxSize()) {
-                Box(Modifier.width(DiscordRailWidth + DiscordChannelWidth).fillMaxHeight()) {
-                    Row(Modifier.fillMaxSize()) {
-                        ServerRail(
+        // Discord 的使用者設定是從底部推上來的整頁，返回時往下退出
+        AnimatedContent(
+            targetState = settingsOpen,
+            transitionSpec = {
+                if (targetState) {
+                    slideInVertically { it } togetherWith slideOutVertically { -it / 8 }
+                } else {
+                    slideInVertically { -it / 8 } togetherWith slideOutVertically { it }
+                }
+            },
+            label = "settings_navigation",
+        ) { showSettings ->
+            if (showSettings) {
+                SettingsScreen(session, { settingsOpen = false }, onLogout)
+            } else if (compact) {
+                MobileChatShell(
+                    roomRepository = roomRepository,
+                    spaces = snapshot.spaces,
+                    spaceRooms = spaceRooms,
+                    selectedSpace = selectedSpace,
+                    spaceIconMode = spaceIconMode,
+                    unreadBySpace = unreadBySpace,
+                    homeUnread = homeUnread,
+                    unreadByRoom = unreadByRoom,
+                    showPreview = showPreview,
+                    onSelectSpace = { selectedSpace = it; selected = null; mobileRoomOpen = false },
+                    summaries = summaries,
+                    selected = selected,
+                    mobileRoomOpen = mobileRoomOpen,
+                    onSelect = { selected = it; mobileRoomOpen = true },
+                    onBack = { mobileRoomOpen = false },
+                    onSettings = { settingsOpen = true },
+                    channelTitle = channelTitle,
+                    accountId = accountId,
+                    strings = strings,
+                    syncState = syncState,
+                    initialSyncDone = initialSyncDone,
+                )
+            } else {
+                Row(Modifier.fillMaxSize()) {
+                    Box(Modifier.width(DiscordRailWidth + DiscordChannelWidth).fillMaxHeight()) {
+                        Row(Modifier.fillMaxSize()) {
+                            ServerRail(
+                                client = session.client,
+                                spaces = snapshot.spaces,
+                                spaceRooms = spaceRooms,
+                                selectedSpace = selectedSpace,
+                                iconMode = spaceIconMode,
+                                unreadBySpace = unreadBySpace,
+                                homeUnread = homeUnread,
+                                onSelectSpace = { selectedSpace = it; selected = null },
+                            )
+                            ChannelPane(
+                                roomRepository = roomRepository,
+                                modifier = Modifier.width(DiscordChannelWidth),
+                                summaries = summaries,
+                                selected = selected,
+                                unreadByRoom = unreadByRoom,
+                                showPreview = showPreview,
+                                onSelect = { selected = it },
+                                channelTitle = channelTitle,
+                                strings = strings,
+                                syncState = syncState,
+                                initialSyncDone = initialSyncDone,
+                            )
+                        }
+                        AccountBar(
                             client = session.client,
-                            spaces = snapshot.spaces,
-                            spaceRooms = spaceRooms,
-                            selectedSpace = selectedSpace,
-                            iconMode = spaceIconMode,
-                            onSelectSpace = { selectedSpace = it; selected = null },
-                        )
-                        ChannelPane(
-                            roomRepository = roomRepository,
-                            modifier = Modifier.width(DiscordChannelWidth),
-                            summaries = summaries,
-                            selected = selected,
-                            onSelect = { selected = it },
-                            channelTitle = channelTitle,
-                            strings = strings,
-                            syncState = syncState,
-                            initialSyncDone = initialSyncDone,
+                            accountId = accountId,
+                            onSettings = { settingsOpen = true },
+                            modifier = Modifier.align(Alignment.BottomCenter),
                         )
                     }
-                    AccountBar(
-                        client = session.client,
-                        accountId = accountId,
-                        onSettings = { settingsOpen = true },
-                        modifier = Modifier.align(Alignment.BottomCenter),
-                    )
+                    Box(Modifier.weight(1f).fillMaxHeight()) {
+                        selected?.let { TimelinePane(roomRepository, it) }
+                            ?: EmptyTimeline(strings.noRoomSelected)
+                    }
+                    MemberPane(session, roomRepository, selected)
                 }
-                Box(Modifier.weight(1f).fillMaxHeight()) {
-                    selected?.let { TimelinePane(roomRepository, it) }
-                        ?: EmptyTimeline(strings.noRoomSelected)
-                }
-                MemberPane(session, roomRepository, selected)
             }
         }
     }
@@ -194,6 +255,10 @@ private fun MobileChatShell(
     spaceRooms: Map<String, List<RoomSummary>>,
     selectedSpace: SpaceSummary?,
     spaceIconMode: SpaceIconMode,
+    unreadBySpace: Map<RoomId, UnreadState>,
+    homeUnread: UnreadState,
+    unreadByRoom: Map<RoomId, UnreadState>,
+    showPreview: Boolean,
     onSelectSpace: (SpaceSummary?) -> Unit,
     summaries: List<RoomSummary>,
     selected: RoomSummary?,
@@ -207,62 +272,39 @@ private fun MobileChatShell(
     syncState: SyncState,
     initialSyncDone: Boolean,
 ) {
-    var horizontalDistance by remember { mutableStateOf(0f) }
+    val showTimeline = mobileRoomOpen && selected != null
+    // 退場動畫期間 selected 可能已清空；記住最後一間房間讓滑出動畫有內容
+    var lastRoom by remember { mutableStateOf<RoomSummary?>(null) }
+    if (selected != null) lastRoom = selected
     Box(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxSize()) {
-        ServerRail(
-            client = roomRepository.client,
-            spaces = spaces,
-            spaceRooms = spaceRooms,
-            selectedSpace = selectedSpace,
-            iconMode = spaceIconMode,
-            onSelectSpace = onSelectSpace,
-            modifier = Modifier.statusBarsPadding(),
-        )
-        AnimatedContent(
-            targetState = mobileRoomOpen && selected != null,
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight()
-                .pointerInput(mobileRoomOpen, selected) {
-                    detectHorizontalDragGestures(
-                        onHorizontalDrag = { _, amount -> horizontalDistance += amount },
-                        onDragEnd = {
-                            if (horizontalDistance < -80f && !mobileRoomOpen && selected != null) onSelect(selected)
-                            if (horizontalDistance > 80f && mobileRoomOpen) onBack()
-                            horizontalDistance = 0f
-                        },
-                        onDragCancel = { horizontalDistance = 0f },
-                    )
-                },
-            transitionSpec = {
-                // 只做左右滑動：疊加淡入淡出會讓兩頁同時半透明，看起來像閃一下空白
-                if (targetState) {
-                    slideInHorizontally { it } togetherWith slideOutHorizontally { -it / 4 }
-                } else {
-                    slideInHorizontally { -it / 4 } togetherWith slideOutHorizontally { it }
-                }
-            },
-            label = "mobile_chat_navigation",
-        ) { showTimeline ->
-            if (showTimeline && selected != null) {
-                TimelinePane(roomRepository, selected, onBack = onBack)
-            } else {
+        // 底層：Space 窄欄 + 聊天室清單 + 浮動帳號列
+        Box(Modifier.fillMaxSize()) {
+            Row(Modifier.fillMaxSize()) {
+                ServerRail(
+                    client = roomRepository.client,
+                    spaces = spaces,
+                    spaceRooms = spaceRooms,
+                    selectedSpace = selectedSpace,
+                    iconMode = spaceIconMode,
+                    unreadBySpace = unreadBySpace,
+                    homeUnread = homeUnread,
+                    onSelectSpace = onSelectSpace,
+                    modifier = Modifier.statusBarsPadding(),
+                )
                 ChannelPane(
                     roomRepository = roomRepository,
                     summaries = summaries,
                     selected = selected,
+                    unreadByRoom = unreadByRoom,
+                    showPreview = showPreview,
                     onSelect = onSelect,
                     channelTitle = channelTitle,
                     strings = strings,
                     syncState = syncState,
                     initialSyncDone = initialSyncDone,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
                 )
             }
-        }
-        }
-        if (!mobileRoomOpen) {
             AccountBar(
                 client = roomRepository.client,
                 accountId = accountId,
@@ -270,9 +312,41 @@ private fun MobileChatShell(
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
+        // 上層：訊息時間線佔滿整個畫面（含 Space 欄），像 Discord／Telegram 那樣整頁推進
+        AnimatedVisibility(
+            visible = showTimeline,
+            enter = slideInHorizontally(animationSpec = tween(260, easing = FastOutSlowInEasing)) { it },
+            exit = slideOutHorizontally(animationSpec = tween(240, easing = FastOutSlowInEasing)) { it },
+        ) {
+            var dragDistance by remember(selected?.roomId) { mutableStateOf(0f) }
+            Box(
+                Modifier.fillMaxSize()
+                    .background(MaterialTheme.colorScheme.surface)
+                    .pointerInput(selected?.roomId) {
+                        // 右滑返回清單，和 Discord／Telegram 的手勢一致
+                        detectHorizontalDragGestures(
+                            onHorizontalDrag = { _, amount -> dragDistance += amount },
+                            onDragEnd = {
+                                if (dragDistance > 90f) onBack()
+                                dragDistance = 0f
+                            },
+                            onDragCancel = { dragDistance = 0f },
+                        )
+                    },
+            ) {
+                // 退場動畫期間 selected 可能已被清掉，用最後一個非空值維持畫面
+                val room = selected ?: lastRoom
+                if (room != null) TimelinePane(roomRepository, room, onBack = onBack)
+            }
+        }
     }
 }
 
+/**
+ * Discord 式左側窄欄。每一格由「選取指示條 + 圖示」組成：
+ * 選中時左緣是一根高 40dp 的白色圓角短條，只有未讀時是 8dp 的小圓點，兩者都沒有就不畫。
+ * 圖示本身選中時圓角收成 16dp（方形感），未選中是整圓，切換時做形狀補間。
+ */
 @Composable
 private fun ServerRail(
     client: de.connect2x.trixnity.client.MatrixClient,
@@ -280,50 +354,166 @@ private fun ServerRail(
     spaceRooms: Map<String, List<RoomSummary>>,
     selectedSpace: SpaceSummary?,
     iconMode: SpaceIconMode,
+    unreadBySpace: Map<RoomId, UnreadState>,
+    homeUnread: UnreadState,
     onSelectSpace: (SpaceSummary?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
         modifier = modifier.width(DiscordRailWidth).fillMaxHeight()
-            .background(MaterialTheme.colorScheme.surfaceContainerLowest)
-            .padding(vertical = 12.dp),
+            .background(MaterialTheme.colorScheme.surfaceContainerLowest),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        ServerIcon("全", selectedSpace == null, onClick = { onSelectSpace(null) })
         LazyColumn(
             modifier = Modifier.weight(1f).fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
-            contentPadding = PaddingValues(vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(top = 10.dp, bottom = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            items(spaces, key = { it.roomId.full }) { space ->
-                SpaceIcon(
-                    client = client,
-                    space = space,
-                    rooms = spaceRooms[space.roomId.full].orEmpty(),
-                    iconMode = iconMode,
-                    selected = selectedSpace?.roomId == space.roomId,
-                ) { onSelectSpace(space) }
+            item {
+                RailSlot(selected = selectedSpace == null, unread = homeUnread, onClick = { onSelectSpace(null) }) { shape ->
+                    Box(
+                        Modifier.size(RailIconSize).clip(shape)
+                            .background(if (selectedSpace == null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.Home,
+                            contentDescription = null,
+                            tint = if (selectedSpace == null) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+                }
             }
-            item { ServerIcon("+", false, onClick = { }) }
+            item { RailSeparator() }
+            items(spaces, key = { it.roomId.full }) { space ->
+                val unread = unreadBySpace[space.roomId] ?: UnreadState()
+                RailSlot(
+                    selected = selectedSpace?.roomId == space.roomId,
+                    unread = unread,
+                    onClick = { onSelectSpace(space) },
+                ) { shape ->
+                    SpaceIcon(
+                        client = client,
+                        space = space,
+                        rooms = spaceRooms[space.roomId.full].orEmpty(),
+                        iconMode = iconMode,
+                        shape = shape,
+                    )
+                }
+            }
+            item {
+                RailSlot(selected = false, unread = UnreadState(), onClick = { }) { _ ->
+                    Box(
+                        Modifier.size(RailIconSize).clip(RoundedCornerShape(RailIdleCorner))
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Filled.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+                    }
+                }
+            }
         }
     }
 }
 
+private val RailIconSize = 48.dp
+private val RailIdleCorner = 24.dp
+private val RailSelectedCorner = 16.dp
+
+/** 左緣指示器 + 圖示 + 右下未讀徽章的組合槽位。 */
 @Composable
-private fun ServerIcon(label: String, selected: Boolean, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier.size(44.dp).clip(RoundedCornerShape(if (selected) 14.dp else 22.dp)).clickable(onClick = onClick)
-            .background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(label, color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-            style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+private fun RailSlot(
+    selected: Boolean,
+    unread: UnreadState,
+    onClick: () -> Unit,
+    content: @Composable (shape: RoundedCornerShape) -> Unit,
+) {
+    val corner by animateDpAsState(
+        targetValue = if (selected) RailSelectedCorner else RailIdleCorner,
+        animationSpec = tween(180, easing = FastOutSlowInEasing),
+        label = "rail_corner",
+    )
+    // 指示條：選中 40dp、僅未讀 8dp、其他 0dp（0dp 時不繪製）
+    val pillHeight by animateDpAsState(
+        targetValue = when {
+            selected -> 40.dp
+            unread.unread -> 8.dp
+            else -> 0.dp
+        },
+        animationSpec = tween(180, easing = FastOutSlowInEasing),
+        label = "rail_pill",
+    )
+    Box(Modifier.fillMaxWidth().height(56.dp), contentAlignment = Alignment.Center) {
+        if (pillHeight > 0.dp) {
+            Box(
+                Modifier.align(Alignment.CenterStart)
+                    .padding(start = 0.dp)
+                    .width(4.dp)
+                    .height(pillHeight)
+                    .clip(RoundedCornerShape(topEnd = 4.dp, bottomEnd = 4.dp))
+                    .background(MaterialTheme.colorScheme.onSurface),
+            )
+        }
+        Box(Modifier.clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+            content(RoundedCornerShape(corner))
+            if (unread.count > 0) {
+                UnreadBadge(
+                    count = unread.count,
+                    modifier = Modifier.align(Alignment.BottomEnd).offset(x = 6.dp, y = 4.dp),
+                )
+            }
+        }
     }
 }
 
 /**
- * Space 圖示：依設定顯示 Space 自身頭像，或仿 Discord 資料夾的最多四格子聊天室預覽。
+ * Discord 的紅圈未讀數。紅色固定不跟隨動態配色：這是狀態指示，
+ * 換成 colorScheme.error 在暖色種子下會變成淺粉、白字看不清。
+ */
+@Composable
+private fun UnreadBadge(count: Int, modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceContainerLowest)
+            .padding(2.dp),
+    ) {
+        Box(
+            Modifier.defaultMinSize(minWidth = 18.dp, minHeight = 18.dp)
+                .clip(CircleShape)
+                .background(UnreadRed)
+                .padding(horizontal = 5.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                if (count > 99) "99+" else count.toString(),
+                color = Color.White,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+/** Discord 未讀徽章紅（#ED4245）。 */
+private val UnreadRed = Color(0xFFED4245)
+
+@Composable
+private fun RailSeparator() {
+    Box(
+        Modifier.padding(vertical = 4.dp)
+            .width(32.dp)
+            .height(2.dp)
+            .clip(RoundedCornerShape(1.dp))
+            .background(MaterialTheme.colorScheme.outlineVariant),
+    )
+}
+
+/**
+ * Space 圖示：依設定顯示 Space 自身頭像，或仿 Discord 資料夾的 2×2 子聊天室預覽。
  * 預覽模式下若還沒收到子聊天室，退回 Space 頭像／首字母，避免出現空方塊。
  */
 @Composable
@@ -332,26 +522,22 @@ private fun SpaceIcon(
     space: SpaceSummary,
     rooms: List<RoomSummary>,
     iconMode: SpaceIconMode,
-    selected: Boolean,
-    onClick: () -> Unit,
+    shape: RoundedCornerShape,
 ) {
+    if (iconMode == SpaceIconMode.SPACE_AVATAR || rooms.isEmpty()) {
+        AvatarImage(client, space.avatarUrl, space.name, Modifier.size(RailIconSize).clip(shape))
+        return
+    }
+    // 資料夾樣式：帶色底的圓角方塊內排 2×2 縮圖
     Box(
-        modifier = Modifier
-            .size(44.dp)
-            .clip(RoundedCornerShape(if (selected) 14.dp else 22.dp))
-            .clickable(onClick = onClick)
-            .background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh),
+        Modifier.size(RailIconSize).clip(shape).background(MaterialTheme.colorScheme.secondaryContainer),
         contentAlignment = Alignment.Center,
     ) {
-        if (iconMode == SpaceIconMode.SPACE_AVATAR || rooms.isEmpty()) {
-            AvatarImage(client, space.avatarUrl, space.name, Modifier.fillMaxSize())
-        } else {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                rooms.chunked(2).take(2).forEach { rowRooms ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                        rowRooms.forEach { room ->
-                            AvatarImage(client, room.avatarUrl, room.name, Modifier.size(16.dp).clip(CircleShape))
-                        }
+        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            rooms.chunked(2).take(2).forEach { rowRooms ->
+                Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                    rowRooms.forEach { room ->
+                        AvatarImage(client, room.avatarUrl, room.name, Modifier.size(17.dp).clip(CircleShape))
                     }
                 }
             }
@@ -359,11 +545,16 @@ private fun SpaceIcon(
     }
 }
 
+/**
+ * Discord 式訊息／聊天室清單：頂部標題、搜尋膠囊，接著是兩行式聊天室列。
+ */
 @Composable
 private fun ChannelPane(
     roomRepository: RoomRepository,
     summaries: List<RoomSummary>,
     selected: RoomSummary?,
+    unreadByRoom: Map<RoomId, UnreadState>,
+    showPreview: Boolean,
     onSelect: (RoomSummary) -> Unit,
     channelTitle: String,
     strings: io.github.capricornus007.nashira.i18n.Strings,
@@ -373,37 +564,41 @@ private fun ChannelPane(
 ) {
     Column(modifier.fillMaxHeight().statusBarsPadding().background(MaterialTheme.colorScheme.surfaceContainerLow)) {
         val updating = !initialSyncDone || syncState != SyncState.RUNNING
-        Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shadowElevation = 1.dp) {
-            Row(Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 14.dp),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                Column(Modifier.weight(1f)) {
-                    Text(channelTitle, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1)
-                    // 已有本機資料時也要說明還在補資料，否則看起來像載入完但聊天室不全
-                    if (updating) {
-                        Text(
-                            if (initialSyncDone) strings.updatingRooms else strings.syncingRooms,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                        )
-                    }
-                }
+        Row(
+            Modifier.fillMaxWidth().height(56.dp).padding(start = 16.dp, end = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    channelTitle,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                // 已有本機資料時也要說明還在補資料，否則看起來像載入完但聊天室不全
                 if (updating) {
-                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Text(
+                        if (initialSyncDone) strings.updatingRooms else strings.syncingRooms,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
                 }
             }
+            if (updating) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
         }
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             shape = RoundedCornerShape(10.dp),
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         ) {
             Row(Modifier.fillMaxWidth().height(42.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Search, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(strings.findOrStartConversation, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 8.dp))
+                Icon(Icons.Filled.Search, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                Text(strings.findOrStartConversation, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 8.dp))
             }
         }
-        ChannelHeading(strings.rooms, strings.add)
         if (summaries.isEmpty()) {
             Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -416,8 +611,18 @@ private fun ChannelPane(
                 }
             }
         } else {
-            LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 96.dp)) {
-                items(summaries, key = { it.roomId.full }) { room -> RoomListItem(roomRepository, room, room.roomId == selected?.roomId, onSelect) }
+            LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(top = 4.dp, bottom = 108.dp)) {
+                items(summaries, key = { it.roomId.full }) { room ->
+                    RoomListItem(
+                        roomRepository = roomRepository,
+                        room = room,
+                        selected = room.roomId == selected?.roomId,
+                        unread = unreadByRoom[room.roomId] ?: UnreadState(),
+                        showPreview = showPreview,
+                        strings = strings,
+                        onSelect = onSelect,
+                    )
+                }
             }
         }
     }
@@ -472,23 +677,73 @@ private fun AccountBar(
     }
 }
 
+/**
+ * Discord 式聊天室列。Discord 的清單本身沒有白條或圓點（那是左側 Space 欄的專屬語彙），
+ * 未讀只靠「名稱轉白加粗 + 右側紅圈數字」表達；選中列是圓角高亮塊。
+ */
 @Composable
-private fun ChannelHeading(title: String, addLabel: String) {
-    Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-        IconButton(onClick = { }, modifier = Modifier.size(32.dp)) { Icon(Icons.Filled.Add, contentDescription = addLabel, tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+private fun RoomListItem(
+    roomRepository: RoomRepository,
+    room: RoomSummary,
+    selected: Boolean,
+    unread: UnreadState,
+    showPreview: Boolean,
+    strings: io.github.capricornus007.nashira.i18n.Strings,
+    onSelect: (RoomSummary) -> Unit,
+) {
+    // 關閉預覽時不訂閱最後訊息流，省掉每個房間一條 timeline 收集
+    val preview = if (!showPreview) {
+        null
+    } else {
+        val previewFlow = remember(roomRepository, room.roomId) { roomRepository.lastMessage(room.roomId) }
+        previewFlow.collectAsState(initial = null).value
     }
-}
-
-@Composable
-private fun RoomListItem(roomRepository: RoomRepository, room: RoomSummary, selected: Boolean, onSelect: (RoomSummary) -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable { onSelect(room) }
-        .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
-        .padding(horizontal = 12.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
-        RoomAvatar(roomRepository, room, Modifier.size(34.dp).clip(CircleShape))
-        Column(Modifier.padding(start = 10.dp).weight(1f)) {
-            Text(room.name, maxLines = 1, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
-            if (room.isDirect) Text(stringsFor(LocalUiState.current.language).privateMessage, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    val now = remember(room.lastActivity) { kotlin.time.Clock.System.now().toEpochMilliseconds() }
+    Row(
+        Modifier.fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 2.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) MaterialTheme.colorScheme.surfaceContainerHighest else Color.Transparent)
+            .clickable { onSelect(room) }
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RoomAvatar(roomRepository, room, Modifier.size(44.dp).clip(CircleShape))
+        Column(Modifier.padding(start = 12.dp).weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    room.name,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = if (unread.unread) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (unread.unread) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    formatRelative(preview?.timestamp ?: room.lastActivity, now, strings),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val line = preview?.let { "${it.senderName}: ${it.content}" }
+                    ?: strings.privateMessage.takeIf { room.isDirect && showPreview }
+                Text(
+                    line.orEmpty(),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                if (unread.count > 0) {
+                    Spacer(Modifier.width(8.dp))
+                    UnreadBadge(unread.count)
+                }
+            }
         }
     }
 }
@@ -593,16 +848,27 @@ private fun TimelinePane(roomRepository: RoomRepository, room: RoomSummary, onBa
         if (last >= 0) listState.scrollToItem(last)
     }
 
+    // 日期分隔線需要「今天」的基準；房間切換時重算即可，不必每分鐘更新
+    val today = remember(room.roomId) { localDateOf(kotlin.time.Clock.System.now().toEpochMilliseconds()) }
+
+    // 進房即推已讀標記，未讀白條/紅圈才會消，其他客戶端也看到同一個已讀位置
+    LaunchedEffect(roomRepository, room.roomId, messages?.size) {
+        if (messages?.isNotEmpty() == true) roomRepository.markRead(room.roomId)
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 navigationIcon = { if (onBack != null) IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, contentDescription = strings.back) } },
                 title = {
-                    Column {
-                        Text(room.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
-                        // 別名和房間名常常一樣，只在不同時才顯示副行
-                        alias?.takeIf { it.substringBefore(':') != room.name }?.let {
-                            Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RoomAvatar(roomRepository, room, Modifier.size(34.dp).clip(CircleShape))
+                        Column(Modifier.padding(start = 10.dp)) {
+                            Text(room.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+                            // 別名和房間名常常一樣，只在不同時才顯示副行
+                            alias?.takeIf { it.substringBefore(':') != room.name }?.let {
+                                Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
                     }
                 },
@@ -615,41 +881,161 @@ private fun TimelinePane(roomRepository: RoomRepository, room: RoomSummary, onBa
         },
         bottomBar = {
             Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).navigationBarsPadding()) {
-                sendError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 16.dp)) }
-                Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(value = draft, onValueChange = { draft = it; sendError = null }, modifier = Modifier.weight(1f), placeholder = { Text(strings.sendTo.format(sendTarget)) }, maxLines = 5)
-                    IconButton(enabled = !sending && draft.isNotBlank(), onClick = {
-                        val body = draft.trim(); draft = ""; sending = true
-                        scope.launch {
-                            roomRepository.sendText(room.roomId, body).onFailure { draft = body; sendError = it.message ?: strings.sendFailed }
-                            sending = false
+                sendError?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp))
+                }
+                // Discord 的輸入列是一顆圓角膠囊，左邊「+」、右邊送出，沒有外框線
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    shape = RoundedCornerShape(24.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                ) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = { }, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Filled.Add, contentDescription = strings.add, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                    }) {
-                        if (sending) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Icon(Icons.Filled.Send, contentDescription = strings.send)
+                        BasicTextField(
+                            value = draft,
+                            onValueChange = { draft = it; sendError = null },
+                            modifier = Modifier.weight(1f).padding(horizontal = 6.dp),
+                            textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                            maxLines = 5,
+                            decorationBox = { inner ->
+                                if (draft.isEmpty()) {
+                                    Text(
+                                        strings.sendTo.format(sendTarget),
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                inner()
+                            },
+                        )
+                        IconButton(enabled = !sending && draft.isNotBlank(), onClick = {
+                            val body = draft.trim(); draft = ""; sending = true
+                            scope.launch {
+                                roomRepository.sendText(room.roomId, body).onFailure { draft = body; sendError = it.message ?: strings.sendFailed }
+                                sending = false
+                            }
+                        }, modifier = Modifier.size(36.dp)) {
+                            if (sending) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                            else Icon(Icons.Filled.Send, contentDescription = strings.send, tint = if (draft.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary)
+                        }
                     }
                 }
             }
         },
     ) { padding ->
-        LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(bottom = 12.dp),
+        ) {
             val loaded = messages
             when {
                 // 還沒讀到本機資料：留白，不先閃一次「房間開始」再被訊息取代
                 loaded == null -> Unit
-                loaded.isEmpty() -> item { Text(strings.roomBeginning.format(room.name), color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 24.dp)) }
-                else -> items(loaded, key = { it.eventId?.full ?: it.timestamp }) { MessageItem(roomRepository.client, it) }
+                loaded.isEmpty() -> item {
+                    Text(
+                        strings.roomBeginning.format(room.name),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 24.dp),
+                    )
+                }
+                else -> itemsIndexed(loaded, key = { _, msg -> msg.eventId?.full ?: msg.timestamp }) { index, msg ->
+                    val previous = loaded.getOrNull(index - 1)
+                    val newDay = previous == null || localDateOf(previous.timestamp) != localDateOf(msg.timestamp)
+                    // Discord 的分組規則：同一人連續發言且未跨日、間隔小於 7 分鐘 → 只顯示訊息本體
+                    val grouped = !newDay && previous != null && previous.sender == msg.sender &&
+                        msg.timestamp - previous.timestamp < GroupingWindowMillis
+                    if (newDay) DateDivider(formatDateDivider(msg.timestamp, today, strings))
+                    MessageRow(
+                        client = roomRepository.client,
+                        msg = msg,
+                        grouped = grouped,
+                        strings = strings,
+                    )
+                }
             }
         }
     }
 }
 
+/** 兩則訊息合併顯示的最大間隔，對齊 Discord 的 7 分鐘。 */
+private const val GroupingWindowMillis = 7 * 60 * 1000L
+
+/** Discord 式日期分隔線：兩側細線、中央日期。 */
 @Composable
-private fun MessageItem(client: de.connect2x.trixnity.client.MatrixClient, msg: TimelineMessage) {
-    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-        AvatarImage(client, msg.senderAvatarUrl, msg.senderName, Modifier.size(34.dp).clip(CircleShape))
+private fun DateDivider(label: String) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        HorizontalDivider(Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant)
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 10.dp),
+        )
+        HorizontalDivider(Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant)
+    }
+}
+
+/**
+ * Discord 式訊息列：頭像佔左欄，右欄是「顯示名 + 時刻」標頭與訊息本體。
+ * 連續發言（grouped）不重複頭像與標頭，訊息本體對齊上一則的文字欄。
+ */
+@Composable
+private fun MessageRow(
+    client: de.connect2x.trixnity.client.MatrixClient,
+    msg: TimelineMessage,
+    grouped: Boolean,
+    strings: io.github.capricornus007.nashira.i18n.Strings,
+) {
+    Row(
+        Modifier.fillMaxWidth().padding(
+            start = 16.dp,
+            end = 16.dp,
+            top = if (grouped) 2.dp else 10.dp,
+            bottom = 1.dp,
+        ),
+    ) {
+        Box(Modifier.width(MessageGutterWidth)) {
+            if (!grouped) {
+                AvatarImage(client, msg.senderAvatarUrl, msg.senderName, Modifier.size(40.dp).clip(CircleShape))
+            }
+        }
         Column(Modifier.weight(1f)) {
-            Text(msg.senderName, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
-            Text(msg.content, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+            if (!grouped) {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        msg.senderName,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    Text(
+                        formatClock(msg.timestamp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 8.dp, bottom = 1.dp),
+                    )
+                }
+            }
+            Text(
+                msg.content,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(top = if (grouped) 0.dp else 2.dp),
+            )
         }
     }
 }

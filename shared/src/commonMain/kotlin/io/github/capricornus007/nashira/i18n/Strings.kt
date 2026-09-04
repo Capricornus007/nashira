@@ -56,9 +56,24 @@ interface Strings {
     val spaceAvatar: String
     val spaceRoomAvatars: String
     val restoringSession: String
+    val chatList: String
+    val unreadIndicators: String
+    val unreadIndicatorsHint: String
+    val messagePreview: String
+    val messagePreviewHint: String
     val updatingRooms: String
     val membersCount: String
     val loginUsername: String
+    val today: String
+    val yesterday: String
+    val justNow: String
+    val minutesAgo: String
+    val hoursAgo: String
+    val daysAgo: String
+    val monthsAgo: String
+    val yearsAgo: String
+    /** 日期分隔線的完整日期，各語言自行排列年月日 */
+    fun formatDate(year: Int, month: Int, day: Int): String
     val homeserver: String
     val loginPassword: String
     val loginSubmit: String
@@ -137,6 +152,11 @@ object ZhTwStrings : Strings {
     override val paletteStyle = "調色盤樣式"
     override val expressive = "Expressive"
     override val colorSpec = "顏色規格"
+    override val chatList = "聊天室清單"
+    override val unreadIndicators = "未讀提示"
+    override val unreadIndicatorsHint = "側欄顯示未讀白條，清單顯示紅圈數字"
+    override val messagePreview = "訊息預覽"
+    override val messagePreviewHint = "清單第二行顯示最後一則訊息"
     override val specM3 = "Material 3 (2021)"
     override val specExpressive = "Expressive (2025)"
     override val themeColor = "主題顏色"
@@ -151,6 +171,15 @@ object ZhTwStrings : Strings {
     override val homeserver = "Homeserver"
     override val loginPassword = "密碼"
     override val loginSubmit = "登入"
+    override val today = "今天"
+    override val yesterday = "昨天"
+    override val justNow = "剛剛"
+    override val minutesAgo = "%d 分鐘前"
+    override val hoursAgo = "%d 小時前"
+    override val daysAgo = "%d 天前"
+    override val monthsAgo = "%d 個月前"
+    override val yearsAgo = "%d 年前"
+    override fun formatDate(year: Int, month: Int, day: Int) = "${year} 年 ${month} 月 ${day} 日"
     override val logout = "登出"
     override val noRoomSelected = "選擇一個房間開始"
     override val sendFailed = "發送失敗"
@@ -230,6 +259,11 @@ object EnStrings : Strings {
     override val updatingRooms = "Updating messages…"
     override val membersCount = "Members · %d"
     override val loginUsername = "Username"
+    override val chatList = "Chat list"
+    override val unreadIndicators = "Unread indicators"
+    override val unreadIndicatorsHint = "Show the unread bar in the rail and count badges in the list"
+    override val messagePreview = "Message preview"
+    override val messagePreviewHint = "Show the latest message on the list's second line"
     override val homeserver = "Homeserver"
     override val loginPassword = "Password"
     override val loginSubmit = "Log in"
@@ -243,6 +277,15 @@ object EnStrings : Strings {
     override val deviceVerification = "Device verification"
     override val verifyThisDevice = "Verify this device"
     override val verificationCreated = "Verification session created. Confirm it on another device."
+    override val today = "Today"
+    override val yesterday = "Yesterday"
+    override val justNow = "Just now"
+    override val minutesAgo = "%d min ago"
+    override val hoursAgo = "%d h ago"
+    override val daysAgo = "%d d ago"
+    override val monthsAgo = "%d mo ago"
+    override val yearsAgo = "%d y ago"
+    override fun formatDate(year: Int, month: Int, day: Int) = "$year-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}"
     override val verificationState = "Verification state"
     override val noVerification = "No verification is currently in progress."
     override val securityHint = "Nashira uses Trixnity vodozemac. Verification marks this device as trusted for decrypting message history."

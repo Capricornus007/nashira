@@ -6,6 +6,7 @@ import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
+import androidx.compose.material3.Surface
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
@@ -83,8 +84,11 @@ fun NashiraTheme(
         shapes = Shapes(),
         motionScheme = remember { MotionScheme.expressive() },
         typography = Typography(),
-        content = content,
-    )
+    ) {
+        // MaterialTheme 不設 LocalContentColor（預設黑）。包一層 Surface 讓沒有顯式
+        // 指定顏色的 Text/Icon 拿到 onBackground，深色主題下才不會變成黑字。
+        Surface(color = colorScheme.background, contentColor = colorScheme.onBackground, content = content)
+    }
 }
 
 /** 品牌配色（Arcaea）：非動態取色時的預設來源 */

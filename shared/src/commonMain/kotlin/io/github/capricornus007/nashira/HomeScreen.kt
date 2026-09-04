@@ -126,32 +126,12 @@ private fun SettingsContent(
                 }
 
                 if (dynamicColorSupported) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(strings.dynamicColor)
-                            Text(strings.dynamicColorHint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Switch(
-                            checked = ui.dynamicColor,
-                            onCheckedChange = { ui.dynamicColor = it },
-                            thumbContent = {
-                                Icon(
-                                    if (ui.dynamicColor) Icons.Filled.Check else Icons.Filled.Close,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(SwitchDefaults.IconSize),
-                                )
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedTrackColor = MaterialTheme.colorScheme.primaryContainer,
-                                checkedThumbColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                                checkedIconColor = MaterialTheme.colorScheme.primaryContainer,
-                                uncheckedTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                uncheckedThumbColor = MaterialTheme.colorScheme.outline,
-                                uncheckedIconColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                uncheckedBorderColor = MaterialTheme.colorScheme.outline,
-                            ),
-                        )
-                    }
+                    SettingSwitch(
+                        title = strings.dynamicColor,
+                        subtitle = strings.dynamicColorHint,
+                        checked = ui.dynamicColor,
+                        onCheckedChange = { ui.dynamicColor = it },
+                    )
                     AnimatedVisibility(visible = ui.dynamicColor, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
                         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                             DropdownAnchor(label = strings.paletteStyle, current = ui.paletteStyle.displayLabel()) { close ->
@@ -172,6 +152,8 @@ private fun SettingsContent(
                     }
                 }
 
+            }
+            Section(title = strings.chatList) {
                 DropdownAnchor(
                     label = strings.spaceIconMode,
                     current = when (ui.spaceIconMode) {
@@ -182,6 +164,18 @@ private fun SettingsContent(
                     DropdownMenuItem(text = { Text(strings.spaceAvatar) }, onClick = { ui.spaceIconMode = SpaceIconMode.SPACE_AVATAR; close() })
                     DropdownMenuItem(text = { Text(strings.spaceRoomAvatars) }, onClick = { ui.spaceIconMode = SpaceIconMode.ROOM_PREVIEWS; close() })
                 }
+                SettingSwitch(
+                    title = strings.unreadIndicators,
+                    subtitle = strings.unreadIndicatorsHint,
+                    checked = ui.showUnreadIndicators,
+                    onCheckedChange = { ui.showUnreadIndicators = it },
+                )
+                SettingSwitch(
+                    title = strings.messagePreview,
+                    subtitle = strings.messagePreviewHint,
+                    checked = ui.showMessagePreview,
+                    onCheckedChange = { ui.showMessagePreview = it },
+                )
             }
             Section(title = strings.language) {
                 DropdownAnchor(label = strings.language, current = ui.language.displayName) { close ->
@@ -223,6 +217,42 @@ private fun SettingRow(
             Text(title, style = MaterialTheme.typography.bodyLarge)
             Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+    }
+}
+
+/** 設定頁的標題＋說明＋M3 Expressive icon-thumb 開關。 */
+@Composable
+private fun SettingSwitch(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            thumbContent = {
+                Icon(
+                    if (checked) Icons.Filled.Check else Icons.Filled.Close,
+                    contentDescription = null,
+                    modifier = Modifier.size(SwitchDefaults.IconSize),
+                )
+            },
+            colors = SwitchDefaults.colors(
+                checkedTrackColor = MaterialTheme.colorScheme.primaryContainer,
+                checkedThumbColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                checkedIconColor = MaterialTheme.colorScheme.primaryContainer,
+                uncheckedTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                uncheckedThumbColor = MaterialTheme.colorScheme.outline,
+                uncheckedIconColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                uncheckedBorderColor = MaterialTheme.colorScheme.outline,
+            ),
+        )
     }
 }
 

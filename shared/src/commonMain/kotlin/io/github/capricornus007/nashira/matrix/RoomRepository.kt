@@ -2,6 +2,7 @@ package io.github.capricornus007.nashira.matrix
 
 import de.connect2x.trixnity.client.MatrixClient
 import de.connect2x.trixnity.client.room
+import de.connect2x.trixnity.client.notification
 import de.connect2x.trixnity.client.room.getState
 import de.connect2x.trixnity.client.room.message.text
 import de.connect2x.trixnity.client.room.toFlowList
@@ -9,6 +10,7 @@ import de.connect2x.trixnity.client.flattenNotNull
 import de.connect2x.trixnity.client.flattenValues
 import de.connect2x.trixnity.client.store.Room
 import de.connect2x.trixnity.client.store.RoomUser
+import de.connect2x.trixnity.client.store.TimelineEvent
 import de.connect2x.trixnity.client.store.type
 import de.connect2x.trixnity.client.user
 import kotlinx.coroutines.flow.first
@@ -18,6 +20,7 @@ import de.connect2x.trixnity.core.model.UserId
 import de.connect2x.trixnity.core.model.events.m.room.CanonicalAliasEventContent
 import de.connect2x.trixnity.core.model.events.m.room.CreateEventContent
 import de.connect2x.trixnity.core.model.events.m.room.Membership
+import de.connect2x.trixnity.core.model.events.m.room.RoomMessageEventContent
 import de.connect2x.trixnity.core.model.events.m.space.ChildEventContent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -41,6 +44,12 @@ data class RoomSummary(
     val spaceIds: Set<RoomId> = emptySet(),
     /** 最後一則相關事件的時間；清單按此遞減排序，避免每次同步重排造成跳動 */
     val lastActivity: Long = 0L,
+)
+
+/** Space／房間的未讀狀態：Discord 用小白點表示有未讀、紅圈數字表示提及數。 */
+data class UnreadState(
+    val unread: Boolean = false,
+    val count: Int = 0,
 )
 
 data class SpaceSummary(
@@ -127,6 +136,30 @@ class RoomRepository(val client: MatrixClient) {
     }
 
     /**
+     * 每個房間的未讀狀態。Trixnity 的 notification count 只算「會產生通知的訊息」，
+     * 有未讀但不觸發通知的房間 count 為 0，所以白點另外看 isUnread。
+     */
+    fun unreadByRoom(): Flow<Map<RoomId, UnreadState>> =
+        joinedRooms()
+            .map { rooms -> rooms.filterNot(::isSpace).map { it.roomId } }
+            .distinctUntilChanged()
+            .flatMapLatest { ids ->
+                if (ids.isEmpty()) {
+                    flowOf(emptyMap())
+                } else {
+                    combine(ids.map { id -> unreadOf(id).map { id to it } }) { it.toMap() }
+                }
+            }
+            .flowOn(Dispatchers.Default)
+
+    private fun unreadOf(roomId: RoomId): Flow<UnreadState> =
+        combine(
+            client.notification.isUnread(roomId),
+            client.notification.getCount(roomId),
+        ) { unread, count -> UnreadState(unread = unread || count > 0, count = count) }
+            .distinctUntilChanged()
+
+    /**
      * 單一 Space 的子聊天室。先用 state key 立即給出結果，再用事件內容剔除已移除的子項
      * （被撤下的 `m.space.child` 內容為空，state key 仍留在 store 裡）。
      */
@@ -179,7 +212,13 @@ class RoomRepository(val client: MatrixClient) {
         memberMap(roomId)
             .map { members ->
                 members.values
-                    .map { RoomMember(it.userId, it.name, it.event.content.avatarUrl) }
+                    .map { user ->
+                        RoomMember(
+                            userId = user.userId,
+                            name = user.name.visibleNameOrNull() ?: user.userId.full.removePrefix("@").substringBefore(':'),
+                            avatarUrl = user.event.content.avatarUrl,
+                        )
+                    }
                     .sortedBy { it.name.lowercase() }
             }
             .flowOn(Dispatchers.Default)
@@ -212,21 +251,53 @@ class RoomRepository(val client: MatrixClient) {
             memberMap(roomId),
         ) { eventFlows, members ->
             eventFlows.mapNotNull { eventFlow ->
-                val roomEvent = eventFlow.first().event
+                val timelineEvent = eventFlow.first()
+                val roomEvent = timelineEvent.event
                 val member = members[roomEvent.sender]
                 TimelineMessage(
                     eventId = roomEvent.id,
                     roomId = roomId,
                     sender = roomEvent.sender,
-                    senderName = member?.name?.takeIf { it.isNotBlank() }
+                    senderName = member?.name.visibleNameOrNull()
                         ?: roomEvent.sender.full.removePrefix("@").substringBefore(':'),
                     senderAvatarUrl = member?.event?.content?.avatarUrl,
-                    content = (roomEvent.content as? de.connect2x.trixnity.core.model.events.m.room.RoomMessageEventContent.TextBased)
-                        ?.body ?: return@mapNotNull null,
+                    content = timelineEvent.bodyOrNull() ?: return@mapNotNull null,
                     timestamp = roomEvent.originTimestamp,
                 )
             }
         }.flowOn(Dispatchers.Default)
+
+    /** 聊天室清單的最後一則訊息預覽（含發送者），對齊 Discord 的兩行列。 */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun lastMessage(roomId: RoomId): Flow<TimelineMessage?> =
+        client.room.getLastTimelineEvent(roomId)
+            .flatMapLatest { eventFlow -> eventFlow ?: flowOf(null) }
+            .combine(memberMap(roomId)) { timelineEvent, members ->
+                val roomEvent = timelineEvent?.event ?: return@combine null
+                val body = timelineEvent.bodyOrNull() ?: return@combine null
+                val member = members[roomEvent.sender]
+                TimelineMessage(
+                    eventId = roomEvent.id,
+                    roomId = roomId,
+                    sender = roomEvent.sender,
+                    senderName = member?.name.visibleNameOrNull()
+                        ?: roomEvent.sender.full.removePrefix("@").substringBefore(':'),
+                    senderAvatarUrl = member?.event?.content?.avatarUrl,
+                    content = body,
+                    timestamp = roomEvent.originTimestamp,
+                )
+            }
+            .distinctUntilChanged()
+            .flowOn(Dispatchers.Default)
+
+    /**
+     * 進房時把已讀標記推到最後一則事件：未讀白條與紅圈數字才會消掉，
+     * 也讓其他客戶端看到同一個已讀位置。
+     */
+    suspend fun markRead(roomId: RoomId) {
+        val lastEventId = client.room.getById(roomId).first()?.lastEventId ?: return
+        client.api.room.setReadMarkers(roomId, fullyRead = lastEventId, read = lastEventId)
+    }
 
     /** 發送文字訊息 */
     suspend fun sendText(roomId: RoomId, body: String): Result<String> =
@@ -243,6 +314,25 @@ class RoomRepository(val client: MatrixClient) {
  */
 private fun String.toRoomIdOrNull(): RoomId? =
     if (RoomId.isValid(this)) RoomId(this) else null
+
+/**
+ * 取訊息本體。加密房間的明文在 `TimelineEvent.content`（解密後的 Result），
+ * 直接讀 `event.content` 只會拿到 `m.room.encrypted`，訊息會整批消失。
+ */
+private fun TimelineEvent.bodyOrNull(): String? =
+    (content?.getOrNull() ?: event.content).let { it as? RoomMessageEventContent }?.body
+
+/**
+ * 顯示名可能只由不可見字元組成（Telegram 橋接使用者常見，例如 U+2063 INVISIBLE SEPARATOR），
+ * 這種名稱在 UI 上等於空白，應該退回 Matrix ID 的 localpart。
+ */
+private fun String?.visibleNameOrNull(): String? {
+    if (this == null) return null
+    val visible = filterNot { ch ->
+        ch.isWhitespace() || ch.code in 0x200B..0x200F || ch.code in 0x2060..0x2064 || ch.code == 0xFEFF
+    }
+    return if (visible.isEmpty()) null else this
+}
 
 private fun List<RoomSummary>.sortedByActivity(): List<RoomSummary> =
     sortedWith(compareByDescending<RoomSummary> { it.lastActivity }.thenBy { it.name.lowercase() })
