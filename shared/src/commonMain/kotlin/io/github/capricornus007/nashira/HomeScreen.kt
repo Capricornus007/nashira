@@ -5,23 +5,29 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -37,98 +43,108 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
-import io.github.capricornus007.nashira.i18n.AppLanguage
 import io.github.capricornus007.nashira.i18n.stringsFor
+import io.github.capricornus007.nashira.matrix.MatrixSession
 import io.github.capricornus007.nashira.theme.ThemeMode
 import io.github.capricornus007.nashira.theme.dynamicColorSupported
 
-@OptIn(ExperimentalMaterial3Api::class)
+/** 完整設定入口：帳戶、安全性、外觀、語言與關於。 */
+@Composable
+fun SettingsScreen(
+    session: MatrixSession,
+    onBack: () -> Unit,
+    onLogout: () -> Unit,
+) {
+    var accountOpen by remember { mutableStateOf(false) }
+    PlatformBackHandler(enabled = accountOpen) { accountOpen = false }
+    PlatformBackHandler(enabled = !accountOpen) { onBack() }
+    if (accountOpen) {
+        SecurityAndAccountScreen(session = session, onBack = { accountOpen = false }, onLogout = onLogout)
+    } else {
+        SettingsContent(onBack = onBack, onOpenAccount = { accountOpen = true }, hasAccount = true)
+    }
+}
+
+/** 舊入口保留給未登入的預覽與既有呼叫端。 */
 @Composable
 fun HomeScreen(dark: Boolean) {
-    var language by remember { mutableStateOf(AppLanguage.ZH_TW) }
-    val strings = stringsFor(language)
-    val ui = LocalUiState.current
+    SettingsContent(onBack = null, onOpenAccount = null, hasAccount = false)
+}
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SettingsContent(
+    onBack: (() -> Unit)?,
+    onOpenAccount: (() -> Unit)?,
+    hasAccount: Boolean,
+) {
+    val ui = LocalUiState.current
+    val strings = stringsFor(ui.language)
     Scaffold(
-        topBar = { TopAppBar(title = { Text(strings.appName) }) },
+        topBar = {
+            TopAppBar(
+                navigationIcon = { if (onBack != null) IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, contentDescription = strings.back) } },
+                title = { Text(strings.settings) },
+            )
+        },
     ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp),
+                .padding(horizontal = 20.dp, vertical = 16.dp)
+                .navigationBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text(
-                strings.tagline,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            if (hasAccount && onOpenAccount != null) {
+                Section(title = strings.account) {
+                    SettingRow(
+                        icon = Icons.Filled.Lock,
+                        title = strings.accountAndSecurity,
+                        subtitle = strings.accountAndSecurityHint,
+                        onClick = onOpenAccount,
+                    )
+                }
+            }
             Section(title = strings.appearance) {
-                // 主題模式：追隨系統 / 深 / 淺（三段）
                 DropdownAnchor(
                     label = strings.themeMode,
                     current = when (ui.themeMode) {
                         ThemeMode.FOLLOW_SYSTEM -> strings.followSystem
                         ThemeMode.DARK -> strings.darkTheme
                         ThemeMode.LIGHT -> strings.lightTheme
-                        else -> strings.followSystem
                     },
                 ) { close ->
-                    DropdownMenuItem(
-                        text = { Text(strings.followSystem) },
-                        onClick = { ui.themeMode = ThemeMode.FOLLOW_SYSTEM; close() },
-                    )
-                    DropdownMenuItem(
-                        text = { Text(strings.darkTheme) },
-                        onClick = { ui.themeMode = ThemeMode.DARK; close() },
-                    )
-                    DropdownMenuItem(
-                        text = { Text(strings.lightTheme) },
-                        onClick = { ui.themeMode = ThemeMode.LIGHT; close() },
-                    )
+                    DropdownMenuItem(text = { Text(strings.followSystem) }, onClick = { ui.themeMode = ThemeMode.FOLLOW_SYSTEM; close() })
+                    DropdownMenuItem(text = { Text(strings.darkTheme) }, onClick = { ui.themeMode = ThemeMode.DARK; close() })
+                    DropdownMenuItem(text = { Text(strings.lightTheme) }, onClick = { ui.themeMode = ThemeMode.LIGHT; close() })
                 }
 
-                // 動態顏色（Android 12+ Material You；桌面端不顯示）
                 if (dynamicColorSupported) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(strings.dynamicColor)
-                            Text(
-                                strings.dynamicColorHint,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                            Text(strings.dynamicColorHint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        // 標準 M3 規範配色（icon 與滑塊對比修正版）：
-                        // 開啟=primaryContainer 軌道 + onPrimaryContainer 滑塊 + primaryContainer 勾
-                        // 關閉=surfaceContainerHighest 軌道 + outline 滑塊 + surfaceContainerHighest 叉
                         Switch(
                             checked = ui.dynamicColor,
                             onCheckedChange = { ui.dynamicColor = it },
                             thumbContent = {
-                                val icon = if (ui.dynamicColor) Icons.Filled.Check else Icons.Filled.Close
                                 Icon(
-                                    imageVector = icon,
+                                    if (ui.dynamicColor) Icons.Filled.Check else Icons.Filled.Close,
                                     contentDescription = null,
                                     modifier = Modifier.size(SwitchDefaults.IconSize),
                                 )
                             },
                             colors = SwitchDefaults.colors(
-                                // 開啟狀態（Checked）
                                 checkedTrackColor = MaterialTheme.colorScheme.primaryContainer,
                                 checkedThumbColor = MaterialTheme.colorScheme.onPrimaryContainer,
                                 checkedIconColor = MaterialTheme.colorScheme.primaryContainer,
-
-                                // 關閉狀態（Unchecked）— 圖標可見性修正
                                 uncheckedTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                                 uncheckedThumbColor = MaterialTheme.colorScheme.outline,
                                 uncheckedIconColor = MaterialTheme.colorScheme.surfaceContainerHighest,
@@ -136,62 +152,41 @@ fun HomeScreen(dark: Boolean) {
                             ),
                         )
                     }
-
-                    // Material You 配置抽屜：開關切換時收起/放出（expand/shrink 動畫）
-                    AnimatedVisibility(
-                        visible = ui.dynamicColor,
-                        enter = expandVertically() + fadeIn(),
-                        exit = shrinkVertically() + fadeOut(),
-                    ) {
+                    AnimatedVisibility(visible = ui.dynamicColor, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
                         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                            DropdownAnchor(
-                                label = strings.paletteStyle,
-                                current = ui.paletteStyle.displayLabel(),
-                            ) { close ->
+                            DropdownAnchor(label = strings.paletteStyle, current = ui.paletteStyle.displayLabel()) { close ->
                                 PaletteStyle.entries.forEach { style ->
-                                    DropdownMenuItem(
-                                        text = { Text(style.displayLabel()) },
-                                        onClick = { ui.paletteStyle = style; close() },
-                                    )
+                                    DropdownMenuItem(text = { Text(style.displayLabel()) }, onClick = { ui.paletteStyle = style; close() })
                                 }
                             }
                             DropdownAnchor(
                                 label = strings.colorSpec,
-                                current = if (ui.specVersion == ColorSpec.SpecVersion.SPEC_2021) {
-                                    strings.specM3
-                                } else {
-                                    strings.specExpressive
-                                },
+                                current = if (ui.specVersion == ColorSpec.SpecVersion.SPEC_2021) strings.specM3 else strings.specExpressive,
                             ) { close ->
-                                DropdownMenuItem(
-                                    text = { Text(strings.specM3) },
-                                    onClick = { ui.specVersion = ColorSpec.SpecVersion.SPEC_2021; close() },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text(strings.specExpressive) },
-                                    onClick = { ui.specVersion = ColorSpec.SpecVersion.SPEC_2025; close() },
-                                )
+                                DropdownMenuItem(text = { Text(strings.specM3) }, onClick = { ui.specVersion = ColorSpec.SpecVersion.SPEC_2021; close() })
+                                DropdownMenuItem(text = { Text(strings.specExpressive) }, onClick = { ui.specVersion = ColorSpec.SpecVersion.SPEC_2025; close() })
                             }
                             Text(strings.themeColor, style = MaterialTheme.typography.bodyMedium)
-                            AccentPicker(
-                                selected = ui.accent,
-                                language = language,
-                                onSelect = { ui.accent = it },
-                            )
+                            AccentPicker(selected = ui.accent, language = ui.language, onSelect = { ui.accent = it })
                         }
                     }
                 }
+
+                DropdownAnchor(
+                    label = strings.spaceIconMode,
+                    current = when (ui.spaceIconMode) {
+                        SpaceIconMode.SPACE_AVATAR -> strings.spaceAvatar
+                        SpaceIconMode.ROOM_PREVIEWS -> strings.spaceRoomAvatars
+                    },
+                ) { close ->
+                    DropdownMenuItem(text = { Text(strings.spaceAvatar) }, onClick = { ui.spaceIconMode = SpaceIconMode.SPACE_AVATAR; close() })
+                    DropdownMenuItem(text = { Text(strings.spaceRoomAvatars) }, onClick = { ui.spaceIconMode = SpaceIconMode.ROOM_PREVIEWS; close() })
+                }
             }
             Section(title = strings.language) {
-                DropdownAnchor(
-                    label = strings.language,
-                    current = language.displayName,
-                ) { close ->
-                    AppLanguage.entries.forEach { candidate ->
-                        DropdownMenuItem(
-                            text = { Text(candidate.displayName) },
-                            onClick = { language = candidate; close() },
-                        )
+                DropdownAnchor(label = strings.language, current = ui.language.displayName) { close ->
+                    io.github.capricornus007.nashira.i18n.AppLanguage.entries.forEach { candidate ->
+                        DropdownMenuItem(text = { Text(candidate.displayName) }, onClick = { ui.language = candidate; close() })
                     }
                 }
             }
@@ -201,55 +196,55 @@ fun HomeScreen(dark: Boolean) {
                 LinkRow(strings.encryption, AppInfo.crypto, AppInfo.cryptoUrl)
                 LinkRow(strings.license, AppInfo.license, AppInfo.licenseUrl)
                 LinkRow(strings.sourceCode, AppInfo.repo, AppInfo.repoUrl)
+                Spacer(Modifier.size(8.dp))
+                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(strings.appName, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                    Text(strings.tagline, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         }
     }
 }
 
-/**
- * 錨定式下拉：按鈕與選單同包一個 Box——Compose 的 DropdownMenu 錨定父容器，
- * 不包 Box 會錨到整個 Section 頂部飄走（真機實測 bug）。
- */
 @Composable
-private fun DropdownAnchor(
-    label: String,
-    current: String,
-    menuContent: @Composable (close: () -> Unit) -> Unit,
+private fun SettingRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
 ) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun DropdownAnchor(label: String, current: String, menuContent: @Composable (close: () -> Unit) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(label, style = MaterialTheme.typography.bodyMedium)
         Box {
-            OutlinedButton(onClick = { open = true }) {
-                Text(current)
-            }
-            DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-                menuContent { open = false }
-            }
+            OutlinedButton(onClick = { open = true }) { Text(current) }
+            DropdownMenu(expanded = open, onDismissRequest = { open = false }) { menuContent { open = false } }
         }
     }
 }
 
-/** PaletteStyle 顯示名（PascalCase 分詞）：TonalSpot → Tonal Spot */
-internal fun PaletteStyle.displayLabel(): String =
-    name.replace(Regex("(?<=[a-z])(?=[A-Z])"), " ")
+internal fun PaletteStyle.displayLabel(): String = name.replace(Regex("(?<=[a-z])(?=[A-Z])"), " ")
 
 @Composable
 private fun Section(title: String, content: @Composable () -> Unit) {
-    Surface(
-        shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
-                title,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.primary,
-            )
+    Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
             content()
         }
     }

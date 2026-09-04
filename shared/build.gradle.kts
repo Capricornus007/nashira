@@ -27,6 +27,7 @@ kotlin {
     sourceSets {
         val androidMain by getting
         androidMain.dependencies {
+            implementation(libs.androidx.activity.compose)
             implementation(libs.ktor.client.okhttp)
             // Android 直依 vodozemac android 構件（root 的 available-at 變體協商
             // 在嵌套傳遞時丟失 jvm-environment 屬性——Gradle 已知問題）

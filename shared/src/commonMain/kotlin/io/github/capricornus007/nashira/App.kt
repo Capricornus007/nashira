@@ -10,6 +10,7 @@ import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.ktx.animateColorScheme
 import com.materialkolor.rememberDynamicColorScheme
+import io.github.capricornus007.nashira.i18n.AppLanguage
 import io.github.capricornus007.nashira.matrix.MatrixEngine
 import io.github.capricornus007.nashira.theme.NashiraDarkColors
 import io.github.capricornus007.nashira.theme.NashiraLightColors
@@ -18,10 +19,16 @@ import io.github.capricornus007.nashira.theme.ThemeAccent
 import io.github.capricornus007.nashira.theme.ThemeMode
 import io.github.capricornus007.nashira.theme.wallpaperSeedColor
 
+enum class SpaceIconMode {
+    SPACE_AVATAR,
+    ROOM_PREVIEWS,
+}
+
 
 
 /** 全域 UI 狀態（記憶體態；P1 接 DataStore 持久化） */
 class UiState {
+    var language by mutableStateOf(AppLanguage.ZH_TW)
     var themeMode by mutableStateOf(ThemeMode.FOLLOW_SYSTEM)
     var dynamicColor by mutableStateOf(false)
 
@@ -29,6 +36,7 @@ class UiState {
     var paletteStyle by mutableStateOf(PaletteStyle.Expressive)
     var specVersion by mutableStateOf(ColorSpec.SpecVersion.SPEC_2025)
     var accent by mutableStateOf<ThemeAccent?>(null)
+    var spaceIconMode by mutableStateOf(SpaceIconMode.ROOM_PREVIEWS)
 }
 
 val LocalUiState = staticCompositionLocalOf { UiState() }
@@ -41,7 +49,6 @@ fun App(defaultDark: Boolean? = null) {
         ThemeMode.FOLLOW_SYSTEM -> systemDark
         ThemeMode.DARK -> true
         ThemeMode.LIGHT -> false
-        else -> systemDark
     }
 
     // 種子來源（僅動態顏色開啟時）：色系覆寫 > 桌布種子；關閉＝品牌 Arcaea
@@ -62,17 +69,20 @@ fun App(defaultDark: Boolean? = null) {
         else if (dark) NashiraDarkColors else NashiraLightColors
     // 配色補間（照 InstallerX：每槽 animateColorAsState(spring()) 物理彈簧曲線）
     val session by MatrixEngine.session.collectAsState()
+    val restoring by MatrixEngine.restoring.collectAsState()
     androidx.compose.runtime.LaunchedEffect(Unit) { MatrixEngine.restoreFromDisk() }
     val animatedScheme = target.animateAsState()
 
     NashiraTheme(colorScheme = animatedScheme) {
-        if (session == null) {
-            LoginScreen(onLoginSuccess = { })
-        } else {
-            ChatScreen(
-                roomRepository = io.github.capricornus007.nashira.matrix.RoomRepository(session!!.client),
+        val current = session
+        when {
+            current != null -> ChatScreen(
+                session = current,
                 onLogout = { MatrixEngine.logout() },
             )
+            // 磁碟有憑證時先顯示啟動頁，不再閃一次登入表單
+            restoring -> StartupScreen()
+            else -> LoginScreen(onLoginSuccess = { })
         }
     }
 }

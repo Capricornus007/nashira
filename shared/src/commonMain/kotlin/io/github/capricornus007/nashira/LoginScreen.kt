@@ -23,7 +23,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import io.github.capricornus007.nashira.i18n.AppLanguage
 import io.github.capricornus007.nashira.i18n.stringsFor
 import io.github.capricornus007.nashira.matrix.MatrixEngine
 import kotlinx.coroutines.launch
@@ -31,8 +30,7 @@ import kotlinx.coroutines.launch
 /** 登入頁：HS 位址 + 用戶名 + 密碼 */
 @Composable
 fun LoginScreen(onLoginSuccess: () -> Unit) {
-    var language by remember { mutableStateOf(AppLanguage.ZH_TW) }
-    val strings = stringsFor(language)
+    val strings = stringsFor(LocalUiState.current.language)
     var baseUrl by remember { mutableStateOf("https://matrix.org") }
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -60,7 +58,7 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
         OutlinedTextField(
             value = baseUrl,
             onValueChange = { baseUrl = it },
-            label = { Text("Homeserver") },
+            label = { Text(strings.homeserver) },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
