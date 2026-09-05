@@ -11,6 +11,6 @@ actual fun persistentRepositories(databaseKey: String): RepositoriesModule {
     val databaseFile = File(System.getProperty("user.home") ?: ".", ".nashira/nashira-$safeKey.db")
     val builder = Room.databaseBuilder(databaseFile.absolutePath) {
         TrixnityRoomDatabaseConstructor.initialize()
-    }
+    }.setDriver(androidx.sqlite.driver.bundled.BundledSQLiteDriver())
     return RepositoriesModule.room(builder)
 }
