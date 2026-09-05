@@ -27,8 +27,6 @@ interface Strings {
     val sendTo: String
     val add: String
     val send: String
-    val syncStatus: String
-    val initialSyncDone: String
     val verified: String
     val tagline: String
     val appearance: String
@@ -64,8 +62,12 @@ interface Strings {
     val unreadIndicatorsHint: String
     val messagePreview: String
     val messagePreviewHint: String
-    val updatingRooms: String
     val membersCount: String
+    val imageMessage: String
+    val stickerMessage: String
+    val undecryptable: String
+    val clearSearch: String
+    val noSearchResults: String
     val showSecret: String
     val hideSecret: String
     val acceptInvite: String
@@ -177,8 +179,6 @@ object ZhTwStrings : Strings {
     override val sendTo = "傳送訊息至 %s"
     override val add = "新增"
     override val send = "傳送"
-    override val syncStatus = "同步狀態"
-    override val initialSyncDone = "已完成初始同步"
     override val verified = "已驗證"
     override val tagline = "γ Capricorni · 報佳音之星"
     override val appearance = "外觀"
@@ -214,8 +214,12 @@ object ZhTwStrings : Strings {
     override val spaceAvatar = "顯示 Space 頭像"
     override val spaceRoomAvatars = "顯示子房間頭像預覽"
     override val restoringSession = "正在載入本機資料…"
-    override val updatingRooms = "正在更新訊息…"
     override val membersCount = "成員 · %d"
+    override val imageMessage = "圖片"
+    override val stickerMessage = "貼圖"
+    override val undecryptable = "⚠ 這則訊息無法解密"
+    override val clearSearch = "清除搜尋"
+    override val noSearchResults = "找不到符合的聊天室"
     override val showSecret = "顯示內容"
     override val hideSecret = "隱藏內容"
     override val acceptInvite = "接受邀請"
@@ -319,8 +323,6 @@ object EnStrings : Strings {
     override val sendTo = "Send a message to %s"
     override val add = "Add"
     override val send = "Send"
-    override val syncStatus = "Sync status"
-    override val initialSyncDone = "Initial sync complete"
     override val verified = "Verified"
     override val tagline = "γ Capricorni, the bringer of good news"
     override val appearance = "Appearance"
@@ -348,8 +350,12 @@ object EnStrings : Strings {
     override val spaceAvatar = "Show the Space avatar"
     override val spaceRoomAvatars = "Show child-room avatar previews"
     override val restoringSession = "Loading local data…"
-    override val updatingRooms = "Updating messages…"
     override val membersCount = "Members · %d"
+    override val imageMessage = "Image"
+    override val stickerMessage = "Sticker"
+    override val undecryptable = "⚠ Unable to decrypt this message"
+    override val clearSearch = "Clear search"
+    override val noSearchResults = "No matching rooms"
     override val showSecret = "Show"
     override val hideSecret = "Hide"
     override val acceptInvite = "Accept"

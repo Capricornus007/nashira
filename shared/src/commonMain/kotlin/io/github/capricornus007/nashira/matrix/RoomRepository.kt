@@ -22,6 +22,19 @@ import de.connect2x.trixnity.core.model.events.m.room.CanonicalAliasEventContent
 import de.connect2x.trixnity.core.model.events.m.room.CreateEventContent
 import de.connect2x.trixnity.core.model.events.m.room.Membership
 import de.connect2x.trixnity.core.model.events.m.room.RoomMessageEventContent
+import de.connect2x.trixnity.core.model.events.UnknownEventContent
+import de.connect2x.trixnity.core.model.events.m.room.EncryptedMessageEventContent
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.debounce
+import de.connect2x.trixnity.core.model.events.m.room.EncryptedFile
+import de.connect2x.trixnity.core.model.events.m.room.ImageInfo
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.intOrNull
 import de.connect2x.trixnity.core.model.events.m.space.ChildEventContent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -73,6 +86,36 @@ data class RoomMember(
     val avatarUrl: String?,
 )
 
+/**
+ * 訊息內容。圖片與貼圖要保留媒體來源（加密房的圖是 EncryptedFile，不是 mxc URL），
+ * 解密失敗也要留下痕跡：直接丟掉會讓時間線看起來「少了幾句」卻找不出原因。
+ */
+sealed interface MessageBody {
+    /** 純文字、emote、通知 */
+    data class Text(val text: String) : MessageBody
+
+    /** 圖片或貼圖。[caption] 是原始 body（檔名或描述），貼圖不畫背景也不裁切。 */
+    data class Image(
+        val caption: String,
+        val source: MediaSource,
+        val width: Int?,
+        val height: Int?,
+        val isSticker: Boolean,
+    ) : MessageBody
+
+    /** 檔案／音訊／影片：先用檔名標示，還沒做內建播放 */
+    data class Attachment(val name: String) : MessageBody
+
+    /** 這台裝置拿不到金鑰 */
+    data object Undecryptable : MessageBody
+}
+
+/** 媒體來源：未加密房是 mxc URL，加密房是帶金鑰的 EncryptedFile。 */
+sealed interface MediaSource {
+    data class Plain(val mxcUrl: String) : MediaSource
+    data class Encrypted(val file: EncryptedFile) : MediaSource
+}
+
 /** 時間線上的單條訊息。發送者顯示名與頭像取自房間成員狀態，取不到才退回 localpart。 */
 data class TimelineMessage(
     val eventId: EventId?,
@@ -80,7 +123,7 @@ data class TimelineMessage(
     val sender: UserId,
     val senderName: String,
     val senderAvatarUrl: String?,
-    val content: String,
+    val body: MessageBody,
     val timestamp: Long,
 )
 
@@ -91,6 +134,10 @@ data class TimelineMessage(
 data class TimelinePage(
     val messages: List<TimelineMessage>,
     val eventCount: Int,
+    /** 是否還有更早的歷史可以抓。 */
+    val canLoadMore: Boolean = false,
+    /** 正在抓更早的一頁（UI 在頂部擺轉圈）。 */
+    val loadingBefore: Boolean = false,
 )
 
 /**
@@ -247,10 +294,20 @@ class RoomRepository(val client: MatrixClient) {
                     }
                     .sortedBy { it.name.lowercase() }
             }
-            .flowOn(Dispatchers.Default)
 
+    /**
+     * 房間成員（顯示名／頭像）對照表。
+     *
+     * 大房間預設沒有載入完整成員（`Room.membersLoaded == false`），這條流在載入完成前**不會發**，
+     * 所以一律補一個空 map 起頭：訊息不該等成員資料才顯示。同時觸發一次成員載入，
+     * 名字與頭像補齊後流會再發、UI 自動換上真名。
+     */
     private fun memberMap(roomId: RoomId): Flow<Map<UserId, RoomUser>> =
         client.user.getAll(roomId).flattenNotNull()
+            .onStart {
+                emit(emptyMap())
+                runCatching { client.user.loadMembers(roomId) }
+            }
 
     /** 房間的正式別名（#room:server），供標題與輸入框顯示真實目標。 */
     fun canonicalAlias(roomId: RoomId): Flow<String?> =
@@ -267,38 +324,17 @@ class RoomRepository(val client: MatrixClient) {
             .flowOn(Dispatchers.Default)
 
     /**
-     * 指定房間的最新時間線。發送者顯示名與頭像來自房間成員狀態，
-     * 成員資料補齊後訊息會自動換上真名，不再只顯示 Matrix ID 的 localpart。
+     * 指定房間的最新時間線。回傳順序是「新 → 舊」（索引 0 最新）。
      *
-     * 回傳順序是「新 → 舊」（索引 0 最新）。[maxSize] 由呼叫端持有：往上滾到頭時把它加大，
-     * Trixnity 會自己往伺服器補抓更早的事件，這就是「載入更多歷史」。
+     * 直接用 `getLastTimelineEvents` 從 store 往後走有致命缺陷：多數房間 store 裡的
+     * `previousEventId` 鏈是斷的（gap 未補、缺檔），往回一步就停，時間線永遠空白。
+     * 改用有狀態的 [de.connect2x.trixnity.client.room.Timeline]：它知道用 sync token
+     * 補抓 gap、解密會更新內層事件流並重新發射，也允許手動 `loadBefore` 載入更早歷史。
+     *
+     * 這條流是冷的：每次訂閱都重建一個 Timeline 並以最後一則事件開頭，結束即丟。
+     * 同一個房間只會有一份在訂閱，成本可以接受。
      */
-    fun timeline(roomId: RoomId, maxSize: MutableStateFlow<Int>): Flow<TimelinePage> =
-        combine(
-            client.room.getLastTimelineEvents(roomId).toFlowList(maxSize),
-            memberMap(roomId),
-        ) { eventFlows, members ->
-            TimelinePage(
-                // 原始事件數要在過濾前算：房間裡大量加入／改名事件不可顯示，
-                // 用過濾後的訊息數去比對 maxSize 永遠比不到，換頁條件就再也不會成立。
-                eventCount = eventFlows.size,
-                messages = eventFlows.mapNotNull { eventFlow ->
-                    val timelineEvent = eventFlow.first()
-                    val roomEvent = timelineEvent.event
-                    val member = members[roomEvent.sender]
-                    TimelineMessage(
-                        eventId = roomEvent.id,
-                        roomId = roomId,
-                        sender = roomEvent.sender,
-                        senderName = member?.name.visibleNameOrNull()
-                            ?: roomEvent.sender.full.removePrefix("@").substringBefore(':'),
-                        senderAvatarUrl = member?.event?.content?.avatarUrl,
-                        content = timelineEvent.bodyOrNull() ?: return@mapNotNull null,
-                        timestamp = roomEvent.originTimestamp,
-                    )
-                },
-            )
-        }.flowOn(Dispatchers.Default)
+    fun timeline(roomId: RoomId): RoomTimeline = RoomTimeline(client, roomId, memberMap(roomId))
 
     /** 聊天室清單的最後一則訊息預覽（含發送者），對齊 Discord 的兩行列。 */
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -307,7 +343,7 @@ class RoomRepository(val client: MatrixClient) {
             .flatMapLatest { eventFlow -> eventFlow ?: flowOf(null) }
             .combine(memberMap(roomId)) { timelineEvent, members ->
                 val roomEvent = timelineEvent?.event ?: return@combine null
-                val body = timelineEvent.bodyOrNull() ?: return@combine null
+                val body = timelineEvent.messageBodyOrNull() ?: return@combine null
                 val member = members[roomEvent.sender]
                 TimelineMessage(
                     eventId = roomEvent.id,
@@ -316,7 +352,7 @@ class RoomRepository(val client: MatrixClient) {
                     senderName = member?.name.visibleNameOrNull()
                         ?: roomEvent.sender.full.removePrefix("@").substringBefore(':'),
                     senderAvatarUrl = member?.event?.content?.avatarUrl,
-                    content = body,
+                    body = body,
                     timestamp = roomEvent.originTimestamp,
                 )
             }
@@ -349,17 +385,76 @@ private fun String.toRoomIdOrNull(): RoomId? =
     if (RoomId.isValid(this)) RoomId(this) else null
 
 /**
- * 取訊息本體。加密房間的明文在 `TimelineEvent.content`（解密後的 Result），
+ * 取訊息內容。加密房間的明文在 `TimelineEvent.content`（解密後的 Result），
  * 直接讀 `event.content` 只會拿到 `m.room.encrypted`，訊息會整批消失。
  */
-private fun TimelineEvent.bodyOrNull(): String? =
-    (content?.getOrNull() ?: event.content).let { it as? RoomMessageEventContent }?.body
+internal fun TimelineEvent.messageBodyOrNull(): MessageBody? {
+    val decrypted = content
+    if (decrypted != null && decrypted.isFailure) return MessageBody.Undecryptable
+    // content 還是 null 表示尚未解密：可能在等金鑰（Trixnity 預設無限期等）。
+    // 這種事件不能靜靜丟掉，否則整個加密房間會是一片空白，看不出「這裡有訊息但我沒鑰匙」。
+    if (decrypted == null && event.content is EncryptedMessageEventContent) return MessageBody.Undecryptable
+    return when (val body = decrypted?.getOrNull() ?: event.content) {
+        is RoomMessageEventContent.TextBased -> MessageBody.Text(body.body)
+        is RoomMessageEventContent.FileBased.Image ->
+            imageBody(body.body, body.url, body.file, body.info as? ImageInfo, isSticker = false)
+        is RoomMessageEventContent.FileBased -> MessageBody.Attachment(body.fileName ?: body.body)
+        // Trixnity 5.8.1 沒有 m.sticker 的內容型別，貼圖以 UnknownEventContent 帶原始 JSON 進來
+        is UnknownEventContent -> if (body.eventType == "m.sticker") stickerBody(body.raw) else null
+        else -> null
+    }
+}
+
+/** 圖片訊息優先用縮圖，省掉整張原圖的流量；加密房的縮圖同樣是 EncryptedFile。 */
+private fun imageBody(
+    caption: String,
+    url: String?,
+    file: EncryptedFile?,
+    info: ImageInfo?,
+    isSticker: Boolean,
+): MessageBody {
+    val source = info?.thumbnailFile?.let(MediaSource::Encrypted)
+        ?: info?.thumbnailUrl?.let(MediaSource::Plain)
+        ?: file?.let(MediaSource::Encrypted)
+        ?: url?.let(MediaSource::Plain)
+        ?: return MessageBody.Attachment(caption)
+    return MessageBody.Image(caption, source, info?.width, info?.height, isSticker)
+}
+
+/** 貼圖事件的形狀跟 m.image 相同（body/url/file/info），只是型別沒被 Trixnity 註冊。 */
+private fun stickerBody(raw: JsonObject): MessageBody? {
+    val info = raw["info"]?.let { it as? JsonObject }
+    val encryptedFile = raw["file"]?.let { element ->
+        runCatching { StickerJson.decodeFromJsonElement<EncryptedFile>(element) }.getOrNull()
+    }
+    val thumbnailFile = info?.get("thumbnail_file")?.let { element ->
+        runCatching { StickerJson.decodeFromJsonElement<EncryptedFile>(element) }.getOrNull()
+    }
+    val source = thumbnailFile?.let(MediaSource::Encrypted)
+        ?: info?.get("thumbnail_url")?.mxcOrNull()?.let(MediaSource::Plain)
+        ?: encryptedFile?.let(MediaSource::Encrypted)
+        ?: raw["url"]?.mxcOrNull()?.let(MediaSource::Plain)
+        ?: return null
+    return MessageBody.Image(
+        caption = raw["body"]?.let { (it as? JsonPrimitive)?.contentOrNull }.orEmpty(),
+        source = source,
+        width = info?.get("w")?.let { (it as? JsonPrimitive)?.intOrNull },
+        height = info?.get("h")?.let { (it as? JsonPrimitive)?.intOrNull },
+        isSticker = true,
+    )
+}
+
+private fun JsonElement.mxcOrNull(): String? =
+    (this as? JsonPrimitive)?.contentOrNull?.takeIf { it.startsWith("mxc://") }
+
+/** 貼圖的 m.file 區塊要自己解；Trixnity 的 Json 實例不對外開放，用寬鬆設定自建一個。 */
+private val StickerJson = Json { ignoreUnknownKeys = true }
 
 /**
  * 顯示名可能只由不可見字元組成（Telegram 橋接使用者常見，例如 U+2063 INVISIBLE SEPARATOR），
  * 這種名稱在 UI 上等於空白，應該退回 Matrix ID 的 localpart。
  */
-private fun String?.visibleNameOrNull(): String? {
+internal fun String?.visibleNameOrNull(): String? {
     if (this == null) return null
     val visible = filterNot { ch ->
         ch.isWhitespace() || ch.code in 0x200B..0x200F || ch.code in 0x2060..0x2064 || ch.code == 0xFEFF

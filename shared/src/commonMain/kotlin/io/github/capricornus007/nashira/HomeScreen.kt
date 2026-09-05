@@ -340,21 +340,16 @@ private fun ChatListPage(onBack: () -> Unit) {
     SettingsScaffold(title = strings.chatList, onBack = onBack) {
         SettingsGroup {
             item { shape ->
-                SettingsDropdownItem(
+                SettingsSwitchItem(
                     shape = shape,
+                    icon = Icons.Filled.Create,
                     title = strings.spaceIconMode,
-                    current = when (ui.spaceIconMode) {
-                        SpaceIconMode.SPACE_AVATAR -> strings.spaceAvatar
-                        SpaceIconMode.ROOM_PREVIEWS -> strings.spaceRoomAvatars
+                    description = if (ui.spaceIconMode == SpaceIconMode.SPACE_AVATAR) strings.spaceAvatar else strings.spaceRoomAvatars,
+                    checked = ui.spaceIconMode == SpaceIconMode.SPACE_AVATAR,
+                    onCheckedChange = { enabled ->
+                        ui.spaceIconMode = if (enabled) SpaceIconMode.SPACE_AVATAR else SpaceIconMode.ROOM_PREVIEWS
                     },
-                ) { close ->
-                    SettingsMenuOption(strings.spaceAvatar, ui.spaceIconMode == SpaceIconMode.SPACE_AVATAR) {
-                        ui.spaceIconMode = SpaceIconMode.SPACE_AVATAR; close()
-                    }
-                    SettingsMenuOption(strings.spaceRoomAvatars, ui.spaceIconMode == SpaceIconMode.ROOM_PREVIEWS) {
-                        ui.spaceIconMode = SpaceIconMode.ROOM_PREVIEWS; close()
-                    }
-                }
+                )
             }
             item { shape ->
                 SettingsSwitchItem(

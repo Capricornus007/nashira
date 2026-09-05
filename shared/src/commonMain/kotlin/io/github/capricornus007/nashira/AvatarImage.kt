@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.min
 import androidx.compose.ui.unit.sp
 import de.connect2x.trixnity.client.MatrixClient
 import de.connect2x.trixnity.client.media.MediaService
+import kotlinx.coroutines.delay
 
 /**
  * Matrix mxc 頭像。縮圖經 Trixnity 媒體快取取得，解出來的位圖按 mxc URL 記憶，
@@ -37,13 +38,21 @@ fun AvatarImage(
     var bitmap by remember(client, mxcUrl) { mutableStateOf(mxcUrl?.let { cache.get(it) }) }
     LaunchedEffect(client, mxcUrl) {
         if (bitmap != null || mxcUrl.isNullOrBlank() || !mxcUrl.startsWith("mxc://")) return@LaunchedEffect
-        val media = client.di.get<MediaService>()
-            .getThumbnail(mxcUrl, 96, 96, maxSize = 512_000)
-            .getOrNull() ?: return@LaunchedEffect
-        val bytes = media.toByteArray(this) ?: return@LaunchedEffect
-        val decoded = decodeImageBitmap(bytes) ?: return@LaunchedEffect
-        cache.put(mxcUrl, decoded)
-        bitmap = decoded
+        // 啟動初期 Trixnity 還不知道伺服器支援認證媒體（ServerData 尚未從資料庫載入），
+        // 那段時間的請求會走舊版 /_matrix/media 端點，較新上傳的媒體一律 404。
+        // 失敗必須重試：一次就放棄會讓頭像整個工作階段都空著（自己的頭像最常中）。
+        repeat(MediaFetchAttempts) { attempt ->
+            if (attempt > 0) delay(MediaRetryDelayMillis * attempt)
+            val media = client.di.get<MediaService>()
+                .getThumbnail(mxcUrl, 96, 96, maxSize = 512_000)
+                .getOrNull()
+            val decoded = media?.toByteArray(this)?.let { decodeImageBitmap(it) }
+            if (decoded != null) {
+                cache.put(mxcUrl, decoded)
+                bitmap = decoded
+                return@LaunchedEffect
+            }
+        }
     }
     val loaded = bitmap
     if (loaded != null) {
@@ -68,6 +77,12 @@ fun AvatarImage(
         )
     }
 }
+
+/** 媒體取回的嘗試次數；只為了跨過啟動初期那一小段「還不知道伺服器版本」的窗口。 */
+internal const val MediaFetchAttempts = 4
+
+/** 重試間隔基數（毫秒），第 n 次等 n 倍，避免離線時空轉。 */
+internal const val MediaRetryDelayMillis = 1200L
 
 /** 進程內頭像位圖快取：房間清單與 Space 圖示會反覆掛載同一個 mxc URL。 */
 private object AvatarCache {
