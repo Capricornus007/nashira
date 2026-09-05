@@ -22,6 +22,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /**
+ * 各平台的 ktor 引擎：桌面 CIO 引擎在 keep-alive 連接被伺服器關閉時會拋
+ * 「Not enough data available」，統一改用 OkHttp（Android 本來就用它）。
+ */
+internal expect fun platformHttpEngine(): io.ktor.client.engine.HttpClientEngine?
+
+/**
  * Matrix 引擎會話：持有 MatrixClient 生命週期（登入 → startSync → 數據流）。
  */
 class MatrixSession(
@@ -89,6 +95,7 @@ object MatrixEngine {
             configuration = {
                 this.syncFilter = MatrixEngine.syncFilter
                 this.modulesFactories = trixnityModuleFactoriesWithPonies()
+                this.httpClientEngine = platformHttpEngine()
             },
         ).getOrNull() ?: run {
             storage.clear()
@@ -123,6 +130,7 @@ object MatrixEngine {
             configuration = {
                 this.syncFilter = MatrixEngine.syncFilter
                 this.modulesFactories = trixnityModuleFactoriesWithPonies()
+                this.httpClientEngine = platformHttpEngine()
             },
         ).getOrElse { return Result.failure(it) }
 

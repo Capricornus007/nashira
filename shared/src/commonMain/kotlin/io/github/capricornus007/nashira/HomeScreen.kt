@@ -15,7 +15,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -172,8 +174,14 @@ private fun SettingsScaffold(
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(bottom = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            item { Column(Modifier.navigationBarsPadding()) { content() } }
+            item {
+                // 手機全寬；寬窗口（桌面）限寬置中，不再整排貼左
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Column(Modifier.navigationBarsPadding().widthIn(max = 640.dp)) { content() }
+                }
+            }
         }
     }
 }

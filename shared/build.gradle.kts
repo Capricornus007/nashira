@@ -20,7 +20,7 @@ kotlin {
         }
         compilations.all {
             dependencies {
-                implementation(libs.ktor.client.cio)
+                implementation(libs.ktor.client.okhttp)
                 // Room KMP 在 JVM 必須顯式給 SQLite 驅動（Android 自帶 framework 版）
                 implementation("androidx.sqlite:sqlite-bundled-jvm:2.6.2")
             }

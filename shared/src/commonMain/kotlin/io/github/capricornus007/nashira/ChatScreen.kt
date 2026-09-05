@@ -1044,13 +1044,13 @@ private fun TimelinePane(roomRepository: RoomRepository, room: RoomSummary, onBa
                         onSend = { sticker ->
                             scope.launch {
                                 roomRepository.sendSticker(room.roomId, sticker)
-                                    .onFailure { sendError = it.message ?: strings.sendFailed }
+                                    .onFailure { sendError = io.github.capricornus007.nashira.i18n.friendlyError(it) }
                             }
                         },
                         onSendImage = { image ->
                             scope.launch {
                                 roomRepository.sendImage(room.roomId, image)
-                                    .onFailure { sendError = it.message ?: strings.sendFailed }
+                                    .onFailure { sendError = io.github.capricornus007.nashira.i18n.friendlyError(it) }
                             }
                         },
                     )
@@ -1117,7 +1117,7 @@ private fun TimelinePane(roomRepository: RoomRepository, room: RoomSummary, onBa
                                 val body = draft.trim(); draft = ""; sending = true
                                 scope.launch {
                                     roomRepository.sendText(room.roomId, body)
-                                        .onFailure { draft = body; sendError = it.message ?: strings.sendFailed }
+                                        .onFailure { draft = body; sendError = io.github.capricornus007.nashira.i18n.friendlyError(it) }
                                     sending = false
                                 }
                             },
