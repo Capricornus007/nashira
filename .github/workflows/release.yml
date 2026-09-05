@@ -42,7 +42,7 @@ jobs:
         run: |
           REF="${GITHUB_REF#refs/tags/}"
           if [ "$REF" = "$GITHUB_REF" ]; then REF="v${{ github.event.inputs.version }}"; fi
-          echo "tag=$REF" >> "$GITHUB_ENV"
+          echo "TAG=$REF" >> "$GITHUB_ENV"
 
       - name: Publish GitHub Release
         env:
