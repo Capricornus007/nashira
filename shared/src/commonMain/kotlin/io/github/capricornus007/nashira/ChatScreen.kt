@@ -30,6 +30,10 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.material3.LocalContentColor
@@ -1124,15 +1128,6 @@ private fun TimelinePane(
                             tint = if (stickerPanel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    if (imageLauncher != null) {
-                        IconButton(onClick = imageLauncher, modifier = Modifier.size(44.dp)) {
-                            Icon(
-                                Icons.Filled.Add,
-                                contentDescription = strings.sendImage,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
                     Surface(
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
                         shape = RoundedCornerShape(22.dp),
@@ -1161,30 +1156,54 @@ private fun TimelinePane(
                             },
                         )
                     }
+                    // 尾端只有一顆鍵，內容隨草稿切換（實機對照：微信空白時是「＋」、
+                    // 有字就換成「傳送」；Telegram 空白時是麥克風＋迴紋針，有字就變紙飛機）。
+                    // 送出鍵不常駐，避免空白時擺一顆按不動的灰鈕。
                     val canSend = !sending && draft.isNotBlank()
-                    Box(
-                        Modifier.size(44.dp)
-                            .clip(CircleShape)
-                            .background(if (canSend) MaterialTheme.colorScheme.primary else Color.Transparent)
-                            .clickable(enabled = canSend) {
-                                val body = draft.trim(); draft = ""; sending = true
-                                scope.launch {
-                                    roomRepository.sendText(room.roomId, body)
-                                        .onFailure { draft = body; sendError = io.github.capricornus007.nashira.i18n.friendlyError(it) }
-                                    sending = false
+                    AnimatedContent(
+                        targetState = canSend || sending,
+                        transitionSpec = {
+                            (scaleIn(initialScale = 0.7f) + fadeIn()) togetherWith
+                                (scaleOut(targetScale = 0.7f) + fadeOut())
+                        },
+                        label = "composer_trailing",
+                    ) { showSend ->
+                        if (showSend) {
+                            Box(
+                                Modifier.size(44.dp)
+                                    .clip(CircleShape)
+                                    .background(if (canSend) MaterialTheme.colorScheme.primary else Color.Transparent)
+                                    .clickable(enabled = canSend) {
+                                        val body = draft.trim(); draft = ""; sending = true
+                                        scope.launch {
+                                            roomRepository.sendText(room.roomId, body)
+                                                .onFailure { draft = body; sendError = io.github.capricornus007.nashira.i18n.friendlyError(it) }
+                                            sending = false
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (sending) {
+                                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                                } else {
+                                    Icon(
+                                        Icons.Filled.Send,
+                                        contentDescription = strings.send,
+                                        modifier = Modifier.size(20.dp),
+                                        tint = MaterialTheme.colorScheme.onPrimary,
+                                    )
                                 }
-                            },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (sending) {
-                            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                            }
+                        } else if (imageLauncher != null) {
+                            IconButton(onClick = imageLauncher, modifier = Modifier.size(44.dp)) {
+                                Icon(
+                                    Icons.Filled.Add,
+                                    contentDescription = strings.sendImage,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         } else {
-                            Icon(
-                                Icons.Filled.Send,
-                                contentDescription = strings.send,
-                                modifier = Modifier.size(20.dp),
-                                tint = if (canSend) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                            Spacer(Modifier.size(4.dp))
                         }
                     }
                 }
