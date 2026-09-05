@@ -1,0 +1,62 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to tag & release (e.g. 0.1.0)"
+        required: false
+        default: "0.1.0"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build release APK and Linux packages
+        run: |
+          ./gradlew :androidApp:assembleRelease :desktopApp:packageDistributionForCurrentOS --no-daemon
+          echo "APK built:"
+          ls -la androidApp/build/outputs/apk/release/*.apk
+          echo "Packages:"
+          ls -la desktopApp/build/compose/binaries/main-dist/ 2>/dev/null || true
+
+      - name: Determine release tag
+        id: tag
+        run: |
+          REF="${GITHUB_REF#refs/tags/}"
+          if [ "$REF" = "$GITHUB_REF" ]; then REF="v${{ github.event.inputs.version }}"; fi
+          echo "tag=$REF" >> "$GITHUB_ENV"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ASSETS=(androidApp/build/outputs/apk/release/*.apk)
+          ASSETS+=($(ls desktopApp/build/compose/binaries/main-dist/**/*.deb 2>/dev/null || true))
+          ASSETS+=($(ls desktopApp/build/compose/binaries/main-dist/**/*.rpm 2>/dev/null || true))
+          echo "Assets: ${ASSETS[*]}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${ASSETS[@]}" --clobber
+          else
+            gh release create "$TAG" "${ASSETS[@]}" \
+              --target "$GITHUB_SHA" \
+              --title "Nashira $TAG" \
+              --notes "自用分發版（debug 簽章）。Android APK + Linux .deb/.rpm。"
+          fi
