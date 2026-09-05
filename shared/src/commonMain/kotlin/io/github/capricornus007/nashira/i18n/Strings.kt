@@ -72,6 +72,7 @@ interface Strings {
     val stickerPanelAbove: String
     val stickerPanelBelow: String
     val sessionLogoutViaAccountPage: String
+    val messageSendFailed: String
     val verificationIncoming: String
     val verificationIncomingHint: String
     val cancelVerification: String
@@ -229,6 +230,7 @@ object ZhTwStrings : Strings {
     override val stickerPanelAbove = "浮在輸入列上方，不推動輸入列"
     override val stickerPanelBelow = "釘在輸入列下方"
     override val sessionLogoutViaAccountPage = "此伺服器改由帳戶管理頁登出裝置，已在瀏覽器開啟"
+    override val messageSendFailed = "送出失敗"
     override val verificationIncoming = "工作階段驗證請求"
     override val verificationIncomingHint = "另一個工作階段要求驗證。接受後兩邊會比對一組表情符號。"
     override val cancelVerification = "取消驗證"
@@ -441,6 +443,7 @@ object EnStrings : Strings {
     override val stickerPanelAbove = "Floats above the composer"
     override val stickerPanelBelow = "Docks below the composer"
     override val sessionLogoutViaAccountPage = "This server logs out devices on its account page; opened in your browser"
+    override val messageSendFailed = "Failed to send"
     override val verificationIncoming = "Session verification request"
     override val verificationIncomingHint = "Another session asked to verify. After accepting, both sides compare a set of emoji."
     override val cancelVerification = "Cancel verification"

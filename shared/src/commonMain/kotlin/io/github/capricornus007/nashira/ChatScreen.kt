@@ -34,6 +34,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.ui.draw.alpha
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.material3.LocalContentColor
@@ -1371,12 +1372,25 @@ private fun MessageRow(
                     )
                 }
             }
-            MessageBodyContent(
-                client = client,
-                body = msg.body,
-                strings = strings,
-                modifier = Modifier.padding(top = if (grouped) 0.dp else 2.dp),
-            )
+            // 送出中／送出失敗：Telegram 與 Element 都在本機先畫出來再標狀態，
+            // 不然點下送出到伺服器回音之間畫面完全沒反應。
+            Box {
+                MessageBodyContent(
+                    client = client,
+                    body = msg.body,
+                    strings = strings,
+                    modifier = Modifier
+                        .padding(top = if (grouped) 0.dp else 2.dp)
+                        .alpha(if (msg.pending && msg.sendError == null) 0.55f else 1f),
+                )
+            }
+            msg.sendError?.let {
+                Text(
+                    strings.messageSendFailed,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
         }
     }
 }

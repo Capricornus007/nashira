@@ -22,6 +22,10 @@ fun friendlyError(t: Throwable): String {
             "加密連線失敗：伺服器憑證可能有問題"
         msg.contains("M_TOO_LARGE") ->
             "檔案太大，伺服器拒收"
+        // matrix.org 實測回應：403 {"errcode":"M_USER_LIMIT_EXCEEDED",
+        // "error":"Media upload limit exceeded"} —— 是伺服器的上傳額度，不是帳密也不是網路
+        msg.contains("M_USER_LIMIT_EXCEEDED") ->
+            "伺服器的媒體上傳額度已用盡，過一段時間再試"
         // M_FORBIDDEN 在登入以外的地方是「伺服器不允許這個操作」——最常見的是
         // matrix.org 的媒體上傳配額。以前一律翻成「帳號或密碼不正確」，發圖失敗時
         // 會顯示成密碼錯誤，誤導得很嚴重。

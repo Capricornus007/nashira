@@ -4,6 +4,7 @@ import de.connect2x.trixnity.client.MatrixClient
 import de.connect2x.trixnity.client.room
 import de.connect2x.trixnity.client.room.TimelineState
 import de.connect2x.trixnity.client.store.RoomUser
+import de.connect2x.trixnity.client.store.RoomOutboxMessage
 import de.connect2x.trixnity.client.store.TimelineEvent
 import de.connect2x.trixnity.core.model.EventId
 import de.connect2x.trixnity.core.model.RoomId
@@ -16,6 +17,8 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flow
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -84,7 +87,42 @@ class RoomTimeline(
                 )
             }
         }
+        // 本機回顯：outbox 裡還沒被伺服器回音確認的訊息貼在最前面（UI 是新→舊）。
+        // 少了這一段，點下送出到 sync 回來之前畫面完全沒反應，使用者只能猜有沒有送出去。
+        .combine(outboxFlow()) { page, pending ->
+            if (pending.isEmpty()) page else page.copy(messages = pending + page.messages)
+        }
         .distinctUntilChanged()
+
+    /**
+     * outbox 的每一筆是一條流（Trixnity 會就地更新上傳進度／錯誤）。
+     * 已經拿到 eventId 的表示伺服器收下了，真正的時間線事件很快就會到，
+     * 這裡濾掉避免同一則訊息出現兩次。
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun outboxFlow(): Flow<List<TimelineMessage>> =
+        client.room.getOutbox(roomId)
+            .flatMapLatest { entries ->
+                if (entries.isEmpty()) flowOf(emptyList())
+                else combine(entries) { list -> list.mapNotNull { toPendingMessage(it) } }
+            }
+
+    private fun toPendingMessage(outbox: RoomOutboxMessage<*>?): TimelineMessage? {
+        if (outbox == null) return null
+        if (outbox.isDraft || outbox.eventId != null) return null
+        val body = outbox.content.messageBodyOrNull() ?: return null
+        return TimelineMessage(
+            eventId = null,
+            roomId = roomId,
+            sender = client.userId,
+            senderName = client.userId.full.removePrefix("@").substringBefore(':'),
+            senderAvatarUrl = null,
+            body = body,
+            timestamp = outbox.createdAt.toEpochMilliseconds(),
+            pending = true,
+            sendError = outbox.sendError?.let { it::class.simpleName },
+        )
+    }
 
     private suspend fun toMessage(eventFlow: Flow<TimelineEvent>): TimelineMessage? {
         val members = memberMap.firstOrNull() ?: emptyMap()

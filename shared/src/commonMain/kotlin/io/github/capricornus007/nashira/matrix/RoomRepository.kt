@@ -129,6 +129,10 @@ data class TimelineMessage(
     val senderAvatarUrl: String?,
     val body: MessageBody,
     val timestamp: Long,
+    /** 還在 outbox（本機回顯）：尚未被伺服器回音確認。 */
+    val pending: Boolean = false,
+    /** outbox 送出失敗的原因；非 null 時 UI 要標紅並允許重試。 */
+    val sendError: String? = null,
 )
 
 /**
@@ -437,16 +441,25 @@ internal fun TimelineEvent.messageBodyOrNull(): MessageBody? {
     // content 還是 null 表示尚未解密：可能在等金鑰（Trixnity 預設無限期等）。
     // 這種事件不能靜靜丟掉，否則整個加密房間會是一片空白，看不出「這裡有訊息但我沒鑰匙」。
     if (decrypted == null && event.content is EncryptedMessageEventContent) return MessageBody.Undecryptable
-    return when (val body = decrypted?.getOrNull() ?: event.content) {
-        is RoomMessageEventContent.TextBased -> MessageBody.Text(body.body)
+    return (decrypted?.getOrNull() ?: event.content).messageBodyOrNull()
+}
+
+/**
+ * 內容層的映射。outbox（本機回顯）只有 content 沒有 TimelineEvent，兩邊共用這一份，
+ * 免得「已送出的訊息」和「還在送的訊息」長得不一樣。
+ */
+internal fun de.connect2x.trixnity.core.model.events.EventContent.messageBodyOrNull(): MessageBody? =
+    when (this) {
+        is RoomMessageEventContent.TextBased -> MessageBody.Text(body)
         is RoomMessageEventContent.FileBased.Image ->
-            imageBody(body.body, body.url, body.file, body.info as? ImageInfo, isSticker = false)
-        is RoomMessageEventContent.FileBased -> MessageBody.Attachment(body.fileName ?: body.body)
-        // Trixnity 5.8.1 沒有 m.sticker 的內容型別，貼圖以 UnknownEventContent 帶原始 JSON 進來
-        is UnknownEventContent -> if (body.eventType == "m.sticker") stickerBody(body.raw) else null
+            imageBody(body, url, file, info as? ImageInfo, isSticker = false)
+        is RoomMessageEventContent.FileBased -> MessageBody.Attachment(fileName ?: body)
+        // 自己送出的貼圖是註冊過的 StickerEventContent
+        is StickerEventContent -> imageBody(body, url, file, info, isSticker = true)
+        // Trixnity 5.8.1 沒有 m.sticker 的內容型別，別人送的貼圖以 UnknownEventContent 帶原始 JSON 進來
+        is UnknownEventContent -> if (eventType == "m.sticker") stickerBody(raw) else null
         else -> null
     }
-}
 
 /** 圖片訊息優先用縮圖，省掉整張原圖的流量；加密房的縮圖同樣是 EncryptedFile。 */
 private fun imageBody(
