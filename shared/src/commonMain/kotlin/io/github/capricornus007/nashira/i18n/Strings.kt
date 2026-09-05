@@ -73,6 +73,24 @@ interface Strings {
     val stickerPanelBelow: String
     val sessionLogoutViaAccountPage: String
     val messageSendFailed: String
+    val attachPhoto: String
+    val attachSticker: String
+    val attachTitle: String
+    val attachFile: String
+    val attach: String
+    val spaceHome: String
+    val actionReply: String
+    val actionCopyText: String
+    val actionCopyLink: String
+    val actionDelete: String
+    val actionMarkUnread: String
+    val actionFavourite: String
+    val actionLowPriority: String
+    val actionInvite: String
+    val actionLeave: String
+    val inviteHint: String
+    val copiedToClipboard: String
+    val replyingTo: String
     val verificationIncoming: String
     val verificationIncomingHint: String
     val cancelVerification: String
@@ -231,6 +249,24 @@ object ZhTwStrings : Strings {
     override val stickerPanelBelow = "釘在輸入列下方"
     override val sessionLogoutViaAccountPage = "此伺服器改由帳戶管理頁登出裝置，已在瀏覽器開啟"
     override val messageSendFailed = "送出失敗"
+    override val attachPhoto = "照片"
+    override val attachSticker = "貼圖"
+    override val attachTitle = "傳送"
+    override val attachFile = "檔案"
+    override val attach = "附件"
+    override val spaceHome = "聊天空間首頁"
+    override val actionReply = "回覆"
+    override val actionCopyText = "複製文字"
+    override val actionCopyLink = "複製連結"
+    override val actionDelete = "刪除訊息"
+    override val actionMarkUnread = "標記為未讀"
+    override val actionFavourite = "收藏"
+    override val actionLowPriority = "低優先"
+    override val actionInvite = "邀請"
+    override val actionLeave = "離開"
+    override val inviteHint = "輸入要邀請的 Matrix ID（@user:server）"
+    override val copiedToClipboard = "已複製"
+    override val replyingTo = "回覆 %s"
     override val verificationIncoming = "工作階段驗證請求"
     override val verificationIncomingHint = "另一個工作階段要求驗證。接受後兩邊會比對一組表情符號。"
     override val cancelVerification = "取消驗證"
@@ -444,6 +480,24 @@ object EnStrings : Strings {
     override val stickerPanelBelow = "Docks below the composer"
     override val sessionLogoutViaAccountPage = "This server logs out devices on its account page; opened in your browser"
     override val messageSendFailed = "Failed to send"
+    override val attachPhoto = "Photo"
+    override val attachSticker = "Sticker"
+    override val attachTitle = "Send"
+    override val attachFile = "File"
+    override val attach = "Attach"
+    override val spaceHome = "Space home"
+    override val actionReply = "Reply"
+    override val actionCopyText = "Copy text"
+    override val actionCopyLink = "Copy link"
+    override val actionDelete = "Remove message"
+    override val actionMarkUnread = "Mark as unread"
+    override val actionFavourite = "Favourite"
+    override val actionLowPriority = "Low priority"
+    override val actionInvite = "Invite"
+    override val actionLeave = "Leave"
+    override val inviteHint = "Enter the Matrix ID to invite (@user:server)"
+    override val copiedToClipboard = "Copied"
+    override val replyingTo = "Replying to %s"
     override val verificationIncoming = "Session verification request"
     override val verificationIncomingHint = "Another session asked to verify. After accepting, both sides compare a set of emoji."
     override val cancelVerification = "Cancel verification"

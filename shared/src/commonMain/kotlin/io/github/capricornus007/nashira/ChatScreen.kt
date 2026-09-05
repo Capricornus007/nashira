@@ -35,6 +35,12 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.material3.LocalContentColor
@@ -62,6 +68,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AccountBox
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material.icons.filled.ArrowBack
@@ -247,6 +255,10 @@ fun ChatScreen(
                                 unreadBySpace = unreadBySpace,
                                 homeUnread = homeUnread,
                                 onSelectSpace = { selectedSpace = it; selected = null },
+                                strings = strings,
+                                spacePermalink = { space -> roomRepository.permalink(space.roomId) },
+                                onLeaveSpace = { space -> roomRepository.leave(space.roomId) },
+                                onInviteToSpace = { space, userId -> roomRepository.invite(space.roomId, userId) },
                             )
                             ChannelPane(
                                 roomRepository = roomRepository,
@@ -377,6 +389,10 @@ private fun MobileChatShell(
                     unreadBySpace = unreadBySpace,
                     homeUnread = homeUnread,
                     onSelectSpace = onSelectSpace,
+                    strings = strings,
+                    spacePermalink = { space -> roomRepository.permalink(space.roomId) },
+                    onLeaveSpace = { space -> roomRepository.leave(space.roomId) },
+                    onInviteToSpace = { space, userId -> roomRepository.invite(space.roomId, userId) },
                     modifier = Modifier.statusBarsPadding(),
                 )
                 ChannelPane(
@@ -418,7 +434,7 @@ private fun MobileChatShell(
                                 flingBehavior = paneFling,
                             ),
                     ) {
-                        TimelinePane(roomRepository, room, onBack = onBack)
+                        TimelinePane(roomRepository, room, onBack = onBack, compact = true)
                     }
                 }
             }
@@ -444,8 +460,14 @@ private fun ServerRail(
     unreadBySpace: Map<RoomId, UnreadState>,
     homeUnread: UnreadState,
     onSelectSpace: (SpaceSummary?) -> Unit,
+    strings: io.github.capricornus007.nashira.i18n.Strings,
+    spacePermalink: suspend (SpaceSummary) -> String,
+    onLeaveSpace: suspend (SpaceSummary) -> Unit,
+    onInviteToSpace: suspend (SpaceSummary, String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
     Column(
         modifier = modifier.width(DiscordRailWidth).fillMaxHeight()
             .background(MaterialTheme.colorScheme.surfaceContainerLowest),
@@ -476,18 +498,45 @@ private fun ServerRail(
             item { RailSeparator() }
             items(spaces, key = { it.roomId.full }) { space ->
                 val unread = unreadBySpace[space.roomId] ?: UnreadState()
-                RailSlot(
-                    selected = selectedSpace?.roomId == space.roomId,
-                    unread = unread,
-                    onClick = { onSelectSpace(space) },
-                ) { shape ->
-                    SpaceIcon(
-                        client = client,
-                        space = space,
-                        rooms = spaceRooms[space.roomId.full].orEmpty(),
-                        iconMode = iconMode,
-                        shape = shape,
-                    )
+                var menuOpen by remember(space.roomId) { mutableStateOf(false) }
+                var inviteFor by remember(space.roomId) { mutableStateOf(false) }
+                Box {
+                    RailSlot(
+                        selected = selectedSpace?.roomId == space.roomId,
+                        unread = unread,
+                        onClick = { onSelectSpace(space) },
+                        onContextMenu = { menuOpen = true },
+                    ) { shape ->
+                        SpaceIcon(
+                            client = client,
+                            space = space,
+                            rooms = spaceRooms[space.roomId.full].orEmpty(),
+                            iconMode = iconMode,
+                            shape = shape,
+                        )
+                    }
+                    ContextMenuSurface(expanded = menuOpen, onDismiss = { menuOpen = false }) {
+                        ContextMenuItem(strings.spaceHome) { menuOpen = false; onSelectSpace(space) }
+                        ContextMenuItem(strings.actionCopyLink) {
+                            menuOpen = false
+                            scope.launch { clipboard.setText(AnnotatedString(spacePermalink(space))) }
+                        }
+                        ContextMenuItem(strings.actionInvite) { menuOpen = false; inviteFor = true }
+                        ContextMenuItem(strings.actionLeave, destructive = true) {
+                            menuOpen = false
+                            scope.launch { onLeaveSpace(space) }
+                        }
+                    }
+                    if (inviteFor) {
+                        InviteDialog(
+                            strings = strings,
+                            onDismiss = { inviteFor = false },
+                            onConfirm = { userId ->
+                                inviteFor = false
+                                scope.launch { onInviteToSpace(space, userId) }
+                            },
+                        )
+                    }
                 }
             }
             item {
@@ -515,6 +564,7 @@ private fun RailSlot(
     selected: Boolean,
     unread: UnreadState,
     onClick: () -> Unit,
+    onContextMenu: (() -> Unit)? = null,
     content: @Composable (shape: RoundedCornerShape) -> Unit,
 ) {
     val corner by animateDpAsState(
@@ -547,7 +597,10 @@ private fun RailSlot(
             // clip 必須在 clickable 之前：否則點擊漣漪畫在未裁切的方形 Box 上，
             // 圓形圖示按下去會冒出一個方塊（用戶回報「動畫是方的」）。
             Box(
-                Modifier.size(RailIconSize).clip(shape).clickable(onClick = onClick),
+                Modifier.size(RailIconSize).clip(shape).let { base ->
+                    if (onContextMenu == null) base.clickable(onClick = onClick)
+                    else base.contextMenuGestures(onClick = onClick, onContextMenu = onContextMenu)
+                },
                 contentAlignment = Alignment.Center,
             ) {
                 content(shape)
@@ -814,6 +867,10 @@ private fun RoomListItem(
     val now = remember(room.lastActivity) { kotlin.time.Clock.System.now().toEpochMilliseconds() }
     val scope = rememberCoroutineScope()
     var inviteBusy by remember(room.roomId) { mutableStateOf(false) }
+    var menuOpen by remember(room.roomId) { mutableStateOf(false) }
+    var tags by remember(room.roomId) { mutableStateOf<Set<String>>(emptySet()) }
+    var inviteFor by remember(room.roomId) { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
     Column(
         Modifier.fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 2.dp)
@@ -825,7 +882,14 @@ private fun RoomListItem(
                     else -> Color.Transparent
                 },
             )
-            .then(if (room.isInvite) Modifier else Modifier.clickable { onSelect(room) }),
+            // 邀請中的房間不能點進去，但長按／右鍵仍要能拒絕與離開
+            .contextMenuGestures(
+                onClick = { if (!room.isInvite) onSelect(room) },
+                onContextMenu = {
+                    menuOpen = true
+                    scope.launch { tags = roomRepository.tags(room.roomId) }
+                },
+            ),
     ) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
@@ -897,6 +961,49 @@ private fun RoomListItem(
                     modifier = Modifier.weight(1f),
                 ) { Text(strings.declineInvite) }
             }
+        }
+        ContextMenuSurface(expanded = menuOpen, onDismiss = { menuOpen = false }) {
+            val favourite = "m.favourite" in tags
+            val lowPriority = "m.lowpriority" in tags
+            if (!room.isInvite) {
+                ContextMenuItem(strings.actionMarkUnread) {
+                    menuOpen = false
+                    scope.launch { roomRepository.setMarkedUnread(room.roomId, true) }
+                }
+                ContextMenuItem(if (favourite) "✓ ${strings.actionFavourite}" else strings.actionFavourite) {
+                    menuOpen = false
+                    scope.launch {
+                        roomRepository.setTag(room.roomId, "m.favourite", !favourite)
+                        tags = roomRepository.tags(room.roomId)
+                    }
+                }
+                ContextMenuItem(if (lowPriority) "✓ ${strings.actionLowPriority}" else strings.actionLowPriority) {
+                    menuOpen = false
+                    scope.launch {
+                        roomRepository.setTag(room.roomId, "m.lowpriority", !lowPriority)
+                        tags = roomRepository.tags(room.roomId)
+                    }
+                }
+                ContextMenuItem(strings.actionCopyLink) {
+                    menuOpen = false
+                    scope.launch { clipboard.setText(AnnotatedString(roomRepository.permalink(room.roomId))) }
+                }
+                ContextMenuItem(strings.actionInvite) { menuOpen = false; inviteFor = true }
+            }
+            ContextMenuItem(strings.actionLeave, destructive = true) {
+                menuOpen = false
+                scope.launch { roomRepository.leave(room.roomId) }
+            }
+        }
+        if (inviteFor) {
+            InviteDialog(
+                strings = strings,
+                onDismiss = { inviteFor = false },
+                onConfirm = { userId ->
+                    inviteFor = false
+                    scope.launch { roomRepository.invite(room.roomId, userId) }
+                },
+            )
         }
     }
 }
@@ -975,6 +1082,8 @@ private fun TimelinePane(
     roomRepository: RoomRepository,
     room: RoomSummary,
     onBack: (() -> Unit)? = null,
+    /** 窄版面：附件選單走底部面板而不是小彈窗 */
+    compact: Boolean = false,
     membersOpen: Boolean = false,
     onToggleMembers: (() -> Unit)? = null,
 ) {
@@ -1000,6 +1109,9 @@ private fun TimelinePane(
     var draft by remember(room.roomId) { mutableStateOf("") }
     var sending by remember(room.roomId) { mutableStateOf(false) }
     var sendError by remember(room.roomId) { mutableStateOf<String?>(null) }
+    /** 選了「回覆」之後要附上的目標訊息；送出後清掉。 */
+    var replyTo by remember(room.roomId) { mutableStateOf<TimelineMessage?>(null) }
+    val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
@@ -1044,6 +1156,8 @@ private fun TimelinePane(
     // 浮在訊息區上方（Telegram／Discord／Element 的做法，不推動輸入列），
     // 或釘在輸入列下方。由設定 stickerPanelAbove 決定。
     var stickerPanel by remember(room.roomId) { mutableStateOf(false) }
+    // 「＋」的附件選單（桌面是小彈窗、手機是底部面板）
+    var attachMenu by remember(room.roomId) { mutableStateOf(false) }
     val panelAbove = LocalUiState.current.stickerPanelAbove
     val stickerPanelContent: @Composable (Modifier) -> Unit = { panelModifier ->
         StickerPicker(
@@ -1064,6 +1178,12 @@ private fun TimelinePane(
     val imageLauncher = rememberImagePickerLauncher { image ->
         scope.launch {
             roomRepository.sendImage(room.roomId, image)
+                .onFailure { sendError = io.github.capricornus007.nashira.i18n.friendlyError(it) }
+        }
+    }
+    val fileLauncher = rememberFilePickerLauncher { picked ->
+        scope.launch {
+            roomRepository.sendFile(room.roomId, picked)
                 .onFailure { sendError = io.github.capricornus007.nashira.i18n.friendlyError(it) }
         }
     }
@@ -1102,6 +1222,30 @@ private fun TimelinePane(
         },
         bottomBar = {
             Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).navigationBarsPadding()) {
+                // 回覆預覽：跟 Element／Telegram 一樣掛在輸入列上方，右邊一個叉取消
+                replyTo?.let { target ->
+                    Row(
+                        Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            strings.replyingTo.format(target.senderName),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = { replyTo = null }, modifier = Modifier.size(32.dp)) {
+                            Icon(
+                                Icons.Filled.Close,
+                                contentDescription = strings.cancel,
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
                 sendError?.let {
                     Text(
                         it,
@@ -1176,9 +1320,18 @@ private fun TimelinePane(
                                     .background(if (canSend) MaterialTheme.colorScheme.primary else Color.Transparent)
                                     .clickable(enabled = canSend) {
                                         val body = draft.trim(); draft = ""; sending = true
+                                        val target = replyTo?.eventId
+                                        replyTo = null
                                         scope.launch {
-                                            roomRepository.sendText(room.roomId, body)
-                                                .onFailure { draft = body; sendError = io.github.capricornus007.nashira.i18n.friendlyError(it) }
+                                            val result = if (target != null) {
+                                                roomRepository.sendReply(room.roomId, target, body)
+                                            } else {
+                                                roomRepository.sendText(room.roomId, body)
+                                            }
+                                            result.onFailure {
+                                                draft = body
+                                                sendError = io.github.capricornus007.nashira.i18n.friendlyError(it)
+                                            }
                                             sending = false
                                         }
                                     },
@@ -1195,16 +1348,30 @@ private fun TimelinePane(
                                     )
                                 }
                             }
-                        } else if (imageLauncher != null) {
-                            IconButton(onClick = imageLauncher, modifier = Modifier.size(44.dp)) {
-                                Icon(
-                                    Icons.Filled.Add,
-                                    contentDescription = strings.sendImage,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
                         } else {
-                            Spacer(Modifier.size(4.dp))
+                            // 「＋」不再直接開相簿：Telegram／Element／Discord 桌面都是先彈一張
+                            // 小選單，手機端 SchildiChat 是從下往上的底部面板。
+                            Box {
+                                IconButton(
+                                    onClick = { attachMenu = true },
+                                    modifier = Modifier.size(44.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Add,
+                                        contentDescription = strings.attach,
+                                        tint = if (attachMenu) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                if (!compact) {
+                                    AttachMenu(
+                                        expanded = attachMenu,
+                                        strings = strings,
+                                        onDismiss = { attachMenu = false },
+                                        onPhoto = imageLauncher?.let { launch -> { attachMenu = false; launch() } },
+                                        onFile = fileLauncher?.let { launch -> { attachMenu = false; launch() } },
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -1263,6 +1430,26 @@ private fun TimelinePane(
                         msg = msg,
                         grouped = grouped,
                         strings = strings,
+                        isOwn = msg.sender == roomRepository.client.userId,
+                        onReply = { replyTo = msg },
+                        onCopyText = {
+                            (msg.body as? MessageBody.Text)?.let { text ->
+                                clipboard.setText(AnnotatedString(text.text))
+                            }
+                        },
+                        onCopyLink = {
+                            scope.launch {
+                                clipboard.setText(AnnotatedString(roomRepository.permalink(room.roomId, msg.eventId)))
+                            }
+                        },
+                        onDelete = {
+                            msg.eventId?.let { id ->
+                                scope.launch {
+                                    roomRepository.redact(room.roomId, id)
+                                        .onFailure { sendError = io.github.capricornus007.nashira.i18n.friendlyError(it) }
+                                }
+                            }
+                        },
                     )
                     // 分隔線畫在這則訊息「上方」，reverseLayout 下要在 MessageRow 之後發出
                     if (newDay) DateDivider(formatDateDivider(msg.timestamp, today, strings))
@@ -1302,8 +1489,81 @@ private fun TimelinePane(
             }
         }
     }
+
+    // 手機端的附件面板：從下往上（對照 SchildiChat 的做法）
+    if (compact && attachMenu) {
+        ModalBottomSheet(onDismissRequest = { attachMenu = false }) {
+            Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
+                if (imageLauncher != null) {
+                    AttachRow(Icons.Filled.AccountBox, strings.attachPhoto) {
+                        attachMenu = false
+                        imageLauncher()
+                    }
+                }
+                if (fileLauncher != null) {
+                    AttachRow(Icons.AutoMirrored.Filled.List, strings.attachFile) {
+                        attachMenu = false
+                        fileLauncher()
+                    }
+                }
+            }
+        }
+    }
 }
 
+
+/**
+ * 桌面端「＋」的小彈窗。對照三家桌面客戶端：Telegram 是照片或影片／選取文件…，
+ * Element 是貼圖／語音／投票，Discord 是上傳檔案／使用應用程式——都是輸入列上方的小選單。
+ *
+ * 貼圖**不放進來**：輸入列左邊已經有專屬的笑臉鍵（三家參考客戶端都是這樣分工），
+ * 放兩份等於多餘。這裡只放真的做得到的項目，不擺按了沒反應的列。
+ */
+@Composable
+private fun AttachMenu(
+    expanded: Boolean,
+    strings: io.github.capricornus007.nashira.i18n.Strings,
+    onDismiss: () -> Unit,
+    onPhoto: (() -> Unit)?,
+    onFile: (() -> Unit)?,
+) {
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shadowElevation = 8.dp,
+        // 輸入列在畫面最底，選單要往上開
+        offset = DpOffset(0.dp, (-200).dp),
+    ) {
+        if (onPhoto != null) {
+            DropdownMenuItem(
+                text = { Text(strings.attachPhoto) },
+                leadingIcon = { Icon(Icons.Filled.AccountBox, contentDescription = null) },
+                onClick = onPhoto,
+            )
+        }
+        if (onFile != null) {
+            DropdownMenuItem(
+                text = { Text(strings.attachFile) },
+                leadingIcon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
+                onClick = onFile,
+            )
+        }
+    }
+}
+
+/** 手機底部面板的一列。 */
+@Composable
+private fun AttachRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 24.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(20.dp),
+    ) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Text(label, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+    }
+}
 /** 兩則訊息合併顯示的最大間隔，對齊 Discord 的 7 分鐘。 */
 private const val GroupingWindowMillis = 7 * 60 * 1000L
 
@@ -1338,43 +1598,52 @@ private fun MessageRow(
     msg: TimelineMessage,
     grouped: Boolean,
     strings: io.github.capricornus007.nashira.i18n.Strings,
+    isOwn: Boolean,
+    onReply: () -> Unit,
+    onCopyText: () -> Unit,
+    onCopyLink: () -> Unit,
+    onDelete: () -> Unit,
 ) {
-    Row(
-        Modifier.fillMaxWidth().padding(
-            start = 16.dp,
-            end = 16.dp,
-            top = if (grouped) 2.dp else 10.dp,
-            bottom = 1.dp,
-        ),
-    ) {
-        Box(Modifier.width(MessageGutterWidth)) {
-            if (!grouped) {
-                AvatarImage(client, msg.senderAvatarUrl, msg.senderName, Modifier.size(40.dp).clip(CircleShape))
-            }
-        }
-        Column(Modifier.weight(1f)) {
-            if (!grouped) {
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text(
-                        msg.senderName,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                    Text(
-                        formatClock(msg.timestamp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 8.dp, bottom = 1.dp),
-                    )
+    var menuOpen by remember(msg.eventId) { mutableStateOf(false) }
+    Box {
+        Row(
+            Modifier.fillMaxWidth()
+                // 長按（手機）／右鍵（桌面）開選單，對齊 Element 與 Discord
+                .contextMenuGestures { menuOpen = true }
+                .padding(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = if (grouped) 2.dp else 10.dp,
+                    bottom = 1.dp,
+                ),
+        ) {
+            Box(Modifier.width(MessageGutterWidth)) {
+                if (!grouped) {
+                    AvatarImage(client, msg.senderAvatarUrl, msg.senderName, Modifier.size(40.dp).clip(CircleShape))
                 }
             }
-            // 送出中／送出失敗：Telegram 與 Element 都在本機先畫出來再標狀態，
-            // 不然點下送出到伺服器回音之間畫面完全沒反應。
-            Box {
+            Column(Modifier.weight(1f)) {
+                if (!grouped) {
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text(
+                            msg.senderName,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        Text(
+                            formatClock(msg.timestamp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = 8.dp, bottom = 1.dp),
+                        )
+                    }
+                }
+                // 送出中／送出失敗：Telegram 與 Element 都在本機先畫出來再標狀態，
+                // 不然點下送出到伺服器回音之間畫面完全沒反應。
                 MessageBodyContent(
                     client = client,
                     body = msg.body,
@@ -1383,13 +1652,29 @@ private fun MessageRow(
                         .padding(top = if (grouped) 0.dp else 2.dp)
                         .alpha(if (msg.pending && msg.sendError == null) 0.55f else 1f),
                 )
+                msg.sendError?.let {
+                    Text(
+                        strings.messageSendFailed,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
             }
-            msg.sendError?.let {
-                Text(
-                    strings.messageSendFailed,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
+        }
+        ContextMenuSurface(expanded = menuOpen, onDismiss = { menuOpen = false }) {
+            // 還在 outbox 的訊息沒有 eventId，回覆／連結／刪除都無從指定
+            val settled = msg.eventId != null
+            if (settled) {
+                ContextMenuItem(strings.actionReply) { menuOpen = false; onReply() }
+            }
+            if (msg.body is MessageBody.Text) {
+                ContextMenuItem(strings.actionCopyText) { menuOpen = false; onCopyText() }
+            }
+            if (settled) {
+                ContextMenuItem(strings.actionCopyLink) { menuOpen = false; onCopyLink() }
+                if (isOwn) {
+                    ContextMenuItem(strings.actionDelete, destructive = true) { menuOpen = false; onDelete() }
+                }
             }
         }
     }

@@ -50,6 +50,10 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
+import de.connect2x.trixnity.client.room.message.reply
+import de.connect2x.trixnity.core.model.events.m.MarkedUnreadEventContent
+import de.connect2x.trixnity.core.model.events.m.TagEventContent
+import io.github.capricornus007.nashira.PickedFile
 
 /** UI 友好的房間摘要 */
 data class RoomSummary(
@@ -387,6 +391,92 @@ class RoomRepository(val client: MatrixClient) {
     /** 發送貼圖（MSC2545 m.sticker）：走 StickerRepository 的加密路徑，回 eventId 便於撤回 */
     suspend fun sendSticker(roomId: RoomId, sticker: StickerItem): Result<String> =
         StickerRepository(client).sendSticker(roomId, sticker)
+
+    /** 回覆某則訊息（m.in_reply_to）。 */
+    suspend fun sendReply(roomId: RoomId, replyTo: EventId, body: String): Result<String> =
+        runCatching {
+            client.room.sendMessage(roomId) {
+                reply(replyTo, null)
+                text(body)
+            }
+        }
+
+    /** 撤回訊息（m.room.redaction）。只有自己的訊息或有權限時伺服器才會接受。 */
+    suspend fun redact(roomId: RoomId, eventId: EventId): Result<Unit> =
+        runCatching { client.api.room.redactEvent(roomId, eventId).getOrThrow() }.map { }
+
+    /**
+     * 標記／取消標記未讀（MSC2867 `m.marked_unread`）。
+     * 這是房間層的 account data，其他客戶端也看得到同一個狀態。
+     */
+    suspend fun setMarkedUnread(roomId: RoomId, unread: Boolean): Result<Unit> =
+        runCatching {
+            client.api.room.setAccountData(MarkedUnreadEventContent(unread), roomId, client.userId).getOrThrow()
+        }
+
+    /** 收藏／低優先等 `m.tag`；enabled=false 時刪掉該標籤。 */
+    suspend fun setTag(roomId: RoomId, tag: String, enabled: Boolean): Result<Unit> =
+        runCatching {
+            if (enabled) {
+                client.api.room.setTag(client.userId, roomId, tag, TagEventContent.Tag()).getOrThrow()
+            } else {
+                client.api.room.deleteTag(client.userId, roomId, tag).getOrThrow()
+            }
+        }
+
+    /** 目前生效的 `m.tag` 名稱集合（`m.favourite` / `m.lowpriority` …）。 */
+    suspend fun tags(roomId: RoomId): Set<String> =
+        client.api.room.getTags(client.userId, roomId).getOrNull()
+            ?.tags?.keys?.map { it.name }?.toSet()
+            ?: emptySet()
+
+    /** 離開房間或 Space。 */
+    suspend fun leave(roomId: RoomId): Result<Unit> =
+        runCatching { client.api.room.leaveRoom(roomId).getOrThrow() }
+
+    /** 邀請使用者加入房間或 Space。 */
+    suspend fun invite(roomId: RoomId, userId: String): Result<Unit> =
+        runCatching { client.api.room.inviteUser(roomId, UserId(userId)).getOrThrow() }
+
+    /**
+     * matrix.to 永久連結。房間有正式別名就用別名（別人點得開），否則用房間 ID
+     * 並附上 via 參數——沒有 via，對方伺服器不知道去哪裡問這個房間。
+     */
+    suspend fun permalink(roomId: RoomId, eventId: EventId? = null): String {
+        val alias = client.room.getState<CanonicalAliasEventContent>(roomId).firstOrNull()?.content?.alias?.full
+        val target = alias ?: roomId.full
+        val via = if (alias == null) "?via=${client.userId.domain}" else ""
+        val event = eventId?.let { "/${it.full}" } ?: ""
+        return "https://matrix.to/#/$target$event$via"
+    }
+
+    /** 發送任意檔案（m.file）。上傳路徑與 sendImage 相同，只是 content 型別不同。 */
+    suspend fun sendFile(roomId: RoomId, picked: PickedFile): Result<String> = runCatching {
+        val mediaService = client.di.get<de.connect2x.trixnity.client.media.MediaService>()
+        val contentType = io.ktor.http.ContentType.parse(picked.mimeType)
+        val info = de.connect2x.trixnity.core.model.events.m.room.FileInfo(
+            mimeType = picked.mimeType,
+            size = picked.bytes.size.toLong(),
+        )
+        val encrypted = client.room.getState<EncryptionEventContent>(roomId).firstOrNull() != null
+        val content = if (encrypted) {
+            RoomMessageEventContent.FileBased.File(
+                body = picked.fileName,
+                fileName = picked.fileName,
+                file = mediaService.prepareUploadEncryptedMedia(picked.bytes.toByteArrayFlow()),
+                info = info,
+            )
+        } else {
+            val cacheUri = mediaService.prepareUploadMedia(picked.bytes.toByteArrayFlow(), contentType)
+            RoomMessageEventContent.FileBased.File(
+                body = picked.fileName,
+                fileName = picked.fileName,
+                url = mediaService.uploadMedia(cacheUri).getOrThrow(),
+                info = info,
+            )
+        }
+        client.room.sendMessage(roomId) { content(content) }
+    }
 
     /**
      * 發送本地圖片（m.image）。加密房先 prepareUploadEncryptedMedia 取得
