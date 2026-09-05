@@ -3,8 +3,6 @@ package io.github.capricornus007.nashira
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,8 +15,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -48,7 +44,11 @@ import io.github.capricornus007.nashira.matrix.StickerPack
 import io.github.capricornus007.nashira.matrix.StickerRepository
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.graphics.Color
 
 /**
  * Discord 式貼圖面板：頂部一排貼圖包籤，下面是當前包的貼圖網格。
@@ -60,7 +60,6 @@ fun StickerPicker(
     roomId: RoomId,
     strings: Strings,
     onSend: (StickerItem) -> Unit,
-    onSendImage: (PickedImage) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val client = roomRepository.client
@@ -73,8 +72,9 @@ fun StickerPicker(
 
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
-        modifier = modifier.fillMaxWidth().height(280.dp),
-        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+        modifier = modifier.fillMaxWidth().height(300.dp),
+        shape = RoundedCornerShape(16.dp),
+        shadowElevation = 8.dp,
     ) {
         if (packs.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -94,58 +94,71 @@ fun StickerPicker(
                     else -> names.firstOrNull { it.roomId == pack.roomId }?.name ?: pack.roomId.full
                 }
             }
-            val pagerState = rememberPagerState(pageCount = { packs.size })
-            val scope = rememberCoroutineScope()
-            // 相簿圖片入口：平台不支援（桌面）時不出現
-            val imageLauncher = rememberImagePickerLauncher { image ->
-                onSendImage(image)
-            }
-            // Surface 的內容槽是 Box 語意：圖片入口和分頁列必須在同一個 Column 裡，
-            // 否則兩者疊在同一格（實測「發送圖片」壓在包名上）。
+            var selected by remember(packs.size) { mutableStateOf(0) }
+            val index = selected.coerceIn(0, packs.lastIndex)
             Column(Modifier.fillMaxSize()) {
-                if (imageLauncher != null) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = 8.dp, end = 8.dp, top = 8.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .clickable { imageLauncher() },
-                    ) {
-                        Text(
-                            strings.sendImage,
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                        )
-                    }
-                }
-                // 包多了要能橫向捲，不然後面的包點不到
-                Row(
-                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                // 包選擇改成封面圖示條（Telegram／Discord／Element 都是這樣）：
+                // 原本的長文字標籤在包多時會橫向溢出，只能靠拖曳，滑鼠與觸控板都不順手。
+                // LazyRow 本身吃滾輪與拖曳，且只渲染可見項。
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    packNames.forEachIndexed { index, name ->
-                        val selected = pagerState.currentPage == index
-                        Text(
-                            name,
-                            maxLines = 1,
-                            style = MaterialTheme.typography.labelLarge,
-                            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .clickable { scope.launch { pagerState.animateScrollToPage(index) } }
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                    itemsIndexed(packs) { position, pack ->
+                        PackTab(
+                            client = client,
+                            pack = pack,
+                            label = packNames.getOrElse(position) { pack.name },
+                            selected = position == index,
+                            onClick = { selected = position },
                         )
                     }
                 }
-                HorizontalPager(state = pagerState, modifier = Modifier.fillMaxWidth().weight(1f)) { page ->
-                    StickerGrid(packs[page], client, onSend)
-                }
+                Text(
+                    packNames.getOrElse(index) { "" },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 2.dp),
+                )
+                StickerGrid(packs[index], client, onSend)
             }
         }
+    }
+}
+
+/**
+ * 圖示條上的一個包：封面用 `pack.avatar_url`，沒設就拿第一張貼圖。
+ *
+ * 封面必須走 `StickerThumb` 而不是 `AvatarImage`：貼圖多半是 webp，伺服器的縮圖端點
+ * 對它常常直接失敗，只有 StickerThumb 那條「最後一輪抓原圖」的退路能載到（實機上
+ * 用 AvatarImage 時整條圖示條都只剩字母佔位）。
+ */
+@Composable
+private fun PackTab(
+    client: MatrixClient,
+    pack: StickerPack,
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val cover = remember(pack) {
+        pack.avatarUrl?.let { url ->
+            StickerItem(shortcode = label, body = label, mxcUrl = url, file = null, info = null)
+        } ?: pack.stickers.firstOrNull()
+    }
+    Box(
+        Modifier
+            .size(40.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(4.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (cover != null) StickerThumb(client, cover)
+        else Text(label.take(1).uppercase(), style = MaterialTheme.typography.labelMedium)
     }
 }
 

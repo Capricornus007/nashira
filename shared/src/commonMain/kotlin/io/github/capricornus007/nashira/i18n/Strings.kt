@@ -71,6 +71,10 @@ interface Strings {
     val stickerPanelPosition: String
     val stickerPanelAbove: String
     val stickerPanelBelow: String
+    val sessionLogoutViaAccountPage: String
+    val verificationIncoming: String
+    val verificationIncomingHint: String
+    val cancelVerification: String
     val membersCount: String
     val imageMessage: String
     val stickerMessage: String
@@ -222,8 +226,12 @@ object ZhTwStrings : Strings {
     override val chatListHint = "清單樣式、未讀提示、訊息預覽與貼圖面板"
     override val messagePreviewHint = "清單第二行顯示最後一則訊息"
     override val stickerPanelPosition = "貼圖面板位置"
-    override val stickerPanelAbove = "在輸入列上方展開"
-    override val stickerPanelBelow = "在輸入列下方展開"
+    override val stickerPanelAbove = "浮在輸入列上方，不推動輸入列"
+    override val stickerPanelBelow = "釘在輸入列下方"
+    override val sessionLogoutViaAccountPage = "此伺服器改由帳戶管理頁登出裝置，已在瀏覽器開啟"
+    override val verificationIncoming = "工作階段驗證請求"
+    override val verificationIncomingHint = "另一個工作階段要求驗證。接受後兩邊會比對一組表情符號。"
+    override val cancelVerification = "取消驗證"
     override val specM3 = "Material 3 (2021)"
     override val specExpressive = "Expressive (2025)"
     override val themeColor = "主題顏色"
@@ -430,8 +438,12 @@ object EnStrings : Strings {
     override val messagePreview = "Message preview"
     override val messagePreviewHint = "Show the latest message on the list's second line"
     override val stickerPanelPosition = "Sticker panel position"
-    override val stickerPanelAbove = "Opens above the composer"
-    override val stickerPanelBelow = "Opens below the composer"
+    override val stickerPanelAbove = "Floats above the composer"
+    override val stickerPanelBelow = "Docks below the composer"
+    override val sessionLogoutViaAccountPage = "This server logs out devices on its account page; opened in your browser"
+    override val verificationIncoming = "Session verification request"
+    override val verificationIncomingHint = "Another session asked to verify. After accepting, both sides compare a set of emoji."
+    override val cancelVerification = "Cancel verification"
     override val personalization = "Personalization"
     override val appearanceHint = "Theme mode, dynamic color, and palette"
     override val chatListHint = "List style, unread indicators, previews, and sticker panel"

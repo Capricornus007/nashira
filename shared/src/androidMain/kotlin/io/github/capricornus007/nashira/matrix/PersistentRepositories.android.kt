@@ -26,3 +26,9 @@ actual fun clearPersistentStore(databaseKey: String) {
         runCatching { context.getDatabasePath(file).delete() }
     }
 }
+
+actual fun mediaStoreDirectory(databaseKey: String): String {
+    val context = TokenStorage.context ?: error("TokenStorage.context 未注入")
+    // cacheDir：系統空間不足時可回收，媒體本來就能重新下載
+    return java.io.File(context.cacheDir, "media-${safeKey(databaseKey)}").absolutePath
+}

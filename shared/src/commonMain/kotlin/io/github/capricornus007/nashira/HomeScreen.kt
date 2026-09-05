@@ -144,10 +144,13 @@ private fun SettingsNavHost(
 
 private val PageSlide = tween<IntOffset>(260, easing = FastOutSlowInEasing)
 
-/** 設定頁的共用骨架：可摺疊大標題 + 群組清單。 */
+/**
+ * 設定頁的共用骨架：可摺疊大標題 + 限寬置中的群組清單。
+ * 每個設定頁都必須用它，否則寬窗口下該頁會變成整排貼齊視窗邊緣、跟其他頁不一致。
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SettingsScaffold(
+internal fun SettingsScaffold(
     title: String,
     onBack: (() -> Unit)?,
     content: @Composable () -> Unit,
@@ -286,8 +289,10 @@ private fun AppearancePage(onBack: () -> Unit) {
                 }
             }
         }
-        if (dynamicColorSupported) {
-            SettingsGroup(title = strings.themeColor) {
+        // 桌面沒有桌布取色，就不畫那顆開關；色票與顏色規格兩邊都要有
+        val dynamic = dynamicColorSupported && ui.dynamicColor
+        SettingsGroup(title = strings.themeColor) {
+            if (dynamicColorSupported) {
                 item { shape ->
                     SettingsSwitchItem(
                         shape = shape,
@@ -298,44 +303,46 @@ private fun AppearancePage(onBack: () -> Unit) {
                         onCheckedChange = { ui.dynamicColor = it },
                     )
                 }
-                item { shape ->
-                    SettingsDropdownItem(
-                        shape = shape,
-                        title = strings.paletteStyle,
-                        current = ui.paletteStyle.displayLabel(),
-                    ) { close ->
-                        PaletteStyle.entries.forEach { style ->
-                            SettingsMenuOption(style.displayLabel(), ui.paletteStyle == style) {
-                                ui.paletteStyle = style; close()
-                            }
-                        }
-                    }
-                }
-                item { shape ->
-                    SettingsDropdownItem(
-                        shape = shape,
-                        title = strings.colorSpec,
-                        current = if (ui.specVersion == ColorSpec.SpecVersion.SPEC_2021) strings.specM3 else strings.specExpressive,
-                    ) { close ->
-                        SettingsMenuOption(strings.specM3, ui.specVersion == ColorSpec.SpecVersion.SPEC_2021) {
-                            ui.specVersion = ColorSpec.SpecVersion.SPEC_2021; close()
-                        }
-                        SettingsMenuOption(strings.specExpressive, ui.specVersion == ColorSpec.SpecVersion.SPEC_2025) {
-                            ui.specVersion = ColorSpec.SpecVersion.SPEC_2025; close()
+            }
+            item { shape ->
+                SettingsDropdownItem(
+                    shape = shape,
+                    title = strings.paletteStyle,
+                    current = ui.paletteStyle.displayLabel(),
+                ) { close ->
+                    PaletteStyle.entries.forEach { style ->
+                        SettingsMenuOption(style.displayLabel(), ui.paletteStyle == style) {
+                            ui.paletteStyle = style; close()
                         }
                     }
                 }
             }
-            // 色票是自由排布的方格，塞進列元件會擠壓；獨立成一塊，跟著動態顏色開關收放
-            AnimatedVisibility(
-                visible = ui.dynamicColor,
-                enter = expandVertically() + fadeIn(),
-                exit = shrinkVertically() + fadeOut(),
-            ) {
-                Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(strings.themeColor, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-                    AccentPicker(selected = ui.accent, language = ui.language, onSelect = { ui.accent = it })
+            item { shape ->
+                SettingsDropdownItem(
+                    shape = shape,
+                    title = strings.colorSpec,
+                    current = if (ui.specVersion == ColorSpec.SpecVersion.SPEC_2021) strings.specM3 else strings.specExpressive,
+                ) { close ->
+                    SettingsMenuOption(strings.specM3, ui.specVersion == ColorSpec.SpecVersion.SPEC_2021) {
+                        ui.specVersion = ColorSpec.SpecVersion.SPEC_2021; close()
+                    }
+                    SettingsMenuOption(strings.specExpressive, ui.specVersion == ColorSpec.SpecVersion.SPEC_2025) {
+                        ui.specVersion = ColorSpec.SpecVersion.SPEC_2025; close()
+                    }
                 }
+            }
+        }
+        // 色票跟 InstallerX Revived 一樣是「動態顏色關閉時」才出現：開了動態顏色就
+        // 一律取桌布色，手選色票沒有意義（實機對照 com.rosan.installer.x.revived
+        // 主題設定頁：動態顏色 ON → 主題顏色整段消失）。
+        AnimatedVisibility(
+            visible = !dynamic,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut(),
+        ) {
+            Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(strings.themeColor, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                AccentPicker(selected = ui.accent, language = ui.language, onSelect = { ui.accent = it })
             }
         }
     }

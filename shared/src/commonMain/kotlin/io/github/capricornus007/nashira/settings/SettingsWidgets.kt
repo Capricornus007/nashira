@@ -221,7 +221,14 @@ fun SettingsSwitchItem(
     }
 }
 
-/** 下拉選擇列：右端顯示目前值，選單錨定在列上（不會飄到頁首）。 */
+/**
+ * 下拉選擇列：右端顯示目前值，選單錨定在**值**上。
+ *
+ * 錨點很關鍵：DropdownMenu 是 Popup，位置取自最近的父節點左上角。原本把它放在包住
+ * 整列的 Box 裡，於是選單從整列最左邊掛下來、還蓋住下一組設定；選單容器色又跟卡片
+ * 同色（surfaceContainer），看起來就像「設定列表整排往左跑偏」。放進尾端插槽的 Box
+ * 就會貼著值展開，並用 surfaceContainerHigh + 陰影把浮層跟卡片分開。
+ */
 @Composable
 fun SettingsDropdownItem(
     shape: Shape,
@@ -232,18 +239,23 @@ fun SettingsDropdownItem(
     menuContent: @Composable (close: () -> Unit) -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
-    Box {
-        SettingsItem(
-            shape = shape,
-            title = title,
-            description = description,
-            icon = icon,
-            onClick = { open = true },
-        ) {
+    SettingsItem(
+        shape = shape,
+        title = title,
+        description = description,
+        icon = icon,
+        onClick = { open = true },
+    ) {
+        Box {
             Text(current, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-        }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            menuContent { open = false }
+            DropdownMenu(
+                expanded = open,
+                onDismissRequest = { open = false },
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                shadowElevation = 6.dp,
+            ) {
+                menuContent { open = false }
+            }
         }
     }
 }

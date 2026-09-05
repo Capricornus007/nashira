@@ -2,17 +2,12 @@ package io.github.capricornus007.nashira
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
@@ -25,29 +20,24 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import de.connect2x.trixnity.client.verification.ActiveSasVerificationMethod
 import de.connect2x.trixnity.client.verification.ActiveSasVerificationState
@@ -59,6 +49,7 @@ import io.github.capricornus007.nashira.matrix.MatrixSession
 import io.github.capricornus007.nashira.matrix.SelfVerificationOption
 import io.github.capricornus007.nashira.matrix.SelfVerificationStatus
 import io.github.capricornus007.nashira.matrix.SessionTrust
+import io.github.capricornus007.nashira.matrix.SessionLogout
 import io.github.capricornus007.nashira.matrix.VerificationRepository
 import io.github.capricornus007.nashira.settings.SettingsGroup
 import io.github.capricornus007.nashira.settings.SettingsItem
@@ -99,121 +90,100 @@ fun SecurityAndAccountScreen(
 
     LaunchedEffect(repository, selfStatus) { reloadSessions() }
 
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.surface,
-        topBar = {
-            TopAppBar(
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = strings.back)
-                    }
-                },
-                title = { Text(strings.accountAndSecurity, fontWeight = FontWeight.Bold) },
-            )
-        },
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(bottom = 24.dp),
-        ) {
-            item {
-                Column(Modifier.navigationBarsPadding()) {
-                    SettingsGroup(title = strings.account) {
-                        item { shape ->
-                            SettingsItem(
-                                shape = shape,
-                                icon = Icons.Filled.Person,
-                                title = strings.accountId,
-                                description = session.client.userId.full,
-                            )
-                        }
-                        item { shape ->
-                            SettingsItem(
-                                shape = shape,
-                                icon = Icons.Filled.Lock,
-                                title = strings.deviceId,
-                                description = session.client.deviceId,
-                            )
-                        }
-                    }
-
-                    SelfVerificationSection(
-                        strings = strings,
-                        status = selfStatus,
-                        bootstrapping = bootstrapping,
-                        onUseSecret = { secretPrompt = it },
-                        onUseOtherDevice = { option ->
-                            scope.launch {
-                                busyMessage = strings.verificationWaitingOtherDevice
-                                repository.startOtherDeviceVerification(option)
-                                    .onFailure { actionError = it.message ?: strings.verificationFailed }
-                                busyMessage = null
-                            }
-                        },
-                        onBootstrap = {
-                            scope.launch {
-                                repository.bootstrapCrossSigning()
-                                    .onSuccess { recoveryKeyToShow = it }
-                                    .onFailure { actionError = it.message ?: strings.bootstrapFailed }
-                            }
-                        },
-                    )
-
-                    // 進行中的 SAS 工作階段：接受請求、比對表情符號
-                    if (activeState != null) {
-                        SettingsGroup(title = strings.verificationState) {
-                            item { shape ->
-                                ActiveVerificationItem(shape, strings, activeState, scope)
-                            }
-                        }
-                    }
-
-                    SessionsSection(
-                        strings = strings,
-                        sessions = sessions,
-                        error = sessionsError,
-                        onRefresh = { scope.launch { reloadSessions() } },
-                        onVerify = { deviceId ->
-                            scope.launch {
-                                repository.requestDeviceVerification(deviceId)
-                                    .onFailure { actionError = it.message ?: strings.verificationFailed }
-                            }
-                        },
-                        onLogoutSession = { deviceId ->
-                            scope.launch {
-                                repository.logoutSession(deviceId)
-                                    .onSuccess { reloadSessions() }
-                                    .onFailure { actionError = it.message ?: strings.sessionLogoutFailed }
-                            }
-                        },
-                    )
-
-                    busyMessage?.let {
-                        Text(
-                            it,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-                        )
-                    }
-                    actionError?.let {
-                        Text(
-                            it,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-                        )
-                    }
-
-                    OutlinedButton(
-                        onClick = onLogout,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 20.dp),
-                    ) {
-                        Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Text(strings.logoutDevice, modifier = Modifier.padding(start = 8.dp))
-                    }
-                }
+    SettingsScaffold(title = strings.accountAndSecurity, onBack = onBack) {
+        SettingsGroup(title = strings.account) {
+            item { shape ->
+                SettingsItem(
+                    shape = shape,
+                    icon = Icons.Filled.Person,
+                    title = strings.accountId,
+                    description = session.client.userId.full,
+                )
             }
+            item { shape ->
+                SettingsItem(
+                    shape = shape,
+                    icon = Icons.Filled.Lock,
+                    title = strings.deviceId,
+                    description = session.client.deviceId,
+                )
+            }
+        }
+
+        SelfVerificationSection(
+            strings = strings,
+            status = selfStatus,
+            bootstrapping = bootstrapping,
+            onUseSecret = { secretPrompt = it },
+            onUseOtherDevice = { option ->
+                scope.launch {
+                    busyMessage = strings.verificationWaitingOtherDevice
+                    repository.startOtherDeviceVerification(option)
+                        .onFailure { actionError = it.message ?: strings.verificationFailed }
+                    busyMessage = null
+                }
+            },
+            onBootstrap = {
+                scope.launch {
+                    repository.bootstrapCrossSigning()
+                        .onSuccess { recoveryKeyToShow = it }
+                        .onFailure { actionError = it.message ?: strings.bootstrapFailed }
+                }
+            },
+        )
+
+        SessionsSection(
+            strings = strings,
+            sessions = sessions,
+            error = sessionsError,
+            onRefresh = { scope.launch { reloadSessions() } },
+            onVerify = { deviceId ->
+                scope.launch {
+                    repository.requestDeviceVerification(deviceId)
+                        .onFailure { actionError = it.message ?: strings.verificationFailed }
+                }
+            },
+            onLogoutSession = { deviceId ->
+                scope.launch {
+                    repository.logoutSession(deviceId)
+                        .onSuccess { outcome ->
+                            when (outcome) {
+                                SessionLogout.Done -> reloadSessions()
+                                is SessionLogout.OpenAccountManagement -> {
+                                    // 委派認證伺服器（matrix.org）只能在帳戶管理頁登出裝置
+                                    openLink(outcome.url)
+                                    busyMessage = strings.sessionLogoutViaAccountPage
+                                }
+                            }
+                        }
+                        .onFailure { actionError = it.message ?: strings.sessionLogoutFailed }
+                }
+            },
+        )
+
+        busyMessage?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+            )
+        }
+        actionError?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+            )
+        }
+
+        OutlinedButton(
+            onClick = onLogout,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 20.dp),
+        ) {
+            Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = null, modifier = Modifier.size(18.dp))
+            Text(strings.logoutDevice, modifier = Modifier.padding(start = 8.dp))
         }
     }
 
@@ -333,67 +303,6 @@ private fun SelfVerificationSection(
     }
 }
 
-/** 進行中的驗證：依 Trixnity 的狀態機給出下一步按鈕。 */
-@Composable
-private fun ActiveVerificationItem(
-    shape: androidx.compose.ui.graphics.Shape,
-    strings: Strings,
-    state: ActiveVerificationState,
-    scope: kotlinx.coroutines.CoroutineScope,
-) {
-    val sasState = (state as? ActiveVerificationState.Start)
-        ?.let { it.method as? ActiveSasVerificationMethod }
-        ?.state?.collectAsState()?.value
-    Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = shape, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(
-                when {
-                    state is ActiveVerificationState.Done -> strings.verificationDone
-                    state is ActiveVerificationState.Cancel -> strings.verificationCancelled
-                    else -> strings.verificationInProgressShort
-                },
-                style = MaterialTheme.typography.titleMedium,
-            )
-            when (state) {
-                is ActiveVerificationState.TheirRequest -> Button(
-                    onClick = { scope.launch { state.ready() } },
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text(strings.acceptVerification) }
-                is ActiveVerificationState.Ready -> Button(
-                    onClick = { state.methods.firstOrNull()?.let { m -> scope.launch { state.start(m) } } },
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text(strings.startSasVerification) }
-                is ActiveVerificationState.Start -> when (sasState) {
-                    is ActiveSasVerificationState.TheirSasStart -> Button(
-                        onClick = { scope.launch { sasState.accept() } },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text(strings.acceptSas) }
-                    is ActiveSasVerificationState.ComparisonByUser -> {
-                        Text(strings.compareEmojiHint, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        if (sasState.emojis.isNotEmpty()) {
-                            Text(
-                                sasState.emojis.joinToString("   ") { it.second },
-                                style = MaterialTheme.typography.headlineSmall,
-                            )
-                        } else {
-                            Text(sasState.decimal.joinToString(" "), style = MaterialTheme.typography.headlineSmall)
-                        }
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = { scope.launch { sasState.match() } }, modifier = Modifier.weight(1f)) {
-                                Text(strings.match)
-                            }
-                            OutlinedButton(onClick = { scope.launch { sasState.noMatch() } }, modifier = Modifier.weight(1f)) {
-                                Text(strings.noMatch)
-                            }
-                        }
-                    }
-                    else -> Unit
-                }
-                else -> Unit
-            }
-        }
-    }
-}
 
 /** 工作階段清單：本裝置置頂，其他裝置可發起驗證或登出。 */
 @Composable

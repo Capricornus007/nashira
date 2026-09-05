@@ -103,7 +103,7 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
                 scope.launch {
                     MatrixEngine.login(baseUrl.trim(), username.trim(), password)
                         .onSuccess { onLoginSuccess() }
-                        .onFailure { error = io.github.capricornus007.nashira.i18n.friendlyError(it) }
+                        .onFailure { error = io.github.capricornus007.nashira.i18n.friendlyLoginError(it) }
                     busy = false
                 }
             },

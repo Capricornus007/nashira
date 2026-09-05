@@ -31,6 +31,8 @@ data class StickerPack(
     val name: String,
     val roomId: RoomId?,
     val stickers: List<StickerItem>,
+    /** 包的封面（MSC2545 `pack.avatar_url`）；沒設就退回第一張貼圖。 */
+    val avatarUrl: String? = null,
 )
 
 /**
@@ -121,6 +123,7 @@ class StickerRepository(private val client: MatrixClient) {
             name = content.pack?.displayName?.takeIf { it.isNotBlank() } ?: stateKey,
             roomId = roomId,
             stickers = images.mapNotNull { (shortcode, image) -> image.toSticker(shortcode, usable = true) },
+            avatarUrl = content.pack?.avatarUrl?.takeIf { it.startsWith("mxc://") },
         )
     }
 

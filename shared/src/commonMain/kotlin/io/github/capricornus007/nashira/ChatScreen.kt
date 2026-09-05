@@ -29,6 +29,11 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Spring
@@ -57,6 +62,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
@@ -258,10 +264,24 @@ fun ChatScreen(
                         )
                     }
                     Box(Modifier.weight(1f).fillMaxHeight()) {
-                        selected?.let { TimelinePane(roomRepository, it) }
-                            ?: EmptyTimeline(strings.noRoomSelected)
+                        val ui = LocalUiState.current
+                        selected?.let {
+                            TimelinePane(
+                                roomRepository = roomRepository,
+                                room = it,
+                                membersOpen = ui.membersPanelOpen,
+                                onToggleMembers = { ui.membersPanelOpen = !ui.membersPanelOpen },
+                            )
+                        } ?: EmptyTimeline(strings.noRoomSelected)
                     }
-                    MemberPane(session, roomRepository, selected)
+                    // 成員欄由標題列的人物圖示切換（Discord／Element 都不是一進房就展開）
+                    AnimatedVisibility(
+                        visible = LocalUiState.current.membersPanelOpen,
+                        enter = slideInHorizontally { it },
+                        exit = slideOutHorizontally { it },
+                    ) {
+                        MemberPane(session, roomRepository, selected)
+                    }
                 }
             }
         }
@@ -946,7 +966,13 @@ private fun EmptyTimeline(message: String) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TimelinePane(roomRepository: RoomRepository, room: RoomSummary, onBack: (() -> Unit)? = null) {
+private fun TimelinePane(
+    roomRepository: RoomRepository,
+    room: RoomSummary,
+    onBack: (() -> Unit)? = null,
+    membersOpen: Boolean = false,
+    onToggleMembers: (() -> Unit)? = null,
+) {
     val strings = stringsFor(LocalUiState.current.language)
     // 頁大小由畫面持有：往上滾到頭時加大，Trixnity 會自己往伺服器補抓更早的事件。
     // 兩者都一定要 remember：重建 Flow 會重啟收集，訊息瞬間清空就是進房閃爍的來源
@@ -1009,6 +1035,34 @@ private fun TimelinePane(roomRepository: RoomRepository, room: RoomSummary, onBa
         if (messages?.isNotEmpty() == true) roomRepository.markRead(room.roomId)
     }
 
+    // 貼圖面板：狀態放在 Scaffold 之外，因為它有兩種擺法——
+    // 浮在訊息區上方（Telegram／Discord／Element 的做法，不推動輸入列），
+    // 或釘在輸入列下方。由設定 stickerPanelAbove 決定。
+    var stickerPanel by remember(room.roomId) { mutableStateOf(false) }
+    val panelAbove = LocalUiState.current.stickerPanelAbove
+    val stickerPanelContent: @Composable (Modifier) -> Unit = { panelModifier ->
+        StickerPicker(
+            roomRepository = roomRepository,
+            roomId = room.roomId,
+            strings = strings,
+            onSend = { sticker ->
+                scope.launch {
+                    roomRepository.sendSticker(room.roomId, sticker)
+                        .onFailure { sendError = io.github.capricornus007.nashira.i18n.friendlyError(it) }
+                }
+            },
+            modifier = panelModifier,
+        )
+    }
+    // 送圖是「附件」，跟貼圖面板是兩件事：微信／Telegram 都把它放在輸入列旁邊自己一顆
+    // 按鈕，而不是塞在貼圖包標題那一行。桌面尚無選擇器實作時回 null，按鈕就不出現。
+    val imageLauncher = rememberImagePickerLauncher { image ->
+        scope.launch {
+            roomRepository.sendImage(room.roomId, image)
+                .onFailure { sendError = io.github.capricornus007.nashira.i18n.friendlyError(it) }
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -1027,37 +1081,22 @@ private fun TimelinePane(roomRepository: RoomRepository, room: RoomSummary, onBa
                 },
                 actions = {
                     IconButton(onClick = { }) { Icon(Icons.Filled.Search, contentDescription = strings.search) }
-                    IconButton(onClick = { }) { Icon(Icons.Filled.Person, contentDescription = strings.members) }
+                    // 成員欄只存在於寬版面：窄版面不給這顆按鈕，避免按了沒反應
+                    if (onToggleMembers != null) {
+                        IconButton(onClick = onToggleMembers) {
+                            Icon(
+                                Icons.Filled.Person,
+                                contentDescription = strings.members,
+                                tint = if (membersOpen) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+                            )
+                        }
+                    }
                     IconButton(onClick = { }) { Icon(Icons.Filled.MoreVert, contentDescription = strings.more) }
                 },
             )
         },
         bottomBar = {
             Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).navigationBarsPadding()) {
-                // Discord 的「+」面板：貼圖包選擇器（MSC2545），開關掛在輸入列左邊的「+」上。
-                // 面板放輸入列上方還是下方由設定決定（stickerPanelAbove）。
-                var stickerPanel by remember { mutableStateOf(false) }
-                val panelAbove = LocalUiState.current.stickerPanelAbove
-                val panel: @Composable () -> Unit = {
-                    StickerPicker(
-                        roomRepository = roomRepository,
-                        roomId = room.roomId,
-                        strings = strings,
-                        onSend = { sticker ->
-                            scope.launch {
-                                roomRepository.sendSticker(room.roomId, sticker)
-                                    .onFailure { sendError = io.github.capricornus007.nashira.i18n.friendlyError(it) }
-                            }
-                        },
-                        onSendImage = { image ->
-                            scope.launch {
-                                roomRepository.sendImage(room.roomId, image)
-                                    .onFailure { sendError = io.github.capricornus007.nashira.i18n.friendlyError(it) }
-                            }
-                        },
-                    )
-                }
-                if (stickerPanel && panelAbove) panel()
                 sendError?.let {
                     Text(
                         it,
@@ -1078,10 +1117,21 @@ private fun TimelinePane(roomRepository: RoomRepository, room: RoomSummary, onBa
                         modifier = Modifier.size(44.dp),
                     ) {
                         Icon(
-                            Icons.Filled.Add,
+                            // 笑臉而不是加號：加號讀起來像「其他附件的集合」（微信／Telegram
+                            // 都是把表情貼圖放在笑臉，附件才是迴紋針或加號）
+                            Icons.Filled.Face,
                             contentDescription = strings.sticker,
                             tint = if (stickerPanel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    }
+                    if (imageLauncher != null) {
+                        IconButton(onClick = imageLauncher, modifier = Modifier.size(44.dp)) {
+                            Icon(
+                                Icons.Filled.Add,
+                                contentDescription = strings.sendImage,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                     Surface(
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -1138,10 +1188,14 @@ private fun TimelinePane(roomRepository: RoomRepository, room: RoomSummary, onBa
                         }
                     }
                 }
-                if (stickerPanel && !panelAbove) panel()
+                // 「下方」擺法：釘在輸入列底下，撐開 bottomBar
+                if (stickerPanel && !panelAbove) {
+                    stickerPanelContent(Modifier.padding(horizontal = 8.dp).padding(bottom = 8.dp))
+                }
             }
         },
     ) { padding ->
+        Box(Modifier.fillMaxSize()) {
         // Trixnity 的 getLastTimelineEvents 回傳「新→舊」，所以用 reverseLayout：
         // index 0（最新）畫在最底部，新訊息自然從下方長出來，跟 Discord/Telegram 一致。
         LazyColumn(
@@ -1207,6 +1261,24 @@ private fun TimelinePane(roomRepository: RoomRepository, room: RoomSummary, onBa
                         Text(strings.loadingMore, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
+            }
+        }
+            // 「上方」擺法：浮在訊息區上，不推動輸入列。點空白處關閉（同 Discord）。
+            if (stickerPanel && panelAbove) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) { stickerPanel = false },
+                )
+                stickerPanelContent(
+                    Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(start = 8.dp, end = 8.dp, bottom = 4.dp)
+                        .widthIn(max = 380.dp),
+                )
             }
         }
     }

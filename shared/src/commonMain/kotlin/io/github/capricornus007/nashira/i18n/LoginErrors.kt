@@ -20,8 +20,13 @@ fun friendlyError(t: Throwable): String {
             "伺服器回應逾時，請再試一次"
         msg.contains("SSL", ignoreCase = true) || msg.contains("certificate", ignoreCase = true) ->
             "加密連線失敗：伺服器憑證可能有問題"
-        msg.contains("M_FORBIDDEN") || msg.contains("M_USER_NOT_FOUND") || msg.contains("403") ->
-            "帳號或密碼不正確"
+        msg.contains("M_TOO_LARGE") ->
+            "檔案太大，伺服器拒收"
+        // M_FORBIDDEN 在登入以外的地方是「伺服器不允許這個操作」——最常見的是
+        // matrix.org 的媒體上傳配額。以前一律翻成「帳號或密碼不正確」，發圖失敗時
+        // 會顯示成密碼錯誤，誤導得很嚴重。
+        msg.contains("M_FORBIDDEN") || msg.contains("403") ->
+            "伺服器拒絕了這個操作：權限不足或已超出配額"
         msg.contains("M_LIMIT_EXCEEDED") ->
             "嘗試次數太多，請稍後再試"
         msg.contains("M_UNKNOWN_TOKEN") || msg.contains("M_UNAUTHORIZED") ->
@@ -30,4 +35,14 @@ fun friendlyError(t: Throwable): String {
             "這個房間的版本不支援"
         else -> msg.ifBlank { t::class.simpleName ?: "未知的錯誤" }
     }
+}
+
+/**
+ * 登入表單專用：這個情境下 `M_FORBIDDEN` / `M_USER_NOT_FOUND` 真的就是帳密不對。
+ * 其他情境一律走 [friendlyError]。
+ */
+fun friendlyLoginError(t: Throwable): String {
+    val msg = t.message.orEmpty()
+    if (msg.contains("M_FORBIDDEN") || msg.contains("M_USER_NOT_FOUND")) return "帳號或密碼不正確"
+    return friendlyError(t)
 }

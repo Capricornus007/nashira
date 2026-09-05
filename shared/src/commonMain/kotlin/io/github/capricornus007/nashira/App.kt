@@ -17,6 +17,7 @@ import io.github.capricornus007.nashira.theme.NashiraLightColors
 import io.github.capricornus007.nashira.theme.NashiraTheme
 import io.github.capricornus007.nashira.theme.ThemeAccent
 import io.github.capricornus007.nashira.theme.ThemeMode
+import io.github.capricornus007.nashira.theme.dynamicColorSupported
 import io.github.capricornus007.nashira.theme.wallpaperSeedColor
 
 enum class SpaceIconMode {
@@ -52,6 +53,12 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
     /** 貼圖面板貼在輸入列上方（Discord/Telegram 慣例）或下方（面板不推走輸入列） */
     var stickerPanelAbove by mutableStateOf(stored["stickerPanelAbove"]?.toBooleanStrictOrNull() ?: true)
 
+    /**
+     * 寬版面的成員欄。預設收起（Discord 與 Element 都不是一進房就展開），
+     * 由聊天室標題列的人物圖示切換，並記住上次選擇。
+     */
+    var membersPanelOpen by mutableStateOf(stored["membersPanelOpen"]?.toBooleanStrictOrNull() ?: false)
+
     init {
         loaded = true
     }
@@ -69,6 +76,7 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
             "showUnreadIndicators" to showUnreadIndicators.toString(),
             "showMessagePreview" to showMessagePreview.toString(),
             "stickerPanelAbove" to stickerPanelAbove.toString(),
+            "membersPanelOpen" to membersPanelOpen.toString(),
         ) + (accent?.let { mapOf("accent" to it.name) } ?: emptyMap())
         if (snapshot == lastPersisted) return
         lastPersisted = snapshot
@@ -95,13 +103,12 @@ fun App(defaultDark: Boolean? = null) {
     // 任一設定變更就寫回磁碟（persist 內部比對快照，值沒變不落盤）
     ui.persist()
 
-    // 種子來源（僅動態顏色開啟時）：色系覆寫 > 桌布種子；關閉＝品牌 Arcaea
-    // （wallpaperSeedColor 內部已 remember 緩存；accent 是純值）
-    val seed = if (ui.dynamicColor) {
-        ui.accent?.color ?: wallpaperSeedColor(enabled = true)
-    } else {
-        null
-    }
+    // 種子來源（對齊 InstallerX Revived）：
+    //   動態顏色 ON  → 一律桌布取色（手選色票在這個模式下不參與）
+    //   動態顏色 OFF → 手選色票；沒選就是 null，落回品牌 Arcaea 色板（＝色票裡的「預設」）
+    // 桌面沒有桌布取色（dynamicColorSupported=false），一律走色票這條。
+    val dynamic = dynamicColorSupported && ui.dynamicColor
+    val seed = if (dynamic) wallpaperSeedColor(enabled = true) else ui.accent?.color
     val generated = rememberDynamicColorScheme(
         seedColor = seed ?: androidx.compose.ui.graphics.Color(0xFF1F1E33),
         isDark = dark,
@@ -127,6 +134,8 @@ fun App(defaultDark: Boolean? = null) {
                     session = current,
                     onLogout = { MatrixEngine.logout() },
                 )
+                // 裝置驗證請求可能在任何畫面到來，所以對話框掛在最外層（蓋住設定頁）
+                DeviceVerificationHost(current)
             }
             // 磁碟有憑證時先顯示啟動頁，不再閃一次登入表單
             restoring -> StartupScreen()

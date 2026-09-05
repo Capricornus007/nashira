@@ -14,3 +14,12 @@ expect fun persistentRepositories(databaseKey: String): RepositoriesModule
  * 造成「登出過一次就再也登不進去」。舊裝置的金鑰在沒有它的 access token 時本來也用不了。
  */
 expect fun clearPersistentStore(databaseKey: String)
+
+/**
+ * 媒體（頭像、圖片、貼圖）快取目錄。
+ *
+ * 一定要落磁碟：`MediaStoreModule.inMemory()` 每次啟動都是空的，於是每個頭像
+ * 每次開 app 都要重新下載一輪縮圖——這就是「頭像同步很慢」的根因。okio store
+ * 讓下載結果跨 session 保留，第二次開啟直接命中。
+ */
+expect fun mediaStoreDirectory(databaseKey: String): String

@@ -4,7 +4,8 @@ import de.connect2x.trixnity.client.CryptoDriverModule
 import de.connect2x.trixnity.client.MatrixClient
 import de.connect2x.trixnity.client.MediaStoreModule
 import de.connect2x.trixnity.client.cryptodriver.vodozemac.vodozemac
-import de.connect2x.trixnity.client.media.inMemory
+import de.connect2x.trixnity.client.media.okio.okio
+import okio.Path.Companion.toPath
 import de.connect2x.trixnity.clientserverapi.client.MatrixClientAuthProviderData
 import de.connect2x.trixnity.clientserverapi.client.classic
 import de.connect2x.trixnity.clientserverapi.client.classicLogin
@@ -26,6 +27,13 @@ import kotlinx.coroutines.launch
  * 「Not enough data available」，統一改用 OkHttp（Android 本來就用它）。
  */
 internal expect fun platformHttpEngine(): io.ktor.client.engine.HttpClientEngine?
+
+/**
+ * 磁碟媒體快取。inMemory 版每次冷啟動都是空的，會讓成員列表／聊天室頭像
+ * 每次開 app 全部重下一輪（使用者回報「頭像同步很慢」的真因）。
+ */
+private fun persistentMediaStore(databaseKey: String): MediaStoreModule =
+    MediaStoreModule.okio(mediaStoreDirectory(databaseKey).toPath())
 
 /**
  * Matrix 引擎會話：持有 MatrixClient 生命週期（登入 → startSync → 數據流）。
@@ -91,9 +99,10 @@ object MatrixEngine {
             return
         }
         _restoring.value = true
+        val key = databaseKey(stored.baseUrl, stored.userId)
         val client = MatrixClient.create(
-            repositoriesModule = persistentRepositories(databaseKey(stored.baseUrl, stored.userId)),
-            mediaStoreModule = MediaStoreModule.inMemory(),
+            repositoriesModule = persistentRepositories(key),
+            mediaStoreModule = persistentMediaStore(key),
             cryptoDriverModule = CryptoDriverModule.vodozemac(),
             authProviderData = MatrixClientAuthProviderData.classic(
                 baseUrl = Url(stored.baseUrl),
@@ -134,7 +143,7 @@ object MatrixEngine {
 
         suspend fun create() = MatrixClient.create(
             repositoriesModule = persistentRepositories(key),
-            mediaStoreModule = MediaStoreModule.inMemory(),
+            mediaStoreModule = persistentMediaStore(key),
             cryptoDriverModule = CryptoDriverModule.vodozemac(),
             authProviderData = authData,
             configuration = {

@@ -8,6 +8,10 @@ import de.connect2x.trixnity.client.verification.ActiveUserVerification
 import de.connect2x.trixnity.client.verification.SelfVerificationMethod
 import de.connect2x.trixnity.client.verification.VerificationService
 import de.connect2x.trixnity.core.model.UserId
+import de.connect2x.trixnity.clientserverapi.model.authentication.oauth2.OAuth2AccountManagementAction
+import de.connect2x.trixnity.clientserverapi.model.authentication.oauth2.accountManagementUri
+import de.connect2x.trixnity.core.ErrorResponse
+import de.connect2x.trixnity.core.MatrixServerException
 import de.connect2x.trixnity.crypto.key.DeviceTrustLevel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -28,6 +32,15 @@ data class DeviceSession(
 
 /** 工作階段的信任狀態，決定 UI 顯示盾牌或警告。 */
 enum class SessionTrust { VERIFIED, UNVERIFIED, BLOCKED, UNKNOWN }
+
+/**
+ * 登出其他工作階段的結果。委派認證（MSC2965）伺服器不提供 C-S 刪裝置端點，
+ * 只能把使用者導到帳戶管理頁完成，所以這不是錯誤而是另一條正常路徑。
+ */
+sealed interface SessionLogout {
+    data object Done : SessionLogout
+    data class OpenAccountManagement(val url: String) : SessionLogout
+}
 
 /**
  * 本裝置能用哪些方式完成自我驗證。對齊 Element 的兩條路：
@@ -155,14 +168,39 @@ class VerificationRepository(private val session: MatrixSession) {
             else -> SessionTrust.UNKNOWN
         }
 
-    /** 登出指定工作階段。伺服器要求二次認證時回傳未完成的 UIA 錯誤。 */
-    suspend fun logoutSession(deviceId: String): Result<Unit> = runCatching {
-        val uia = session.client.api.device.deleteDevice(deviceId).getOrThrow()
-        uia.let { result ->
-            // 沒有互動認證需求時 Trixnity 直接回 Success；有需求就丟出來讓 UI 顯示
-            if (result !is de.connect2x.trixnity.clientserverapi.client.UIA.Success) {
-                error("需要密碼再次確認才能登出此工作階段")
-            }
+    /**
+     * 登出指定工作階段。
+     *
+     * 兩條路：
+     * 1. 傳統 C-S API `DELETE /_matrix/client/v3/devices/{deviceId}`（需要 UIA）。
+     * 2. 伺服器改用委派認證（MSC2965／MSC3861，matrix.org 就是）時上面那個端點**不存在**，
+     *    回 404 `M_UNRECOGNIZED`「Unrecognized request」——這正是使用者看到的錯誤。
+     *    裝置管理必須交給認證服務的帳戶管理頁：
+     *    `{account_management_uri}?action=org.matrix.device_delete&device_id=…`。
+     *    Trixnity 的 `ServerMetadata.accountManagementUri` 就是組這個 URL 的。
+     */
+    suspend fun logoutSession(deviceId: String): Result<SessionLogout> = runCatching {
+        val uia = runCatching {
+            session.client.api.device.deleteDevice(deviceId).getOrThrow()
+        }.getOrElse { error ->
+            val url = accountManagementUrl(deviceId, error)
+                ?: throw error
+            return@runCatching SessionLogout.OpenAccountManagement(url)
         }
+        // 沒有互動認證需求時 Trixnity 直接回 Success；有需求就丟出來讓 UI 顯示
+        if (uia !is de.connect2x.trixnity.clientserverapi.client.UIA.Success) {
+            error("需要密碼再次確認才能登出此工作階段")
+        }
+        SessionLogout.Done
+    }
+
+    /** 只有「端點不存在」才轉帳戶管理頁；其他錯誤（權限、網路）照原樣回報。 */
+    private suspend fun accountManagementUrl(deviceId: String, error: Throwable): String? {
+        val unrecognized = error is MatrixServerException && error.errorResponse is ErrorResponse.Unrecognized
+        if (!unrecognized) return null
+        val metadata = session.client.api.authentication.getOAuth2ServerMetadata().getOrNull() ?: return null
+        return runCatching {
+            metadata.accountManagementUri(OAuth2AccountManagementAction.DeleteDevice, deviceId).toString()
+        }.getOrNull()
     }
 }
