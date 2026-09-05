@@ -387,6 +387,21 @@ private fun ChatListPage(onBack: () -> Unit) {
                 )
             }
             item { shape ->
+                SettingsDropdownItem(
+                    shape = shape,
+                    title = strings.sendShortcut,
+                    description = strings.sendShortcutHint,
+                    current = sendShortcutLabel(ui.sendShortcut, strings),
+                ) { close ->
+                    SendShortcut.entries.forEach { option ->
+                        SettingsMenuOption(sendShortcutLabel(option, strings), ui.sendShortcut == option) {
+                            ui.sendShortcut = option
+                            close()
+                        }
+                    }
+                }
+            }
+            item { shape ->
                 SettingsSwitchItem(
                     shape = shape,
                     title = strings.stickerPanelPosition,
@@ -479,3 +494,13 @@ private fun AboutPage(onBack: () -> Unit) {
 }
 
 internal fun PaletteStyle.displayLabel(): String = name.replace(Regex("(?<=[a-z])(?=[A-Z])"), " ")
+
+private fun sendShortcutLabel(
+    shortcut: SendShortcut,
+    strings: io.github.capricornus007.nashira.i18n.Strings,
+): String = when (shortcut) {
+    SendShortcut.ENTER -> strings.keyEnter
+    SendShortcut.CTRL_ENTER -> strings.keyCtrlEnter
+    SendShortcut.ALT_ENTER -> strings.keyAltEnter
+    SendShortcut.SHIFT_ENTER -> strings.keyShiftEnter
+}

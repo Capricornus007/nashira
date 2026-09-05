@@ -3,6 +3,7 @@ package io.github.capricornus007.nashira.matrix
 import de.connect2x.trixnity.client.MatrixClient
 import de.connect2x.trixnity.client.room
 import de.connect2x.trixnity.client.notification
+import de.connect2x.trixnity.client.room.getAccountData
 import de.connect2x.trixnity.client.room.getState
 import de.connect2x.trixnity.client.room.message.text
 import de.connect2x.trixnity.client.room.toFlowList
@@ -74,6 +75,8 @@ data class RoomSummary(
 data class UnreadState(
     val unread: Boolean = false,
     val count: Int = 0,
+    /** 使用者手動標記的未讀（`m.marked_unread`），與「有新訊息」區分開。 */
+    val markedUnread: Boolean = false,
 )
 
 data class SpaceSummary(
@@ -240,7 +243,18 @@ class RoomRepository(val client: MatrixClient) {
         combine(
             client.notification.isUnread(roomId),
             client.notification.getCount(roomId),
-        ) { unread, count -> UnreadState(unread = unread || count > 0, count = count) }
+            markedUnread(roomId),
+        ) { unread, count, marked ->
+            // 手動標記的未讀也算未讀，否則「標記為未讀」按了畫面完全沒反應
+            // （isUnread 只看有沒有需要通知的新訊息，不看 m.marked_unread）
+            UnreadState(unread = unread || count > 0 || marked, count = count, markedUnread = marked)
+        }
+            .distinctUntilChanged()
+
+    /** MSC2867 的手動未讀標記（`m.marked_unread` 房間 account data）。 */
+    fun markedUnread(roomId: RoomId): Flow<Boolean> =
+        client.room.getAccountData<MarkedUnreadEventContent>(roomId)
+            .map { it?.unread == true }
             .distinctUntilChanged()
 
     /**
@@ -327,6 +341,21 @@ class RoomRepository(val client: MatrixClient) {
             .map { event -> event?.content?.alias?.full }
             .distinctUntilChanged()
             .flowOn(Dispatchers.Default)
+
+    /**
+     * 單一成員的顯示名。**通知路徑必須用這個而不是 [members]**：members 為了不卡住大房
+     * 會先發一次空表（大房 membersLoaded=false 時 getAll 根本不發），
+     * 取 first() 就永遠拿到空的、於是每個發送者都退回 localpart。
+     * 這裡直接讀單一成員，讀不到才觸發一次載入再試。
+     *
+     * 回 null 的情況是該帳號在 Matrix 側真的沒有可用顯示名（Telegram 橋接使用者常見：
+     * displayname 只由不可見字元組成），這種情況所有客戶端都只能顯示 localpart。
+     */
+    suspend fun memberName(roomId: RoomId, userId: UserId): String? {
+        client.user.getById(roomId, userId).firstOrNull()?.name.visibleNameOrNull()?.let { return it }
+        runCatching { client.user.loadMembers(roomId) }
+        return client.user.getById(roomId, userId).firstOrNull()?.name.visibleNameOrNull()
+    }
 
     /** 單一成員的頭像；私訊沒有房間頭像時用對方的頭像（與 Element 行為一致）。 */
     fun memberAvatar(roomId: RoomId, userId: UserId): Flow<String?> =

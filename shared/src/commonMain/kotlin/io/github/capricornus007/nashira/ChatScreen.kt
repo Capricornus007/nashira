@@ -40,7 +40,6 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.ui.unit.DpOffset
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.material3.LocalContentColor
@@ -125,6 +124,18 @@ import de.connect2x.trixnity.clientserverapi.client.SyncState
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.foundation.text.input.clearText
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 
 private val DiscordRailWidth = 72.dp
 private val DiscordChannelWidth = 286.dp
@@ -536,17 +547,6 @@ private fun ServerRail(
                                 scope.launch { onInviteToSpace(space, userId) }
                             },
                         )
-                    }
-                }
-            }
-            item {
-                RailSlot(selected = false, unread = UnreadState(), onClick = { }) { _ ->
-                    Box(
-                        Modifier.size(RailIconSize).clip(RoundedCornerShape(RailIdleCorner))
-                            .background(MaterialTheme.colorScheme.surfaceContainerHigh),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(Icons.Filled.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
                     }
                 }
             }
@@ -966,9 +966,21 @@ private fun RoomListItem(
             val favourite = "m.favourite" in tags
             val lowPriority = "m.lowpriority" in tags
             if (!room.isInvite) {
-                ContextMenuItem(strings.actionMarkUnread) {
-                    menuOpen = false
-                    scope.launch { roomRepository.setMarkedUnread(room.roomId, true) }
+                // 有未讀時該給的是「標記為已讀」，反過來才是「標記為未讀」
+                if (unread.unread) {
+                    ContextMenuItem(strings.actionMarkRead) {
+                        menuOpen = false
+                        scope.launch {
+                            roomRepository.markRead(room.roomId)
+                            // 手動標記過的也要一起清掉，否則清單上的未讀狀態不會消
+                            if (unread.markedUnread) roomRepository.setMarkedUnread(room.roomId, false)
+                        }
+                    }
+                } else {
+                    ContextMenuItem(strings.actionMarkUnread) {
+                        menuOpen = false
+                        scope.launch { roomRepository.setMarkedUnread(room.roomId, true) }
+                    }
                 }
                 ContextMenuItem(if (favourite) "✓ ${strings.actionFavourite}" else strings.actionFavourite) {
                     menuOpen = false
@@ -1106,12 +1118,17 @@ private fun TimelinePane(
     val alias by aliasFlow.collectAsState(initial = null)
     // 輸入框只放別名的本地部分（#room）；完整 #room:server 會擠成三行
     val sendTarget = alias?.substringBefore(':') ?: room.name
-    var draft by remember(room.roomId) { mutableStateOf("") }
+    // TextFieldState（BTF2）：輸入法要靠它回報游標位置
+    val draft = remember(room.roomId) { TextFieldState() }
     var sending by remember(room.roomId) { mutableStateOf(false) }
     var sendError by remember(room.roomId) { mutableStateOf<String?>(null) }
     /** 選了「回覆」之後要附上的目標訊息；送出後清掉。 */
     var replyTo by remember(room.roomId) { mutableStateOf<TimelineMessage?>(null) }
     val clipboard = LocalClipboardManager.current
+    // 使用者一改動草稿就把上一次的錯誤訊息收掉
+    LaunchedEffect(draft) {
+        snapshotFlow { draft.text.toString() }.collect { sendError = null }
+    }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
@@ -1152,6 +1169,29 @@ private fun TimelinePane(
         if (messages?.isNotEmpty() == true) roomRepository.markRead(room.roomId)
     }
 
+    // 送出動作由按鈕與 Enter 鍵共用，兩邊行為必須一致
+    val sendDraft: () -> Unit = {
+        val body = draft.text.toString().trim()
+        if (body.isNotEmpty() && !sending) {
+            draft.clearText()
+            sending = true
+            val target = replyTo?.eventId
+            replyTo = null
+            scope.launch {
+                val result = if (target != null) {
+                    roomRepository.sendReply(room.roomId, target, body)
+                } else {
+                    roomRepository.sendText(room.roomId, body)
+                }
+                result.onFailure {
+                    draft.setTextAndPlaceCursorAtEnd(body)
+                    sendError = io.github.capricornus007.nashira.i18n.friendlyError(it)
+                }
+                sending = false
+            }
+        }
+    }
+
     // 貼圖面板：狀態放在 Scaffold 之外，因為它有兩種擺法——
     // 浮在訊息區上方（Telegram／Discord／Element 的做法，不推動輸入列），
     // 或釘在輸入列下方。由設定 stickerPanelAbove 決定。
@@ -1159,6 +1199,7 @@ private fun TimelinePane(
     // 「＋」的附件選單（桌面是小彈窗、手機是底部面板）
     var attachMenu by remember(room.roomId) { mutableStateOf(false) }
     val panelAbove = LocalUiState.current.stickerPanelAbove
+    val sendShortcut = LocalUiState.current.sendShortcut
     val stickerPanelContent: @Composable (Modifier) -> Unit = { panelModifier ->
         StickerPicker(
             roomRepository = roomRepository,
@@ -1205,7 +1246,6 @@ private fun TimelinePane(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { }) { Icon(Icons.Filled.Search, contentDescription = strings.search) }
                     // 成員欄只存在於寬版面：窄版面不給這顆按鈕，避免按了沒反應
                     if (onToggleMembers != null) {
                         IconButton(onClick = onToggleMembers) {
@@ -1216,26 +1256,45 @@ private fun TimelinePane(
                             )
                         }
                     }
-                    IconButton(onClick = { }) { Icon(Icons.Filled.MoreVert, contentDescription = strings.more) }
                 },
             )
         },
         bottomBar = {
             Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).navigationBarsPadding()) {
-                // 回覆預覽：跟 Element／Telegram 一樣掛在輸入列上方，右邊一個叉取消
+                // 回覆預覽：跟 Element／Telegram 一樣掛在輸入列上方——除了「回覆給誰」
+                // 還要顯示被引用的內容，否則挑錯訊息了也看不出來。左邊一條豎線標示引用。
                 replyTo?.let { target ->
                     Row(
                         Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(
-                            strings.replyingTo.format(target.senderName),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
+                        Box(
+                            Modifier.width(3.dp).height(32.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(MaterialTheme.colorScheme.primary),
                         )
+                        Column(Modifier.weight(1f).padding(start = 10.dp)) {
+                            Text(
+                                strings.replyingTo.format(target.senderName),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                when (val body = target.body) {
+                                    is MessageBody.Text -> body.text
+                                    is MessageBody.Image ->
+                                        if (body.isSticker) strings.notifSticker else strings.notifImage
+                                    is MessageBody.Attachment -> body.name
+                                    MessageBody.Undecryptable -> strings.notifUndecryptable
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                         IconButton(onClick = { replyTo = null }, modifier = Modifier.size(32.dp)) {
                             Icon(
                                 Icons.Filled.Close,
@@ -1278,17 +1337,40 @@ private fun TimelinePane(
                         shape = RoundedCornerShape(22.dp),
                         modifier = Modifier.weight(1f),
                     ) {
+                        // 用 state 版的 BasicTextField（BTF2）而不是 value/onValueChange 版：
+                        // 舊版在 Linux 不會把游標矩形回報給輸入法，fcitx5 的候選詞窗只能
+                        // 退回視窗原點，於是跑到畫面左下角。BTF2 走新的文字輸入會話，
+                        // 會回報 composition/cursor 位置。
                         BasicTextField(
-                            value = draft,
-                            onValueChange = { draft = it; sendError = null },
+                            state = draft,
                             modifier = Modifier.fillMaxWidth()
                                 .heightIn(min = 44.dp)
+                                // 送出鍵：命中設定的組合就送並吃掉事件，其餘 Enter 交回去換行
+                                .onPreviewKeyEvent { event ->
+                                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                    if (event.key != Key.Enter && event.key != Key.NumPadEnter) {
+                                        return@onPreviewKeyEvent false
+                                    }
+                                    val matches = when (sendShortcut) {
+                                        SendShortcut.ENTER ->
+                                            !event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed
+                                        SendShortcut.CTRL_ENTER -> event.isCtrlPressed
+                                        SendShortcut.ALT_ENTER -> event.isAltPressed
+                                        SendShortcut.SHIFT_ENTER -> event.isShiftPressed
+                                    }
+                                    if (matches) {
+                                        sendDraft()
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                }
                                 .padding(horizontal = 16.dp, vertical = 11.dp),
                             textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
                             cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                            maxLines = 6,
-                            decorationBox = { inner ->
-                                if (draft.isEmpty()) {
+                            lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 6),
+                            decorator = { inner ->
+                                if (draft.text.isEmpty()) {
                                     Text(
                                         strings.sendTo.format(sendTarget),
                                         style = MaterialTheme.typography.bodyLarge,
@@ -1304,7 +1386,7 @@ private fun TimelinePane(
                     // 尾端只有一顆鍵，內容隨草稿切換（實機對照：微信空白時是「＋」、
                     // 有字就換成「傳送」；Telegram 空白時是麥克風＋迴紋針，有字就變紙飛機）。
                     // 送出鍵不常駐，避免空白時擺一顆按不動的灰鈕。
-                    val canSend = !sending && draft.isNotBlank()
+                    val canSend = !sending && draft.text.isNotBlank()
                     AnimatedContent(
                         targetState = canSend || sending,
                         transitionSpec = {
@@ -1318,23 +1400,7 @@ private fun TimelinePane(
                                 Modifier.size(44.dp)
                                     .clip(CircleShape)
                                     .background(if (canSend) MaterialTheme.colorScheme.primary else Color.Transparent)
-                                    .clickable(enabled = canSend) {
-                                        val body = draft.trim(); draft = ""; sending = true
-                                        val target = replyTo?.eventId
-                                        replyTo = null
-                                        scope.launch {
-                                            val result = if (target != null) {
-                                                roomRepository.sendReply(room.roomId, target, body)
-                                            } else {
-                                                roomRepository.sendText(room.roomId, body)
-                                            }
-                                            result.onFailure {
-                                                draft = body
-                                                sendError = io.github.capricornus007.nashira.i18n.friendlyError(it)
-                                            }
-                                            sending = false
-                                        }
-                                    },
+                                    .clickable(enabled = canSend, onClick = sendDraft),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 if (sending) {
@@ -1532,8 +1598,6 @@ private fun AttachMenu(
         onDismissRequest = onDismiss,
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         shadowElevation = 8.dp,
-        // 輸入列在畫面最底，選單要往上開
-        offset = DpOffset(0.dp, (-200).dp),
     ) {
         if (onPhoto != null) {
             DropdownMenuItem(

@@ -20,6 +20,12 @@ import io.github.capricornus007.nashira.theme.ThemeMode
 import io.github.capricornus007.nashira.theme.dynamicColorSupported
 import io.github.capricornus007.nashira.theme.wallpaperSeedColor
 
+/**
+ * 哪一種 Enter 組合送出訊息；其餘的 Enter 一律換行。
+ * 預設 Enter 直接送（Telegram／Discord／Element 桌面預設都是這樣）。
+ */
+enum class SendShortcut { ENTER, CTRL_ENTER, ALT_ENTER, SHIFT_ENTER }
+
 enum class SpaceIconMode {
     SPACE_AVATAR,
     ROOM_PREVIEWS,
@@ -65,6 +71,9 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
      */
     var backgroundSync by mutableStateOf(stored["backgroundSync"]?.toBooleanStrictOrNull() ?: true)
 
+    /** 送出鍵；其餘 Enter 組合換行。 */
+    var sendShortcut by mutableStateOf(stored.enumOr("sendShortcut", SendShortcut.ENTER))
+
     init {
         loaded = true
     }
@@ -84,6 +93,7 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
             "stickerPanelAbove" to stickerPanelAbove.toString(),
             "membersPanelOpen" to membersPanelOpen.toString(),
             "backgroundSync" to backgroundSync.toString(),
+            "sendShortcut" to sendShortcut.name,
         ) + (accent?.let { mapOf("accent" to it.name) } ?: emptyMap())
         if (snapshot == lastPersisted) return
         lastPersisted = snapshot

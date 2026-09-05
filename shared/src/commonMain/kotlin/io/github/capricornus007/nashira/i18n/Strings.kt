@@ -87,6 +87,13 @@ interface Strings {
     val actionCopyLink: String
     val actionDelete: String
     val actionMarkUnread: String
+    val actionMarkRead: String
+    val sendShortcut: String
+    val sendShortcutHint: String
+    val keyEnter: String
+    val keyCtrlEnter: String
+    val keyAltEnter: String
+    val keyShiftEnter: String
     val actionFavourite: String
     val actionLowPriority: String
     val actionInvite: String
@@ -266,6 +273,13 @@ object ZhTwStrings : Strings {
     override val actionCopyLink = "複製連結"
     override val actionDelete = "刪除訊息"
     override val actionMarkUnread = "標記為未讀"
+    override val actionMarkRead = "標記為已讀"
+    override val sendShortcut = "送出鍵"
+    override val sendShortcutHint = "命中的組合送出，其餘 Enter 換行"
+    override val keyEnter = "Enter"
+    override val keyCtrlEnter = "Ctrl + Enter"
+    override val keyAltEnter = "Alt + Enter"
+    override val keyShiftEnter = "Shift + Enter"
     override val actionFavourite = "收藏"
     override val actionLowPriority = "低優先"
     override val actionInvite = "邀請"
@@ -500,6 +514,13 @@ object EnStrings : Strings {
     override val actionCopyLink = "Copy link"
     override val actionDelete = "Remove message"
     override val actionMarkUnread = "Mark as unread"
+    override val actionMarkRead = "Mark as read"
+    override val sendShortcut = "Send shortcut"
+    override val sendShortcutHint = "The chosen combo sends; other Enter presses insert a newline"
+    override val keyEnter = "Enter"
+    override val keyCtrlEnter = "Ctrl + Enter"
+    override val keyAltEnter = "Alt + Enter"
+    override val keyShiftEnter = "Shift + Enter"
     override val actionFavourite = "Favourite"
     override val actionLowPriority = "Low priority"
     override val actionInvite = "Invite"

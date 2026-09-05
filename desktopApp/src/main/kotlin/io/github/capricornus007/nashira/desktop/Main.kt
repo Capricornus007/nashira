@@ -15,11 +15,16 @@ import androidx.compose.ui.window.rememberWindowState
 import io.github.capricornus007.nashira.App
 import io.github.capricornus007.nashira.theme.readXdgColorSchemeDark
 import io.github.capricornus007.nashira.theme.xdgColorSchemeDarkFlow
+import androidx.compose.runtime.snapshotFlow
+import io.github.capricornus007.nashira.AppNotifications
+import io.github.capricornus007.nashira.DesktopNotifications
 
 fun main() {
     // 必須在 application {} 與任何 AWT 觸碰之前：非重親 WM 修正與 HiDPI 縮放
     // 都只在 toolkit 初始化前設定才生效。
     configureX11Platform()
+    // 通知走 freedesktop 的 notify-send；視窗有焦點時不發（使用者正在看）
+    AppNotifications.platform = DesktopNotifications
     application {
         // Linux 無動態取色；「跟隨系統」用 xdg portal（fallback GTK 設定檔）判深淺，
         // 啟動先取一次快照，之後輪詢跟隨中途切換。
@@ -39,6 +44,10 @@ fun main() {
                 size = DpSize(1040.dp, 720.dp),
             ),
         ) {
+            // window.isFocused 只在 WindowScope 內拿得到；焦點變化即時反映到通知抑制
+            LaunchedEffect(window) {
+                snapshotFlow { window.isFocused }.collect { DesktopNotifications.setForeground(it) }
+            }
             App(defaultDark = systemDark)
         }
     }

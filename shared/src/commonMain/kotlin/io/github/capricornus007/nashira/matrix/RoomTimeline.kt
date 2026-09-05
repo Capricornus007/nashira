@@ -72,14 +72,18 @@ class RoomTimeline(
      */
     @OptIn(ExperimentalCoroutinesApi::class)
     fun pageFlow(): Flow<TimelinePage> = timeline.state
-        .flatMapLatest { state ->
+        // 成員表要一起收：大房（幾千人）的 member 事件是延後載入的，先到的是空表。
+        // 只在建頁時取一次 memberMap 的當下值，發送者名字會全部退回 localpart，
+        // 而且之後成員到了也不會重畫——使用者看到的就是「一部分有名字一部分是 telegram_數字」。
+        .combine(memberMap) { state, members -> state to members }
+        .flatMapLatest { (state, members) ->
             // Timeline state 的元素是「事件流」。解密完成會更新該流並重新發射，
             // timeline.state 也因為事件流換值而重算；這裡在 Flow 的 suspend map 裡等每條流的最新值。
             flow {
                 emit(
                     TimelinePage(
                         // elements 是舊→新，UI 要新→舊
-                        messages = state.elements.asReversed().mapNotNull { eventFlow -> toMessage(eventFlow) },
+                        messages = state.elements.asReversed().mapNotNull { eventFlow -> toMessage(eventFlow, members) },
                         eventCount = state.elements.size,
                         canLoadMore = state.canLoadBefore,
                         loadingBefore = loadingBefore.value,
@@ -124,8 +128,10 @@ class RoomTimeline(
         )
     }
 
-    private suspend fun toMessage(eventFlow: Flow<TimelineEvent>): TimelineMessage? {
-        val members = memberMap.firstOrNull() ?: emptyMap()
+    private suspend fun toMessage(
+        eventFlow: Flow<TimelineEvent>,
+        members: Map<UserId, RoomUser>,
+    ): TimelineMessage? {
         val timelineEvent = eventFlow.first()
         val roomEvent = timelineEvent.event
         val member = members[roomEvent.sender]
