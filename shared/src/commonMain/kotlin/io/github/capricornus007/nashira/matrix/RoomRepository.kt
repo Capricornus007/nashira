@@ -69,6 +69,8 @@ data class RoomSummary(
     val spaceIds: Set<RoomId> = emptySet(),
     /** 最後一則相關事件的時間；清單按此遞減排序，避免每次同步重排造成跳動 */
     val lastActivity: Long = 0L,
+    /** `m.tag` 標籤（`m.favourite` / `m.lowpriority`）：收藏排最前、低優先排最後 */
+    val tags: Set<String> = emptySet(),
 )
 
 /** Space／房間的未讀狀態：Discord 用小白點表示有未讀、紅圈數字表示提及數。 */
@@ -167,10 +169,28 @@ class RoomRepository(val client: MatrixClient) {
     private fun isSpace(room: Room): Boolean = room.type is CreateEventContent.RoomType.Space
 
     /** 全部已加入房間的摘要流（sync 後自動更新）。 */
+    @OptIn(ExperimentalCoroutinesApi::class)
     fun roomSummaries(): Flow<List<RoomSummary>> =
         joinedRooms()
-            .map { rooms -> rooms.filterNot(::isSpace).map(::summaryOf).sortedByActivity() }
+            .map { rooms -> rooms.filterNot(::isSpace).map(::summaryOf) }
+            .flatMapLatest { summaries ->
+                if (summaries.isEmpty()) {
+                    flowOf(emptyList())
+                } else {
+                    // 標籤要進排序：不然「收藏／低優先」按了只是寫給別的客戶端看，
+                    // Nashira 自己的清單毫無變化，使用者當然覺得那兩個選項沒作用。
+                    combine(summaries.map { summary -> tagsOf(summary.roomId).map { summary.copy(tags = it) } }) {
+                        it.toList().sortedByTagsAndActivity()
+                    }
+                }
+            }
             .flowOn(Dispatchers.Default)
+
+    /** 房間的 `m.tag` 名稱集合，取自已同步的房間 account data。 */
+    private fun tagsOf(roomId: RoomId): Flow<Set<String>> =
+        client.room.getAccountData<TagEventContent>(roomId)
+            .map { content -> content?.tags?.keys?.map { it.name }?.toSet() ?: emptySet() }
+            .distinctUntilChanged()
 
     private fun joinedRooms(): Flow<List<Room>> =
         client.room.getAll().flattenValues().map { rooms -> rooms.filter(::visible) }
@@ -637,5 +657,19 @@ internal fun String?.visibleNameOrNull(): String? {
     return if (visible.isEmpty()) null else this
 }
 
+
+/**
+ * 收藏在最前、低優先在最後，同組內按最後活動時間遞減——與 Element 的清單分組一致。
+ */
+private fun List<RoomSummary>.sortedByTagsAndActivity(): List<RoomSummary> =
+    sortedWith(
+        compareBy<RoomSummary> {
+            when {
+                "m.favourite" in it.tags -> 0
+                "m.lowpriority" in it.tags -> 2
+                else -> 1
+            }
+        }.thenByDescending { it.lastActivity },
+    )
 private fun List<RoomSummary>.sortedByActivity(): List<RoomSummary> =
     sortedWith(compareByDescending<RoomSummary> { it.lastActivity }.thenBy { it.name.lowercase() })
