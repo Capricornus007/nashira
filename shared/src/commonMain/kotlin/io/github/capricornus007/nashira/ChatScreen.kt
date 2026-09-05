@@ -1034,6 +1034,21 @@ private fun TimelinePane(roomRepository: RoomRepository, room: RoomSummary, onBa
         },
         bottomBar = {
             Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).navigationBarsPadding()) {
+                // Discord 的「+」面板：貼圖包選擇器（MSC2545），開關就掛在輸入列左邊的「+」上
+                var stickerPanel by remember { mutableStateOf(false) }
+                if (stickerPanel) {
+                    StickerPicker(
+                        roomRepository = roomRepository,
+                        roomId = room.roomId,
+                        strings = strings,
+                        onSend = { sticker ->
+                            scope.launch {
+                                roomRepository.sendSticker(room.roomId, sticker)
+                                    .onFailure { sendError = it.message ?: strings.sendFailed }
+                            }
+                        },
+                    )
+                }
                 sendError?.let {
                     Text(
                         it,
@@ -1049,8 +1064,15 @@ private fun TimelinePane(roomRepository: RoomRepository, room: RoomSummary, onBa
                     verticalAlignment = Alignment.Bottom,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    IconButton(onClick = { }, modifier = Modifier.size(44.dp)) {
-                        Icon(Icons.Filled.Add, contentDescription = strings.add, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    IconButton(
+                        onClick = { stickerPanel = !stickerPanel },
+                        modifier = Modifier.size(44.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.Add,
+                            contentDescription = strings.sticker,
+                            tint = if (stickerPanel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                     Surface(
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,

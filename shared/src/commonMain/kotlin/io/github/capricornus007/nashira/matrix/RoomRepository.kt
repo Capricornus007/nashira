@@ -375,6 +375,10 @@ class RoomRepository(val client: MatrixClient) {
                 text(body)
             }
         }
+
+    /** 發送貼圖（MSC2545 m.sticker）：走 StickerRepository 的加密路徑，回 eventId 便於撤回 */
+    suspend fun sendSticker(roomId: RoomId, sticker: StickerItem): Result<String> =
+        StickerRepository(client).sendSticker(roomId, sticker)
 }
 
 /**

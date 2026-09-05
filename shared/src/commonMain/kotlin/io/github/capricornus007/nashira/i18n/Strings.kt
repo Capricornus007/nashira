@@ -27,6 +27,11 @@ interface Strings {
     val sendTo: String
     val add: String
     val send: String
+    val sticker: String
+    val stickerEmpty: String
+    val notifImage: String
+    val notifSticker: String
+    val notifUndecryptable: String
     val verified: String
     val tagline: String
     val appearance: String
@@ -179,6 +184,11 @@ object ZhTwStrings : Strings {
     override val sendTo = "傳送訊息至 %s"
     override val add = "新增"
     override val send = "傳送"
+    override val sticker = "貼圖"
+    override val stickerEmpty = "還沒有貼圖包"
+    override val notifImage = "[圖片]"
+    override val notifSticker = "[貼圖]"
+    override val notifUndecryptable = "[無法解密]"
     override val verified = "已驗證"
     override val tagline = "γ Capricorni · 報佳音之星"
     override val appearance = "外觀"
@@ -323,6 +333,11 @@ object EnStrings : Strings {
     override val sendTo = "Send a message to %s"
     override val add = "Add"
     override val send = "Send"
+    override val sticker = "Stickers"
+    override val stickerEmpty = "No sticker packs yet"
+    override val notifImage = "[Image]"
+    override val notifSticker = "[Sticker]"
+    override val notifUndecryptable = "[Undecryptable]"
     override val verified = "Verified"
     override val tagline = "γ Capricorni, the bringer of good news"
     override val appearance = "Appearance"

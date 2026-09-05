@@ -116,10 +116,14 @@ fun App(defaultDark: Boolean? = null) {
     NashiraTheme(colorScheme = animatedScheme) {
         val current = session
         when {
-            current != null -> ChatScreen(
-                session = current,
-                onLogout = { MatrixEngine.logout() },
-            )
+            current != null -> {
+                // 新訊息的系統通知：房間未讀 false→true 邊沿觸發（前台抑制在平台層）
+                NotificationHost(io.github.capricornus007.nashira.matrix.RoomRepository(current.client), current.client.userId)
+                ChatScreen(
+                    session = current,
+                    onLogout = { MatrixEngine.logout() },
+                )
+            }
             // 磁碟有憑證時先顯示啟動頁，不再閃一次登入表單
             restoring -> StartupScreen()
             else -> LoginScreen(onLoginSuccess = { })

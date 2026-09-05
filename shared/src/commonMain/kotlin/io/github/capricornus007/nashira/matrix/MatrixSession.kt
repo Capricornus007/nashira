@@ -86,7 +86,10 @@ object MatrixEngine {
                 accessToken = stored.accessToken,
                 refreshToken = null,
             ),
-            configuration = { this.syncFilter = MatrixEngine.syncFilter },
+            configuration = {
+                this.syncFilter = MatrixEngine.syncFilter
+                this.modulesFactories = trixnityModuleFactoriesWithPonies()
+            },
         ).getOrNull() ?: run {
             storage.clear()
             _restoring.value = false
@@ -117,7 +120,10 @@ object MatrixEngine {
             mediaStoreModule = MediaStoreModule.inMemory(),
             cryptoDriverModule = CryptoDriverModule.vodozemac(),
             authProviderData = authData,
-            configuration = { this.syncFilter = MatrixEngine.syncFilter },
+            configuration = {
+                this.syncFilter = MatrixEngine.syncFilter
+                this.modulesFactories = trixnityModuleFactoriesWithPonies()
+            },
         ).getOrElse { return Result.failure(it) }
 
         storage.save(

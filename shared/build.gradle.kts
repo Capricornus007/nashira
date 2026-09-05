@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.android.kotlin.multiplatform.library)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.compose)
 }
 
@@ -42,6 +43,9 @@ kotlin {
             implementation(libs.cmp.material3)
             implementation(libs.material.kolor)
             implementation(libs.kotlinx.datetime)
+            // MSC2545 自訂 content（m.sticker / im.ponies.*）需要 serialization 插件與 runtime；
+            // runtime 用 Trixnity 傳遞帶入的版本，避免雙版本
+            implementation("org.jetbrains.kotlinx:kotlinx-serialization-core:1.11.0")
             implementation("org.jetbrains.compose.material:material-icons-core:1.7.3")
             // kotlin-wrappers:kotlin-browser 只有 js/wasm 變體，Android/JVM 解析會炸（Trixnity POM 傳遞帶入），排除
             implementation("de.connect2x.trixnity:trixnity-client:${libs.versions.trixnity.get()}") {

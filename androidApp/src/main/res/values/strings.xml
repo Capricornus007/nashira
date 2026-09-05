@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Nashira</string>
+    <string name="notif_channel_messages">Messages</string>
+    <string name="notif_channel_messages_desc">New messages from rooms and direct chats</string>
 </resources>

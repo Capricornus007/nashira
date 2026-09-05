@@ -112,15 +112,15 @@ private fun ratioOf(width: Int?, height: Int?, bitmap: ImageBitmap?): Float {
 }
 
 /** 縮圖上限 2 MiB：時間線一次可能掛十幾張圖，原圖直接拉會把手機流量與記憶體吃光。 */
-private const val MaxMediaBytes = 2L * 1024 * 1024
+internal const val MaxMediaBytes = 2L * 1024 * 1024
 
 private fun MediaSource.cacheKey(): String = when (this) {
     is MediaSource.Plain -> mxcUrl
     is MediaSource.Encrypted -> file.url
 }
 
-/** 進程內位圖快取：時間線來回滾動會反覆掛載同一則圖片訊息。 */
-private object MediaBitmapCache {
+/** 進程內位圖快取：時間線來回滾動會反覆掛載同一則圖片訊息，貼圖面板也共用這份。 */
+internal object MediaBitmapCache {
     private const val MAX_ENTRIES = 64
     private val entries = LinkedHashMap<String, ImageBitmap>()
 
