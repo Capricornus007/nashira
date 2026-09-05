@@ -13,6 +13,8 @@ kotlin {
 dependencies {
     implementation(project(":shared"))
     implementation(compose.desktop.currentOs)
+    // 讓 Trixnity 的 lognity/SLF4J 日誌真正輸出（否則 desktop 端 NOP 看不到任何錯誤）
+    runtimeOnly("org.slf4j:slf4j-simple:2.0.16")
 }
 
 compose.desktop {
