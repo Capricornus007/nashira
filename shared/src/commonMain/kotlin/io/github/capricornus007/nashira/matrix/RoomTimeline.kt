@@ -27,7 +27,10 @@ import kotlin.time.Duration.Companion.seconds
  * 而長住的大房間那條鏈幾乎都有缺口（sync 停頓、事件未補檔），走到缺口就停，畫面一片空白。
  * 這裡改用 `Timeline.init`——它會用 sync token 補抓缺口，解密完成會更新內層事件流並重新發射。
  *
- * 產出的頁面順序是「新 → 舊」（索引 0 最新），正好配 UI 的 reverseLayout。
+ * 產出的頁面順序是「新 → 舊」（索引 0 最新），配 UI 的 reverseLayout。
+ * 注意 Trixnity 的 `TimelineState.elements` 是「舊 → 新」（索引越大越新，見其 KDoc
+ * "sorted with higher indexes being more recent"），所以這裡必須反轉一次；
+ * 忘了反轉就會看到最舊的訊息貼在輸入框上方。
  */
 class RoomTimeline(
     private val client: MatrixClient,
@@ -72,7 +75,8 @@ class RoomTimeline(
             flow {
                 emit(
                     TimelinePage(
-                        messages = state.elements.mapNotNull { eventFlow -> toMessage(eventFlow) },
+                        // elements 是舊→新，UI 要新→舊
+                        messages = state.elements.asReversed().mapNotNull { eventFlow -> toMessage(eventFlow) },
                         eventCount = state.elements.size,
                         canLoadMore = state.canLoadBefore,
                         loadingBefore = loadingBefore.value,

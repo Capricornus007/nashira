@@ -49,6 +49,9 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
     /** 聊天室列表第二行的最後一則訊息預覽 */
     var showMessagePreview by mutableStateOf(stored["showMessagePreview"]?.toBooleanStrictOrNull() ?: true)
 
+    /** 貼圖面板貼在輸入列上方（Discord/Telegram 慣例）或下方（面板不推走輸入列） */
+    var stickerPanelAbove by mutableStateOf(stored["stickerPanelAbove"]?.toBooleanStrictOrNull() ?: true)
+
     init {
         loaded = true
     }
@@ -65,6 +68,7 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
             "spaceIconMode" to spaceIconMode.name,
             "showUnreadIndicators" to showUnreadIndicators.toString(),
             "showMessagePreview" to showMessagePreview.toString(),
+            "stickerPanelAbove" to stickerPanelAbove.toString(),
         ) + (accent?.let { mapOf("accent" to it.name) } ?: emptyMap())
         if (snapshot == lastPersisted) return
         lastPersisted = snapshot

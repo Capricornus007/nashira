@@ -68,6 +68,9 @@ interface Strings {
     val unreadIndicatorsHint: String
     val messagePreview: String
     val messagePreviewHint: String
+    val stickerPanelPosition: String
+    val stickerPanelAbove: String
+    val stickerPanelBelow: String
     val membersCount: String
     val imageMessage: String
     val stickerMessage: String
@@ -218,6 +221,9 @@ object ZhTwStrings : Strings {
     override val appearanceHint = "主題模式、動態顏色與色板"
     override val chatListHint = "清單樣式、未讀提示與訊息預覽"
     override val messagePreviewHint = "清單第二行顯示最後一則訊息"
+    override val stickerPanelPosition = "貼圖面板位置"
+    override val stickerPanelAbove = "在輸入列上方展開"
+    override val stickerPanelBelow = "在輸入列下方展開"
     override val specM3 = "Material 3 (2021)"
     override val specExpressive = "Expressive (2025)"
     override val themeColor = "主題顏色"
@@ -423,6 +429,9 @@ object EnStrings : Strings {
     override val unreadIndicatorsHint = "Show the unread bar in the rail and count badges in the list"
     override val messagePreview = "Message preview"
     override val messagePreviewHint = "Show the latest message on the list's second line"
+    override val stickerPanelPosition = "Sticker panel position"
+    override val stickerPanelAbove = "Opens above the composer"
+    override val stickerPanelBelow = "Opens below the composer"
     override val personalization = "Personalization"
     override val appearanceHint = "Theme mode, dynamic color, and palette"
     override val chatListHint = "List style, unread indicators, and previews"

@@ -68,10 +68,18 @@ object MatrixEngine {
         return "${Url(baseUrl).host}-$localpart"
     }
 
+    /**
+     * 登出。除了清 token，**本機資料庫也要一起刪**：庫裡的 Account 行記著舊 deviceId，
+     * 下次密碼登入拿到的是新 deviceId，Trixnity 的一致性檢查會擋下
+     *（"newly authenticated deviceId … must match stored authenticated deviceId …"），
+     * 表現就是「登出過就再也登不回去」。
+     */
     fun logout() {
+        val stored = runCatching { storage.load() }.getOrNull()
         _session.value?.close()
         _session.value = null
         storage.clear()
+        stored?.let { clearPersistentStore(databaseKey(it.baseUrl, it.userId)) }
         _restoring.value = false
     }
 
@@ -122,8 +130,10 @@ object MatrixEngine {
             initialDeviceDisplayName = "Nashira",
         ).getOrElse { return Result.failure(it) }
 
-        val client = MatrixClient.create(
-            repositoriesModule = persistentRepositories(databaseKey(baseUrl, username)),
+        val key = databaseKey(baseUrl, username)
+
+        suspend fun create() = MatrixClient.create(
+            repositoriesModule = persistentRepositories(key),
             mediaStoreModule = MediaStoreModule.inMemory(),
             cryptoDriverModule = CryptoDriverModule.vodozemac(),
             authProviderData = authData,
@@ -132,7 +142,16 @@ object MatrixEngine {
                 this.modulesFactories = trixnityModuleFactoriesWithPonies()
                 this.httpClientEngine = platformHttpEngine()
             },
-        ).getOrElse { return Result.failure(it) }
+        )
+
+        // 密碼登入永遠拿到新 deviceId。若磁碟上還留著別的 deviceId 的庫（上次沒清乾淨、
+        // 或 app 被強殺沒走 logout），create 會以一致性檢查失敗。這種情況把舊庫刪掉重試一次：
+        // 舊 deviceId 的金鑰沒有對應 token 本來也用不了，留著只會擋住登入。
+        val client = create().getOrElse { first ->
+            if (!isStaleStoreError(first)) return Result.failure(first)
+            clearPersistentStore(key)
+            create().getOrElse { return Result.failure(it) }
+        }
 
         storage.save(
             baseUrl = baseUrl,
@@ -145,4 +164,14 @@ object MatrixEngine {
         _session.value = session
         return Result.success(Unit)
     }
+}
+
+/**
+ * Trixnity 的一致性檢查訊息長這樣：
+ * "newly authenticated userId (…) and deviceId (X) must match stored authenticated userId (…) and deviceId (Y)."
+ * 沒有專屬異常型別可判，只能認訊息。認錯了最壞情況是白刪一次本機快取（可重新同步）。
+ */
+private fun isStaleStoreError(error: Throwable): Boolean {
+    val message = error.message ?: return false
+    return message.contains("must match stored authenticated", ignoreCase = true)
 }

@@ -377,6 +377,15 @@ private fun ChatListPage(onBack: () -> Unit) {
                     onCheckedChange = { ui.showMessagePreview = it },
                 )
             }
+            item { shape ->
+                SettingsSwitchItem(
+                    shape = shape,
+                    title = strings.stickerPanelPosition,
+                    description = if (ui.stickerPanelAbove) strings.stickerPanelAbove else strings.stickerPanelBelow,
+                    checked = ui.stickerPanelAbove,
+                    onCheckedChange = { ui.stickerPanelAbove = it },
+                )
+            }
         }
     }
 }

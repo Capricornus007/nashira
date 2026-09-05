@@ -20,6 +20,10 @@ dependencies {
 compose.desktop {
     application {
         mainClass = "io.github.capricornus007.nashira.desktop.MainKt"
+        // X11Platform 需要反射 sun.awt.X11.XWM 修正非重親 WM（bspwm/dwm/i3…）下
+        // AWT 假邊框造成的「視窗被平鋪、內容卻停在左上角小方塊」。
+        // gradle run 與打包產物都要帶，否則只在其中一種情況生效。
+        jvmArgs += listOf("--add-opens=java.desktop/sun.awt.X11=ALL-UNNAMED")
         nativeDistributions {
             targetFormats(TargetFormat.Deb, TargetFormat.Rpm)
             packageName = "nashira"

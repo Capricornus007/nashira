@@ -3,6 +3,8 @@ package io.github.capricornus007.nashira
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -83,9 +85,14 @@ fun StickerPicker(
                 )
             }
         } else {
+            // 包名優先用包自己的 display_name（state_key 兜底）。同一個貼圖倉庫房會掛
+            // 好幾包，用房間名當標籤會變成三個一樣的「貼圖包倉庫」，分不出來。
             val packNames = packs.map { pack ->
-                if (pack.roomId == null) strings.sticker
-                else names.firstOrNull { it.roomId == pack.roomId }?.name ?: pack.name
+                when {
+                    pack.roomId == null -> strings.sticker
+                    pack.name.isNotBlank() -> pack.name
+                    else -> names.firstOrNull { it.roomId == pack.roomId }?.name ?: pack.roomId.full
+                }
             }
             val pagerState = rememberPagerState(pageCount = { packs.size })
             val scope = rememberCoroutineScope()
@@ -93,26 +100,31 @@ fun StickerPicker(
             val imageLauncher = rememberImagePickerLauncher { image ->
                 onSendImage(image)
             }
-            if (imageLauncher != null) {
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                        .clickable { imageLauncher() },
-                ) {
-                    Text(
-                        strings.sendImage,
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                    )
+            // Surface 的內容槽是 Box 語意：圖片入口和分頁列必須在同一個 Column 裡，
+            // 否則兩者疊在同一格（實測「發送圖片」壓在包名上）。
+            Column(Modifier.fillMaxSize()) {
+                if (imageLauncher != null) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 8.dp, end = 8.dp, top = 8.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { imageLauncher() },
+                    ) {
+                        Text(
+                            strings.sendImage,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        )
+                    }
                 }
-            }
-            Column {
+                // 包多了要能橫向捲，不然後面的包點不到
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     packNames.forEachIndexed { index, name ->
@@ -129,7 +141,7 @@ fun StickerPicker(
                         )
                     }
                 }
-                HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
+                HorizontalPager(state = pagerState, modifier = Modifier.fillMaxWidth().weight(1f)) { page ->
                     StickerGrid(packs[page], client, onSend)
                 }
             }
@@ -168,12 +180,17 @@ private fun StickerThumb(client: MatrixClient, sticker: StickerItem) {
         if (bitmap != null) return@LaunchedEffect
         repeat(MediaFetchAttempts) { attempt ->
             if (attempt > 0) delay(MediaRetryDelayMillis * attempt)
-            val media = client.di.get<MediaService>().let { service ->
-                when (val source = sticker.mxcUrl?.let { MediaSource.Plain(it) } ?: sticker.file?.let { MediaSource.Encrypted(it) }) {
-                    is MediaSource.Plain -> service.getThumbnail(source.mxcUrl, 240, 240, maxSize = MaxMediaBytes)
-                    is MediaSource.Encrypted -> service.getEncryptedMedia(source.file, maxSize = MaxMediaBytes)
-                    null -> null
-                }
+            val service = client.di.get<MediaService>()
+            val source = sticker.mxcUrl?.let { MediaSource.Plain(it) } ?: sticker.file?.let { MediaSource.Encrypted(it) }
+            // 縮圖端點對 webp/動圖常常直接失敗（伺服器不生縮圖）。最後一輪改抓原圖，
+            // 否則整包貼圖只會顯示破圖佔位。
+            val fullSize = attempt >= MediaFetchAttempts - 1
+            val media = when (source) {
+                is MediaSource.Plain ->
+                    if (fullSize) service.getMedia(source.mxcUrl, maxSize = MaxMediaBytes)
+                    else service.getThumbnail(source.mxcUrl, 240, 240, maxSize = MaxMediaBytes)
+                is MediaSource.Encrypted -> service.getEncryptedMedia(source.file, maxSize = MaxMediaBytes)
+                null -> null
             }?.getOrNull()
             val decoded = media?.toByteArray(this)?.let { decodeImageBitmap(it) }
             if (decoded != null) {

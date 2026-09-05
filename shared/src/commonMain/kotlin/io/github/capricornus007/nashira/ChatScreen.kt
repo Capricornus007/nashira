@@ -1034,9 +1034,11 @@ private fun TimelinePane(roomRepository: RoomRepository, room: RoomSummary, onBa
         },
         bottomBar = {
             Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).navigationBarsPadding()) {
-                // Discord 的「+」面板：貼圖包選擇器（MSC2545），開關就掛在輸入列左邊的「+」上
+                // Discord 的「+」面板：貼圖包選擇器（MSC2545），開關掛在輸入列左邊的「+」上。
+                // 面板放輸入列上方還是下方由設定決定（stickerPanelAbove）。
                 var stickerPanel by remember { mutableStateOf(false) }
-                if (stickerPanel) {
+                val panelAbove = LocalUiState.current.stickerPanelAbove
+                val panel: @Composable () -> Unit = {
                     StickerPicker(
                         roomRepository = roomRepository,
                         roomId = room.roomId,
@@ -1055,6 +1057,7 @@ private fun TimelinePane(roomRepository: RoomRepository, room: RoomSummary, onBa
                         },
                     )
                 }
+                if (stickerPanel && panelAbove) panel()
                 sendError?.let {
                     Text(
                         it,
@@ -1135,6 +1138,7 @@ private fun TimelinePane(roomRepository: RoomRepository, room: RoomSummary, onBa
                         }
                     }
                 }
+                if (stickerPanel && !panelAbove) panel()
             }
         },
     ) { padding ->
