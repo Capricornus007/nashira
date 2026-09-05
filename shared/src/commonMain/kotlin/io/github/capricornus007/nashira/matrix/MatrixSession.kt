@@ -44,6 +44,10 @@ class MatrixSession(
 ) {
     fun start() {
         scope.launch { client.startSync() }
+        // 通知在背景才需要發，所以觀察器綁在 session 上而不是 Compose 樹上
+        scope.launch {
+            io.github.capricornus007.nashira.watchUnreadForNotifications(RoomRepository(client), client.userId)
+        }
     }
 
     fun close() {

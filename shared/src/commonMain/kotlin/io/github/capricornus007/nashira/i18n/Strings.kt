@@ -79,6 +79,9 @@ interface Strings {
     val attachFile: String
     val attach: String
     val spaceHome: String
+    val notifications: String
+    val backgroundSync: String
+    val backgroundSyncHint: String
     val actionReply: String
     val actionCopyText: String
     val actionCopyLink: String
@@ -255,6 +258,9 @@ object ZhTwStrings : Strings {
     override val attachFile = "檔案"
     override val attach = "附件"
     override val spaceHome = "聊天空間首頁"
+    override val notifications = "通知"
+    override val backgroundSync = "背景同步"
+    override val backgroundSyncHint = "常駐連線，離開 app 也收得到新訊息通知"
     override val actionReply = "回覆"
     override val actionCopyText = "複製文字"
     override val actionCopyLink = "複製連結"
@@ -353,7 +359,7 @@ object ZhTwStrings : Strings {
     override val verificationState = "驗證狀態"
     override val noVerification = "目前沒有進行中的驗證。"
     override val securityHint = "Nashira 使用 Trixnity vodozemac。驗證後才會把此裝置標記為可信，並用於解密歷史訊息。"
-    override val verificationHint = "用另一個已登入的 Matrix 裝置確認 SAS，驗證事件會透過加密的 to-device 通道傳送。"
+    override val verificationHint = "用另一個已登入 Nashira 或其他 Matrix 客戶端的裝置確認 SAS，驗證事件會透過加密的 to-device 通道傳送。"
     override val targetDeviceId = "要驗證的裝置 ID"
     override val targetDeviceIdExample = "例如 ABCDEFGHIJ"
     override val verificationFailed = "驗證要求失敗"
@@ -486,6 +492,9 @@ object EnStrings : Strings {
     override val attachFile = "File"
     override val attach = "Attach"
     override val spaceHome = "Space home"
+    override val notifications = "Notifications"
+    override val backgroundSync = "Background sync"
+    override val backgroundSyncHint = "Keeps the connection open so notifications arrive in the background"
     override val actionReply = "Reply"
     override val actionCopyText = "Copy text"
     override val actionCopyLink = "Copy link"

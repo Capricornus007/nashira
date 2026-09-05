@@ -3,4 +3,8 @@
     <string name="app_name">Nashira</string>
     <string name="notif_channel_messages">Messages</string>
     <string name="notif_channel_messages_desc">New messages from rooms and direct chats</string>
+    <string name="notif_channel_sync">Background sync</string>
+    <string name="notif_channel_sync_desc">Keeps Nashira connected so notifications arrive</string>
+    <string name="notif_sync_title">Nashira is syncing</string>
+    <string name="notif_sync_text">Keeping the connection open for new messages</string>
 </resources>

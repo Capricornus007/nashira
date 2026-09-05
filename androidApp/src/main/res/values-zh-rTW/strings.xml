@@ -2,4 +2,8 @@
 <resources>
     <string name="notif_channel_messages">訊息</string>
     <string name="notif_channel_messages_desc">聊天室與私訊的新訊息通知</string>
+    <string name="notif_channel_sync">背景同步</string>
+    <string name="notif_channel_sync_desc">維持 Nashira 的連線，新訊息才收得到通知</string>
+    <string name="notif_sync_title">Nashira 正在同步</string>
+    <string name="notif_sync_text">保持連線以接收新訊息</string>
 </resources>

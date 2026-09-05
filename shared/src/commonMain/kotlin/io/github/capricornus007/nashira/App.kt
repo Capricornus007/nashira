@@ -59,6 +59,12 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
      */
     var membersPanelOpen by mutableStateOf(stored["membersPanelOpen"]?.toBooleanStrictOrNull() ?: false)
 
+    /**
+     * Android 背景同步（前台服務）。關掉就只有 app 在前台時收得到訊息。
+     * 桌面不看這個值。
+     */
+    var backgroundSync by mutableStateOf(stored["backgroundSync"]?.toBooleanStrictOrNull() ?: true)
+
     init {
         loaded = true
     }
@@ -77,6 +83,7 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
             "showMessagePreview" to showMessagePreview.toString(),
             "stickerPanelAbove" to stickerPanelAbove.toString(),
             "membersPanelOpen" to membersPanelOpen.toString(),
+            "backgroundSync" to backgroundSync.toString(),
         ) + (accent?.let { mapOf("accent" to it.name) } ?: emptyMap())
         if (snapshot == lastPersisted) return
         lastPersisted = snapshot
@@ -128,8 +135,6 @@ fun App(defaultDark: Boolean? = null) {
         val current = session
         when {
             current != null -> {
-                // 新訊息的系統通知：房間未讀 false→true 邊沿觸發（前台抑制在平台層）
-                NotificationHost(io.github.capricornus007.nashira.matrix.RoomRepository(current.client), current.client.userId)
                 ChatScreen(
                     session = current,
                     onLogout = { MatrixEngine.logout() },
