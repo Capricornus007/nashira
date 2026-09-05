@@ -32,6 +32,7 @@ interface Strings {
     val notifImage: String
     val notifSticker: String
     val notifUndecryptable: String
+    val sendImage: String
     val verified: String
     val tagline: String
     val appearance: String
@@ -189,6 +190,7 @@ object ZhTwStrings : Strings {
     override val notifImage = "[圖片]"
     override val notifSticker = "[貼圖]"
     override val notifUndecryptable = "[無法解密]"
+    override val sendImage = "發送圖片"
     override val verified = "已驗證"
     override val tagline = "γ Capricorni · 報佳音之星"
     override val appearance = "外觀"
@@ -338,6 +340,7 @@ object EnStrings : Strings {
     override val notifImage = "[Image]"
     override val notifSticker = "[Sticker]"
     override val notifUndecryptable = "[Undecryptable]"
+    override val sendImage = "Send image"
     override val verified = "Verified"
     override val tagline = "γ Capricorni, the bringer of good news"
     override val appearance = "Appearance"

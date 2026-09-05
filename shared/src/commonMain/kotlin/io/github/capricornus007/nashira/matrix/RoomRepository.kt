@@ -14,8 +14,13 @@ import de.connect2x.trixnity.client.store.TimelineEvent
 import de.connect2x.trixnity.client.store.type
 import de.connect2x.trixnity.client.user
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.firstOrNull
 import de.connect2x.trixnity.core.model.EventId
 import de.connect2x.trixnity.core.model.RoomId
+import de.connect2x.trixnity.core.model.events.m.room.EncryptionEventContent
+import de.connect2x.trixnity.core.model.events.m.room.ImageInfo
+import de.connect2x.trixnity.utils.toByteArrayFlow
+import io.github.capricornus007.nashira.PickedImage
 import de.connect2x.trixnity.core.model.UserId
 import kotlinx.coroutines.flow.MutableStateFlow
 import de.connect2x.trixnity.core.model.events.m.room.CanonicalAliasEventContent
@@ -27,7 +32,6 @@ import de.connect2x.trixnity.core.model.events.m.room.EncryptedMessageEventConte
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
 import de.connect2x.trixnity.core.model.events.m.room.EncryptedFile
-import de.connect2x.trixnity.core.model.events.m.room.ImageInfo
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -379,6 +383,41 @@ class RoomRepository(val client: MatrixClient) {
     /** 發送貼圖（MSC2545 m.sticker）：走 StickerRepository 的加密路徑，回 eventId 便於撤回 */
     suspend fun sendSticker(roomId: RoomId, sticker: StickerItem): Result<String> =
         StickerRepository(client).sendSticker(roomId, sticker)
+
+    /**
+     * 發送本地圖片（m.image）。加密房先 prepareUploadEncryptedMedia 取得
+     * EncryptedFile（事件層再由 outbox 走 megolm）；明文房上傳取 mxc url。
+     */
+    suspend fun sendImage(roomId: RoomId, image: PickedImage): Result<String> = runCatching {
+        val mediaService = client.di.get<de.connect2x.trixnity.client.media.MediaService>()
+        val contentType = io.ktor.http.ContentType.parse(image.mimeType)
+        val info = ImageInfo(
+            mimeType = image.mimeType,
+            width = image.width,
+            height = image.height,
+            size = image.bytes.size.toLong(),
+        )
+        val encrypted = client.room.getState<EncryptionEventContent>(roomId).firstOrNull() != null
+        val content = if (encrypted) {
+            val file = mediaService.prepareUploadEncryptedMedia(image.bytes.toByteArrayFlow())
+            RoomMessageEventContent.FileBased.Image(
+                body = image.fileName,
+                file = file,
+                info = info,
+            )
+        } else {
+            val cacheUri = mediaService.prepareUploadMedia(image.bytes.toByteArrayFlow(), contentType)
+            val mxc = mediaService.uploadMedia(cacheUri).getOrThrow()
+            RoomMessageEventContent.FileBased.Image(
+                body = image.fileName,
+                url = mxc,
+                info = info,
+            )
+        }
+        client.room.sendMessage(roomId) {
+            content(content)
+        }
+    }
 }
 
 /**

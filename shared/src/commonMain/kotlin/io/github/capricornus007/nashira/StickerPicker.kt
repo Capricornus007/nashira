@@ -58,6 +58,7 @@ fun StickerPicker(
     roomId: RoomId,
     strings: Strings,
     onSend: (StickerItem) -> Unit,
+    onSendImage: (PickedImage) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val client = roomRepository.client
@@ -88,6 +89,27 @@ fun StickerPicker(
             }
             val pagerState = rememberPagerState(pageCount = { packs.size })
             val scope = rememberCoroutineScope()
+            // 相簿圖片入口：平台不支援（桌面）時不出現
+            val imageLauncher = rememberImagePickerLauncher { image ->
+                onSendImage(image)
+            }
+            if (imageLauncher != null) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                        .clickable { imageLauncher() },
+                ) {
+                    Text(
+                        strings.sendImage,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    )
+                }
+            }
             Column {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),

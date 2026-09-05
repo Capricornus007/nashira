@@ -1047,6 +1047,12 @@ private fun TimelinePane(roomRepository: RoomRepository, room: RoomSummary, onBa
                                     .onFailure { sendError = it.message ?: strings.sendFailed }
                             }
                         },
+                        onSendImage = { image ->
+                            scope.launch {
+                                roomRepository.sendImage(room.roomId, image)
+                                    .onFailure { sendError = it.message ?: strings.sendFailed }
+                            }
+                        },
                     )
                 }
                 sendError?.let {
