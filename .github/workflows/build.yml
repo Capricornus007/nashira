@@ -34,5 +34,5 @@ jobs:
         with:
           name: nashira-linux
           path: |
-            desktopApp/build/compose/binaries/main-dist/**/*.deb
-            desktopApp/build/compose/binaries/main-dist/**/*.rpm
+            desktopApp/build/compose/binaries/main/deb/*.deb
+            desktopApp/build/compose/binaries/main/rpm/*.rpm

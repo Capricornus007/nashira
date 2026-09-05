@@ -49,8 +49,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           ASSETS=(androidApp/build/outputs/apk/release/*.apk)
-          mapfile -t DEB < <(find desktopApp/build/compose/binaries/main-dist -name '*.deb' 2>/dev/null)
-          mapfile -t RPM < <(find desktopApp/build/compose/binaries/main-dist -name '*.rpm' 2>/dev/null)
+          mapfile -t DEB < <(find desktopApp/build/compose/binaries/main -name '*.deb' 2>/dev/null)
+          mapfile -t RPM < <(find desktopApp/build/compose/binaries/main -name '*.rpm' 2>/dev/null)
           ASSETS+=("${DEB[@]}" "${RPM[@]}")
           echo "Assets: ${ASSETS[*]}"
           if gh release view "$TAG" >/dev/null 2>&1; then
