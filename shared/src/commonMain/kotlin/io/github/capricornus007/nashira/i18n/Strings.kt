@@ -93,6 +93,11 @@ interface Strings {
     val actionPin: String
     val actionUnpin: String
     val actionSourceUrl: String
+    val actionViewSource: String
+    val actionForward: String
+    val forwardTo: String
+    val forwardUnsupported: String
+    val viewSourceFailed: String
     val sendShortcut: String
     val sendShortcutHint: String
     val keyEnter: String
@@ -105,6 +110,7 @@ interface Strings {
     val actionLeave: String
     val inviteHint: String
     val copiedToClipboard: String
+    val copy: String
     val replyingTo: String
     val verificationIncoming: String
     val verificationIncomingHint: String
@@ -284,6 +290,11 @@ object ZhTwStrings : Strings {
     override val actionPin = "圖釘"
     override val actionUnpin = "取消圖釘"
     override val actionSourceUrl = "來源網址"
+    override val actionViewSource = "檢視原始碼"
+    override val actionForward = "轉寄"
+    override val forwardTo = "轉寄到…"
+    override val forwardUnsupported = "這種訊息還不支援轉寄"
+    override val viewSourceFailed = "讀取事件失敗"
     override val sendShortcut = "送出鍵"
     override val sendShortcutHint = "命中的組合送出，其餘 Enter 換行"
     override val keyEnter = "Enter"
@@ -296,6 +307,7 @@ object ZhTwStrings : Strings {
     override val actionLeave = "離開"
     override val inviteHint = "輸入要邀請的 Matrix ID（@user:server）"
     override val copiedToClipboard = "已複製"
+    override val copy = "複製"
     override val replyingTo = "回覆 %s"
     override val verificationIncoming = "工作階段驗證請求"
     override val verificationIncomingHint = "另一個工作階段要求驗證。接受後兩邊會比對一組表情符號。"
@@ -530,6 +542,11 @@ object EnStrings : Strings {
     override val actionPin = "Pin"
     override val actionUnpin = "Unpin"
     override val actionSourceUrl = "Source URL"
+    override val actionViewSource = "View source"
+    override val actionForward = "Forward"
+    override val forwardTo = "Forward to…"
+    override val forwardUnsupported = "Forwarding this message type isn't supported yet"
+    override val viewSourceFailed = "Failed to load the event"
     override val sendShortcut = "Send shortcut"
     override val sendShortcutHint = "The chosen combo sends; other Enter presses insert a newline"
     override val keyEnter = "Enter"
@@ -542,6 +559,7 @@ object EnStrings : Strings {
     override val actionLeave = "Leave"
     override val inviteHint = "Enter the Matrix ID to invite (@user:server)"
     override val copiedToClipboard = "Copied"
+    override val copy = "Copy"
     override val replyingTo = "Replying to %s"
     override val verificationIncoming = "Session verification request"
     override val verificationIncomingHint = "Another session asked to verify. After accepting, both sides compare a set of emoji."

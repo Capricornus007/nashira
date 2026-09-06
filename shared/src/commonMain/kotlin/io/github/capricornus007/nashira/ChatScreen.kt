@@ -29,6 +29,11 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -1244,6 +1249,11 @@ private fun TimelinePane(
     LaunchedEffect(composerFocused) {
         if (composerFocused) stickerPanel = false
     }
+    // 「檢視原始碼」對話框：null = 關；內容是 JSON 或載入失敗訊息
+    var viewSource by remember(room.roomId) { mutableStateOf<String?>(null) }
+    var viewSourceLoading by remember(room.roomId) { mutableStateOf(false) }
+    // 「轉寄」選目標房間
+    var forwardTarget by remember(room.roomId) { mutableStateOf<TimelineMessage?>(null) }
     val stickerPanelContent: @Composable (Modifier) -> Unit = { panelModifier ->
         StickerPicker(
             roomRepository = roomRepository,
@@ -1575,6 +1585,18 @@ private fun TimelinePane(
                                 }
                             }
                         },
+                        onViewSource = {
+                            msg.eventId?.let { id ->
+                                viewSource = null
+                                viewSourceLoading = true
+                                scope.launch {
+                                    roomRepository.eventJson(room.roomId, id)
+                                        .onSuccess { viewSource = it; viewSourceLoading = false }
+                                        .onFailure { viewSource = strings.viewSourceFailed; viewSourceLoading = false }
+                                }
+                            }
+                        },
+                        onForward = { forwardTarget = msg },
                         onToggleReaction = { key, mine ->
                             val target = msg.eventId
                             scope.launch {
@@ -1651,6 +1673,105 @@ private fun TimelinePane(
                 }
             }
         }
+    }
+
+    // 「檢視原始碼」：可全選複製的 JSON。事件向伺服器要（GET /event/{id}），
+    // 拿到的是解密後的內容——這正是除錯時想看的。
+    viewSource?.let { json ->
+        AlertDialog(
+            onDismissRequest = { viewSource = null },
+            confirmButton = {
+                TextButton(onClick = {
+                    clipboard.setText(AnnotatedString(json))
+                    viewSource = null
+                }) { Text(strings.copy) }
+            },
+            dismissButton = { TextButton(onClick = { viewSource = null }) { Text(strings.cancel) } },
+            title = { Text(strings.actionViewSource) },
+            text = {
+                SelectionContainer {
+                    Text(
+                        json,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.verticalScroll(rememberScrollState()),
+                    )
+                }
+            },
+        )
+    }
+    if (viewSourceLoading) {
+        AlertDialog(
+            onDismissRequest = { viewSourceLoading = false },
+            confirmButton = {},
+            title = { Text(strings.actionViewSource) },
+            text = { Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) } },
+        )
+    }
+
+    // 「轉寄」：挑目標房間。文字重發、貼圖／圖片引用同一個 mxc（Element 的做法）。
+    forwardTarget?.let { message ->
+        val rooms by remember(roomRepository) { roomRepository.roomSummaries() }
+            .collectAsState(initial = emptyList())
+        // 搜尋框：房間列表動輒數百個，Element 的轉寄對話框也是搜尋式。
+        var forwardQuery by remember(message) { mutableStateOf("") }
+        val matches = remember(rooms, forwardQuery) {
+            val q = forwardQuery.trim()
+            if (q.isEmpty()) rooms else rooms.filter { it.name.contains(q, ignoreCase = true) }
+        }.take(60)
+        AlertDialog(
+            onDismissRequest = { forwardTarget = null },
+            confirmButton = {},
+            title = { Text(strings.forwardTo) },
+            text = {
+                Column {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        BasicTextField(
+                            value = forwardQuery,
+                            onValueChange = { forwardQuery = it },
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    // 用 Column+verticalScroll 而不是 LazyColumn：AlertDialog 的 text slot
+                    // 會吃掉 LazyColumn 的滾動手勢（真機實測拖不動），滾動修飾詞則正常。
+                    Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState())) {
+                    matches.forEach { target ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    forwardTarget = null
+                                    scope.launch {
+                                        roomRepository.forwardMessage(target.roomId, message)
+                                            .onFailure {
+                                                sendError = it.message?.let(String::toString)
+                                                    ?: strings.forwardUnsupported
+                                            }
+                                    }
+                                }
+                                .padding(horizontal = 4.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            RoomAvatar(roomRepository, target, Modifier.size(32.dp).clip(CircleShape))
+                            Text(
+                                target.name,
+                                Modifier.padding(start = 12.dp).weight(1f),
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+                }
+            },
+        )
     }
 }
 
@@ -1750,6 +1871,8 @@ private fun MessageRow(
     onCopyText: () -> Unit,
     onCopyLink: () -> Unit,
     onDelete: () -> Unit,
+    onViewSource: () -> Unit,
+    onForward: () -> Unit,
     onToggleReaction: (String, EventId?) -> Unit,
     onTogglePin: () -> Unit,
 ) {
@@ -1905,9 +2028,6 @@ private fun MessageRow(
                     }
                 }
             }
-            if (settled) {
-                ContextMenuItem(strings.actionReply) { menuOpen = false; onReply() }
-            }
             if (msg.body is MessageBody.Text) {
                 ContextMenuItem(strings.actionCopyText) { menuOpen = false; onCopyText() }
             }
@@ -1921,6 +2041,8 @@ private fun MessageRow(
                 msg.externalUrl?.let { url ->
                     ContextMenuItem(strings.actionSourceUrl) { menuOpen = false; openLink(url) }
                 }
+                ContextMenuItem(strings.actionViewSource) { menuOpen = false; onViewSource() }
+                ContextMenuItem(strings.actionForward) { menuOpen = false; onForward() }
                 if (isOwn) {
                     ContextMenuItem(strings.actionDelete, destructive = true) { menuOpen = false; onDelete() }
                 }

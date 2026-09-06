@@ -33,6 +33,10 @@ import de.connect2x.trixnity.core.model.events.m.room.EncryptedMessageEventConte
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
 import de.connect2x.trixnity.core.model.events.m.room.EncryptedFile
+import de.connect2x.trixnity.core.model.events.ClientEvent
+import de.connect2x.trixnity.core.serialization.events.EventContentSerializerMappings
+import de.connect2x.trixnity.core.serialization.events.createMatrixEventSerializersModule
+import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -495,6 +499,114 @@ class RoomRepository(val client: MatrixClient) {
                 text(body)
             }
         }
+
+    /**
+     * 取某則事件的原始 JSON（給「檢視原始碼」）。向伺服器要回來的是解密後的
+     * 事件，再用 Trixnity 的事件序列化模組編回 JSON——內容欄位的 polymorphic
+     * serializer 由 mappings 提供，所以自訂的 m.sticker 也能印出來。
+     */
+    suspend fun eventJson(roomId: RoomId, eventId: EventId): Result<String> = runCatching {
+        val event = client.api.room.getEvent(roomId, eventId).getOrThrow()
+        val mappings = client.di.get<EventContentSerializerMappings>()
+        val json = Json {
+            serializersModule = createMatrixEventSerializersModule(mappings)
+            prettyPrint = true
+            prettyPrintIndent = "  "
+            encodeDefaults = false
+        }
+        val element = when (event) {
+            is ClientEvent.RoomEvent.MessageEvent -> {
+                val mapping = mappings.message.firstOrNull { it.kClass.isInstance(event.content) }
+                @Suppress("UNCHECKED_CAST")
+                val contentSerializer = (mapping?.serializer
+                    ?: error("no serializer mapping for content")) as kotlinx.serialization.KSerializer<Any>
+                json.encodeToJsonElement(
+                    ClientEvent.RoomEvent.MessageEvent.serializer(contentSerializer),
+                    event as ClientEvent.RoomEvent.MessageEvent<Any>,
+                )
+            }
+            is ClientEvent.RoomEvent.StateEvent -> {
+                val mapping = mappings.state.firstOrNull { it.kClass.isInstance(event.content) }
+                @Suppress("UNCHECKED_CAST")
+                val contentSerializer = (mapping?.serializer
+                    ?: error("no serializer mapping for content")) as kotlinx.serialization.KSerializer<Any>
+                json.encodeToJsonElement(
+                    ClientEvent.RoomEvent.StateEvent.serializer(contentSerializer),
+                    event as ClientEvent.RoomEvent.StateEvent<Any>,
+                )
+            }
+            else -> null
+        } ?: error("unsupported event shape")
+        element.toString()
+    }
+
+    /**
+     * 轉寄訊息到別的房間：文字原樣重發；貼圖／圖片重發同一個 mxc 引用（Element
+     * 的做法，不重新上傳）。加密來源的媒體在目標房會由 outbox 重新加密。
+     */
+    suspend fun forwardMessage(targetRoom: RoomId, message: TimelineMessage): Result<String> = runCatching {
+        when (val body = message.body) {
+            is MessageBody.Text -> sendText(targetRoom, body.text).getOrThrow()
+            is MessageBody.Image -> {
+                val info = ImageInfo(
+                    width = body.width,
+                    height = body.height,
+                    mimeType = body.mimeType,
+                )
+                when (val source = body.source) {
+                    is MediaSource.Plain ->
+                        if (body.isSticker) {
+                            StickerRepository(client).sendSticker(
+                                targetRoom,
+                                StickerItem(
+                                    shortcode = "",
+                                    body = body.caption,
+                                    mxcUrl = source.mxcUrl,
+                                    file = null,
+                                    info = info,
+                                    mimeType = body.mimeType,
+                                ),
+                            ).getOrThrow()
+                        } else {
+                            client.room.sendMessage(targetRoom) {
+                                content(
+                                    RoomMessageEventContent.FileBased.Image(
+                                        body = body.caption,
+                                        url = source.mxcUrl,
+                                        info = info,
+                                    ),
+                                )
+                            }
+                        }
+                    is MediaSource.Encrypted ->
+                        if (body.isSticker) {
+                            StickerRepository(client).sendSticker(
+                                targetRoom,
+                                StickerItem(
+                                    shortcode = "",
+                                    body = body.caption,
+                                    mxcUrl = null,
+                                    file = source.file,
+                                    info = info,
+                                    mimeType = body.mimeType,
+                                ),
+                            ).getOrThrow()
+                        } else {
+                            client.room.sendMessage(targetRoom) {
+                                content(
+                                    RoomMessageEventContent.FileBased.Image(
+                                        body = body.caption,
+                                        file = source.file,
+                                        info = info,
+                                    ),
+                                )
+                            }
+                        }
+                }
+            }
+            else -> error("unsupported")
+        }
+    }
 
     /**
      * 對某則訊息加上反應（`m.reaction` + `m.annotation` 關聯）。
