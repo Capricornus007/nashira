@@ -24,6 +24,8 @@ data class StickerItem(
     val mxcUrl: String?,
     val file: EncryptedFile?,
     val info: ImageInfo?,
+    /** Tairitsu 這類 Telegram 橋貼圖其實是 video/webm；UI 要抽第一格而不是當圖片解。 */
+    val mimeType: String?,
 )
 
 /** 一個貼圖包；roomId 指向來源房間（個人包為 null），UI 顯示名稱用。 */
@@ -155,6 +157,7 @@ private fun EmoteImage.toSticker(shortcode: String, usable: Boolean): StickerIte
         mxcUrl = url,
         file = file,
         info = info,
+        mimeType = info?.mimeType,
     )
 }
 

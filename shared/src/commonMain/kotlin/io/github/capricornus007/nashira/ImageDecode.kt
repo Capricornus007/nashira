@@ -13,3 +13,14 @@ expect fun decodeImageBitmap(bytes: ByteArray, maxDimension: Int = DefaultMaxIma
 
 /** 聊天用途的長邊上限：手機與桌面顯示都遠小於這個值。 */
 const val DefaultMaxImageDimension: Int = 1024
+
+/**
+ * 從影片位元組取第一格畫面。
+ *
+ * 為什麼需要：Telegram 的動態貼圖經橋接後是 `video/webm`（實測 Tairitsu 包 36 張
+ * 全部是 video/webm），伺服器的縮圖端點對影片直接回 400，圖片解碼器也吃不下，
+ * 於是整包只能顯示破圖。取一格當靜態預覽是所有客戶端的通用做法。
+ *
+ * 平台沒有可用的解碼器時回 null，UI 再退回帶標籤的佔位。
+ */
+expect fun decodeVideoFrame(bytes: ByteArray, maxDimension: Int = 256): ImageBitmap?

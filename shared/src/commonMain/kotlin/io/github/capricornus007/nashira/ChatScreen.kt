@@ -143,7 +143,7 @@ import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.ui.geometry.Offset
 
-private val DiscordRailWidth = 72.dp
+private val DiscordRailWidth = 64.dp
 private val DiscordChannelWidth = 286.dp
 
 /**
@@ -575,9 +575,9 @@ private fun ServerRail(
     }
 }
 
-private val RailIconSize = 48.dp
-private val RailIdleCorner = 24.dp
-private val RailSelectedCorner = 16.dp
+private val RailIconSize = 44.dp
+private val RailIdleCorner = 22.dp
+private val RailSelectedCorner = 14.dp
 
 /** 左緣指示器 + 圖示 + 右下未讀徽章的組合槽位。 */
 @Composable
@@ -824,6 +824,7 @@ private fun AccountBar(
     modifier: Modifier = Modifier,
 ) {
     val profile by client.profile.collectAsState()
+    val avatarUrl = profile?.avatarUrl
     val accountName = accountId.substringAfter('@').substringBefore(':').ifBlank { accountId }
     val displayName = profile?.displayName?.takeIf { it.isNotBlank() } ?: accountName
     val accountServer = accountId.substringAfter(':', missingDelimiterValue = "")
@@ -835,29 +836,16 @@ private fun AccountBar(
         modifier = modifier
             .fillMaxWidth()
             .widthIn(max = 584.dp)
-            .padding(horizontal = 12.dp, vertical = 12.dp)
+            .padding(horizontal = 6.dp, vertical = 6.dp)
             .navigationBarsPadding(),
     ) {
         Row(
-            Modifier.fillMaxWidth().clickable(onClick = onSettings).padding(horizontal = 12.dp, vertical = 10.dp),
+            Modifier.fillMaxWidth().clickable(onClick = onSettings).padding(horizontal = 10.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box {
-                AvatarImage(
-                    client = client,
-                    mxcUrl = profile?.avatarUrl,
-                    fallback = displayName,
-                    modifier = Modifier.size(40.dp).clip(CircleShape),
-                )
-                Box(
-                    Modifier.align(Alignment.BottomEnd)
-                        .size(11.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF3BA55C)),
-                )
-            }
-            Column(Modifier.weight(1f).padding(start = 10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(displayName, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
+            AvatarImage(client, avatarUrl, displayName, Modifier.size(42.dp).clip(CircleShape))
+            Column(Modifier.weight(1f).padding(start = 8.dp), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Text(displayName, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
                 Text("@$accountName${if (accountServer.isNotBlank()) ":$accountServer" else ""}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
             }
         }

@@ -24,6 +24,9 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 import de.connect2x.trixnity.core.model.events.m.ReactionEventContent
 import de.connect2x.trixnity.core.model.events.MessageEventContent
+import io.github.capricornus007.nashira.matrix.MediaSource
+import io.github.capricornus007.nashira.matrix.MessageBody
+import io.github.capricornus007.nashira.matrix.StickerEventContent
 
 /**
  * 以 Trixnity 有狀態的 `Timeline` 為核心的房間時間線包裝。
@@ -129,7 +132,20 @@ class RoomTimeline(
     private fun toPendingMessage(outbox: RoomOutboxMessage<*>?): TimelineMessage? {
         if (outbox == null) return null
         if (outbox.isDraft || outbox.eventId != null) return null
-        val body = outbox.content.messageBodyOrNull() ?: return null
+        val body = outbox.content.messageBodyOrNull()
+            ?: when (val content = outbox.content) {
+                is StickerEventContent -> MessageBody.Image(
+                    caption = content.body,
+                    source = content.file?.let(MediaSource::Encrypted)
+                        ?: content.url?.let(MediaSource::Plain)
+                        ?: return null,
+                    width = content.info?.width,
+                    height = content.info?.height,
+                    isSticker = true,
+                )
+                else -> null
+            }
+            ?: return null
         return TimelineMessage(
             eventId = null,
             roomId = roomId,

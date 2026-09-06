@@ -145,7 +145,7 @@ private fun PackTab(
 ) {
     val cover = remember(pack) {
         pack.avatarUrl?.let { url ->
-            StickerItem(shortcode = label, body = label, mxcUrl = url, file = null, info = null)
+            StickerItem(shortcode = label, body = label, mxcUrl = url, file = null, info = null, mimeType = null)
         } ?: pack.stickers.firstOrNull()
     }
     Box(
@@ -189,27 +189,43 @@ private fun StickerThumb(client: MatrixClient, sticker: StickerItem) {
     val key = remember(sticker) { sticker.mxcUrl ?: sticker.file?.url ?: sticker.shortcode }
     var bitmap by remember(key) { mutableStateOf(MediaBitmapCache.get(key)) }
     var failed by remember(key) { mutableStateOf(false) }
-    LaunchedEffect(client, key) {
+    var reloadToken by remember(key) { mutableStateOf(0) }
+    val isVideo = remember(sticker.mimeType) { sticker.mimeType?.startsWith("video/") == true }
+    LaunchedEffect(client, key, reloadToken) {
+        failed = false
         if (bitmap != null) return@LaunchedEffect
+        val service = client.di.get<MediaService>()
+        val source = sticker.mxcUrl?.let { MediaSource.Plain(it) } ?: sticker.file?.let { MediaSource.Encrypted(it) }
         repeat(MediaFetchAttempts) { attempt ->
-            if (attempt > 0) delay(MediaRetryDelayMillis * attempt)
-            val service = client.di.get<MediaService>()
-            val source = sticker.mxcUrl?.let { MediaSource.Plain(it) } ?: sticker.file?.let { MediaSource.Encrypted(it) }
-            // 縮圖端點對 webp/動圖常常直接失敗（伺服器不生縮圖）。最後一輪改抓原圖，
-            // 否則整包貼圖只會顯示破圖佔位。
-            val fullSize = attempt >= MediaFetchAttempts - 1
+            if (attempt > 0) delay(MediaRetryDelayMillis)
             val media = when (source) {
-                is MediaSource.Plain ->
-                    if (fullSize) service.getMedia(source.mxcUrl, maxSize = MaxMediaBytes)
-                    else service.getThumbnail(source.mxcUrl, 240, 240, maxSize = MaxMediaBytes)
-                is MediaSource.Encrypted -> service.getEncryptedMedia(source.file, maxSize = MaxMediaBytes)
+                is MediaSource.Plain -> {
+                    // Synapse 對 animated webp / sticker thumbnail 很常直接 404 或回空。
+                    // 第一輪縮圖失敗後立刻退回原圖，不要一直卡 spinner。
+                    val preferThumbnail = !isVideo && attempt == 0
+                    val result = if (preferThumbnail) {
+                        service.getThumbnail(source.mxcUrl, 240, 240, maxSize = MaxMediaBytes)
+                    } else {
+                        service.getMedia(source.mxcUrl, maxSize = MaxMediaBytes)
+                    }
+                    result.getOrNull()
+                }
+                is MediaSource.Encrypted -> {
+                    service.getEncryptedMedia(source.file, maxSize = MaxMediaBytes).getOrNull()
+                }
                 null -> null
-            }?.getOrNull()
-            // 貼圖只有 256px 的顯示需求；抓原圖那條退路若不降採樣會把堆積吃光
-            val decoded = media?.toByteArray(this)?.let { decodeImageBitmap(it, maxDimension = 256) }
+            }
+            val mediaBytes = media?.toByteArray(this)
+            if (mediaBytes == null) return@repeat
+            val decoded = if (isVideo) {
+                decodeVideoFrame(mediaBytes, maxDimension = 256)
+            } else {
+                decodeImageBitmap(mediaBytes, maxDimension = 256)
+            }
             if (decoded != null) {
                 MediaBitmapCache.put(key, decoded)
                 bitmap = decoded
+                failed = false
                 return@LaunchedEffect
             }
         }
@@ -223,7 +239,20 @@ private fun StickerThumb(client: MatrixClient, sticker: StickerItem) {
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Fit,
         )
-        failed -> Text("🖼", style = MaterialTheme.typography.titleLarge)
+        failed -> Box(
+            Modifier
+                .fillMaxSize()
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .clickable {
+                    failed = false
+                    bitmap = null
+                    reloadToken += 1
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(if (isVideo) "▶" else "↻", style = MaterialTheme.typography.titleLarge)
+        }
         else -> CircularProgressIndicator(Modifier.padding(12.dp), strokeWidth = 2.dp)
     }
 }

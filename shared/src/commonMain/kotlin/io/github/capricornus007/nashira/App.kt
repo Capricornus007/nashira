@@ -43,7 +43,9 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
 
     var language by mutableStateOf(stored.enumOr("language", AppLanguage.ZH_TW))
     var themeMode by mutableStateOf(stored.enumOr("themeMode", ThemeMode.FOLLOW_SYSTEM))
-    var dynamicColor by mutableStateOf(stored["dynamicColor"]?.toBooleanStrictOrNull() ?: false)
+    // 動態桌布取色目前會在部分 AMOLED 深色桌布上生成髒棕色；先預設關閉，
+    // 使用者手動開啟才使用 Material You。
+    var dynamicColor by mutableStateOf(false)
 
     /** Material You 配置（僅 Android 顯示；動態顏色開啟時以抽屜動畫展開） */
     var paletteStyle by mutableStateOf(stored.enumOr("paletteStyle", PaletteStyle.Expressive))
