@@ -47,6 +47,8 @@ interface Strings {
     val sourceCode: String
     val themeMode: String
     val followSystem: String
+    val pureBlack: String
+    val pureBlackHint: String
     val dynamicColor: String
     val dynamicColorHint: String
     val paletteStyle: String
@@ -259,6 +261,8 @@ object ZhTwStrings : Strings {
     override val sourceCode = "原始碼"
     override val themeMode = "主題模式"
     override val followSystem = "追隨系統主題"
+    override val pureBlack = "純黑 (AMOLED)"
+    override val pureBlackHint = "深色模式改用純黑背景，OLED 省電"
     override val dynamicColor = "動態顏色"
     override val dynamicColorHint = "基於桌布的主題顏色（Material You）"
     override val paletteStyle = "調色盤樣式"
@@ -315,8 +319,8 @@ object ZhTwStrings : Strings {
     override val keyCtrlEnter = "Ctrl + Enter"
     override val keyAltEnter = "Alt + Enter"
     override val keyShiftEnter = "Shift + Enter"
-    override val actionFavourite = "最愛"
-    override val actionLowPriority = "低優先"
+    override val actionFavourite = "置頂"
+    override val actionLowPriority = "置底"
     override val actionInvite = "邀請"
     override val actionLeave = "離開"
     override val inviteHint = "輸入要邀請的 Matrix ID（@user:server）"
@@ -463,6 +467,8 @@ object EnStrings : Strings {
     override val sourceCode = "Source code"
     override val themeMode = "Theme mode"
     override val followSystem = "Follow system theme"
+    override val pureBlack = "Pure black (AMOLED)"
+    override val pureBlackHint = "Use a true-black background in dark mode to save OLED power"
     override val dynamicColor = "Dynamic color"
     override val dynamicColorHint = "Wallpaper-based theme colors (Material You)"
     override val paletteStyle = "Palette style"

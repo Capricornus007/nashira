@@ -291,8 +291,18 @@ private fun AppearancePage(onBack: () -> Unit) {
                     }
                 }
             }
+            item { shape ->
+                SettingsSwitchItem(
+                    shape = shape,
+                    title = strings.pureBlack,
+                    description = strings.pureBlackHint,
+                    checked = ui.pureBlack,
+                    onCheckedChange = { ui.pureBlack = it },
+                )
+            }
         }
-        // 桌面沒有桌布取色，就不畫那顆開關；色票與顏色規格兩邊都要有
+        // 桌面沒有桌布取色：動態顏色開關、調色盤樣式、顏色規格都不顯示；
+        // 色票（手選強調色）兩邊都要有
         val dynamic = dynamicColorSupported && ui.dynamicColor
         SettingsGroup(title = strings.themeColor) {
             if (dynamicColorSupported) {
@@ -307,7 +317,9 @@ private fun AppearancePage(onBack: () -> Unit) {
                     )
                 }
             }
-            item { shape ->
+            // 調色盤樣式與顏色規格（M3 / Expressive 2025）只影響動態取色的生成；
+            // 桌面沒有桌布取色，這兩項在那邊沒有意義（使用者指示）
+            if (dynamicColorSupported) item { shape ->
                 SettingsDropdownItem(
                     shape = shape,
                     title = strings.paletteStyle,
@@ -320,7 +332,7 @@ private fun AppearancePage(onBack: () -> Unit) {
                     }
                 }
             }
-            item { shape ->
+            if (dynamicColorSupported) item { shape ->
                 SettingsDropdownItem(
                     shape = shape,
                     title = strings.colorSpec,

@@ -13,36 +13,48 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 
+/**
+ * 品牌深色板。基底是協商定案的 Arcaea 曲目色 #1F1E33（深藍紫），
+ * 表面層級全部從它推導——不是 Discord 的冷灰（那套曾在 2026-09-06 被
+ * 誤當成「對齊 Discord」引入，破壞了品牌共識，已回歸）。
+ */
 internal val NashiraDarkColors = darkColorScheme(
     primary = NashiraGold,
     onPrimary = NashiraIndigo,
     primaryContainer = NashiraGoldContainer,
     onPrimaryContainer = NashiraGoldLight,
-    secondary = Color(0xFFB5BACD),
-    onSecondary = Color(0xFF1E1F22),
-    secondaryContainer = Color(0xFF313338),
-    onSecondaryContainer = Color(0xFFDBDEE1),
+    secondary = Color(0xFFC6C4E8),
+    onSecondary = Color(0xFF2E2C4C),
+    secondaryContainer = Color(0xFF45436E),
+    onSecondaryContainer = Color(0xFFE2E0FF),
     tertiary = Color(0xFF949CF7),
-    onTertiary = Color(0xFF181A2A),
+    onTertiary = Color(0xFF252A55),
     tertiaryContainer = Color(0xFF3A3F63),
     onTertiaryContainer = Color(0xFFE2E5FF),
-    background = Color(0xFF111214),
-    onBackground = Color(0xFFF2F3F5),
-    surface = Color(0xFF111214),
-    onSurface = Color(0xFFF2F3F5),
-    surfaceVariant = Color(0xFF232428),
-    onSurfaceVariant = Color(0xFFB5BAC1),
-    surfaceContainer = Color(0xFF1E1F22),
-    surfaceContainerHigh = Color(0xFF2B2D31),
-    surfaceContainerHighest = Color(0xFF35373C),
-    surfaceContainerLow = Color(0xFF18191C),
-    surfaceContainerLowest = Color(0xFF0C0D0F),
-    surfaceDim = Color(0xFF0B0C0E),
-    surfaceBright = Color(0xFF3A3C43),
-    outline = Color(0xFF6D7280),
-    outlineVariant = Color(0xFF3F4248)
+    background = NashiraDarkBackground,
+    onBackground = Color(0xFFE6E5F2),
+    surface = NashiraDarkBackground,
+    onSurface = Color(0xFFE6E5F2),
+    surfaceVariant = Color(0xFF3E3C64),
+    onSurfaceVariant = Color(0xFFB9B7D2),
+    surfaceContainer = Color(0xFF2A2947),
+    surfaceContainerHigh = Color(0xFF33315A),
+    surfaceContainerHighest = Color(0xFF3B3963),
+    surfaceContainerLow = Color(0xFF242340),
+    surfaceContainerLowest = Color(0xFF18172B),
+    surfaceDim = Color(0xFF141324),
+    surfaceBright = Color(0xFF474575),
+    outline = Color(0xFF8D8BAA),
+    outlineVariant = Color(0xFF4E4C74),
+    // 錯誤紅：M3 預設的 #F2B8B5 在深藍紫上太淡，刪除鈕幾乎看不出來。
+    // 換高飽和的珊瑚紅；主題兩個借用色（#1F1E33/#E0E1CC）不動。
+    error = Color(0xFFFF6E6E),
+    onError = Color(0xFF3F0A0A),
+    errorContainer = Color(0xFF8C1D18),
+    onErrorContainer = Color(0xFFFFDAD6),
 )
 
+/** 品牌淺色板。基底是協商定案的 Arcaea 曲目色 #E0E1CC（米綠）。 */
 internal val NashiraLightColors = lightColorScheme(
     primary = NashiraGoldDeep,
     onPrimary = NashiraLightBackground,
@@ -62,15 +74,36 @@ internal val NashiraLightColors = lightColorScheme(
     onSurface = NashiraIndigo,
     surfaceVariant = Color(0xFFC8CAB1),
     onSurfaceVariant = NashiraIndigoDeep,
-    surfaceContainer = Color(0xFFD8DAC1),
-    surfaceContainerHigh = Color(0xFFD2D4BB),
-    surfaceContainerHighest = Color(0xFFCCCEB5),
-    surfaceContainerLow = Color(0xFFDEE0C7),
-    surfaceContainerLowest = Color(0xFFE8EAD1),
+    surfaceContainer = Color(0xFFD9DABF),
+    surfaceContainerHigh = Color(0xFFCFD0B3),
+    surfaceContainerHighest = Color(0xFFC3C4A8),
+    surfaceContainerLow = Color(0xFFE6E7D2),
+    surfaceContainerLowest = Color(0xFFEDEEDE),
     surfaceDim = Color(0xFFBBBDA4),
     surfaceBright = Color(0xFFFDFEF3),
     outline = NashiraIndigoDeep,
     outlineVariant = Color(0xFFC8CAB1),
+    error = Color(0xFFB3261E),
+    onError = Color(0xFFFFFFFF),
+    errorContainer = Color(0xFFFFDAD6),
+    onErrorContainer = Color(0xFF93000A),
+)
+
+/**
+ * 純黑（AMOLED）變體：深色板把背景/表面壓到真黑，容器層級換成黑階。
+ * 以開關提供，不動品牌深色板的 #1F1E33 基底。
+ */
+internal val NashiraPureBlackColors = NashiraDarkColors.copy(
+    background = Color(0xFF000000),
+    surface = Color(0xFF000000),
+    surfaceContainerLowest = Color(0xFF000000),
+    surfaceContainerLow = Color(0xFF0B0A12),
+    surfaceContainer = Color(0xFF12111C),
+    surfaceContainerHigh = Color(0xFF191826),
+    surfaceContainerHighest = Color(0xFF1F1E30),
+    surfaceVariant = Color(0xFF262538),
+    surfaceDim = Color(0xFF000000),
+    surfaceBright = Color(0xFF2E2D42),
 )
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)

@@ -154,8 +154,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.ui.geometry.Offset
 
 private val DiscordRailWidth = 64.dp
-/** Space 欄底色：比清單深一階但不是純黑（Discord #1E1F22 的同位語彙）。 */
-private val DiscordRailColor = Color(0xFF17181C)
 private val DiscordChannelWidth = 286.dp
 
 /**
@@ -512,8 +510,9 @@ private fun ServerRail(
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
     Column(
+        // Space 欄底色用比清單深一階的表面色（Arcaea 深藍紫系），不用硬編碼色
         modifier = modifier.width(DiscordRailWidth).fillMaxHeight()
-            .background(DiscordRailColor),
+            .background(MaterialTheme.colorScheme.surfaceContainerLowest),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         LazyColumn(

@@ -7,7 +7,7 @@ import androidx.compose.ui.graphics.Color
 val NashiraGold = Color(0xFFF2B63C)
 val NashiraGoldLight = Color(0xFFFFE9A8)
 val NashiraGoldDeep = Color(0xFF7A4E00)
-val NashiraGoldContainer = Color(0xFF5C430F)
+val NashiraGoldContainer = Color(0xFF6E5210)  // 提亮一階：#5C430F 在深藍紫底上偏泥
 val NashiraIndigo = Color(0xFF23283F)
 val NashiraIndigoMid = Color(0xFF565E8C)
 val NashiraIndigoDeep = Color(0xFF444C74)

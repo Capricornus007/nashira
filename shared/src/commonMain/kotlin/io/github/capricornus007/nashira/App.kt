@@ -14,6 +14,7 @@ import io.github.capricornus007.nashira.i18n.AppLanguage
 import io.github.capricornus007.nashira.matrix.MatrixEngine
 import io.github.capricornus007.nashira.theme.NashiraDarkColors
 import io.github.capricornus007.nashira.theme.NashiraLightColors
+import io.github.capricornus007.nashira.theme.NashiraPureBlackColors
 import io.github.capricornus007.nashira.theme.NashiraTheme
 import io.github.capricornus007.nashira.theme.ThemeAccent
 import io.github.capricornus007.nashira.theme.ThemeMode
@@ -76,6 +77,9 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
     /** 送出鍵；其餘 Enter 組合換行。 */
     var sendShortcut by mutableStateOf(stored.enumOr("sendShortcut", SendShortcut.ENTER))
 
+    /** 純黑（AMOLED）深色變體：背景壓真黑省電；只在深色模式生效。 */
+    var pureBlack by mutableStateOf(stored["pureBlack"]?.toBooleanStrictOrNull() ?: false)
+
     /** 被隱藏的媒體（mxc 網址）。「隱藏圖片」後時間線改畫佔位，點佔位恢復。 */
     var hiddenMedia by mutableStateOf(
         stored["hiddenMedia"]?.split('\n')?.filter { it.isNotBlank() }?.toSet() ?: emptySet()
@@ -102,6 +106,7 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
             "backgroundSync" to backgroundSync.toString(),
             "sendShortcut" to sendShortcut.name,
             "hiddenMedia" to hiddenMedia.joinToString("\n"),
+            "pureBlack" to pureBlack.toString(),
         ) + (accent?.let { mapOf("accent" to it.name) } ?: emptyMap())
         if (snapshot == lastPersisted) return
         lastPersisted = snapshot
@@ -142,7 +147,9 @@ fun App(defaultDark: Boolean? = null) {
     )
     // 目標配色：動態開啟且種子存在 → material-kolor 生成；否則手調品牌 Arcaea 色板
     val target = if (seed != null) generated
-        else if (dark) NashiraDarkColors else NashiraLightColors
+        else if (dark) {
+            if (ui.pureBlack) NashiraPureBlackColors else NashiraDarkColors
+        } else NashiraLightColors
     // 配色補間（照 InstallerX：每槽 animateColorAsState(spring()) 物理彈簧曲線）
     val session by MatrixEngine.session.collectAsState()
     val restoring by MatrixEngine.restoring.collectAsState()
