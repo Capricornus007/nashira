@@ -55,6 +55,8 @@ import de.connect2x.trixnity.client.room.message.reply
 import de.connect2x.trixnity.core.model.events.m.MarkedUnreadEventContent
 import de.connect2x.trixnity.core.model.events.m.TagEventContent
 import io.github.capricornus007.nashira.PickedFile
+import de.connect2x.trixnity.core.model.events.m.ReactionEventContent
+import de.connect2x.trixnity.core.model.events.m.RelatesTo
 
 /** UI 友好的房間摘要 */
 data class RoomSummary(
@@ -142,6 +144,14 @@ data class TimelineMessage(
     val pending: Boolean = false,
     /** outbox 送出失敗的原因；非 null 時 UI 要標紅並允許重試。 */
     val sendError: String? = null,
+    /** 這則訊息上的反應：表情 → 統計。 */
+    val reactions: Map<String, ReactionInfo> = emptyMap(),
+)
+
+/** 單一表情的反應統計。[mine] 非 null 表示自己按過，值是自己那則 reaction 事件（用來撤回）。 */
+data class ReactionInfo(
+    val count: Int,
+    val mine: EventId?,
 )
 
 /**
@@ -182,6 +192,9 @@ class RoomRepository(val client: MatrixClient) {
                     combine(summaries.map { summary -> tagsOf(summary.roomId).map { summary.copy(tags = it) } }) {
                         it.toList().sortedByTagsAndActivity()
                     }
+                        // combine 要等每個房間的標籤流都先發一次才會有第一次輸出；
+                        // 冷啟動時那段空白會讓清單看起來像「還沒同步」。先給不帶標籤的排序結果。
+                        .onStart { emit(summaries.sortedByTagsAndActivity()) }
                 }
             }
             .flowOn(Dispatchers.Default)
@@ -447,6 +460,17 @@ class RoomRepository(val client: MatrixClient) {
             client.room.sendMessage(roomId) {
                 reply(replyTo, null)
                 text(body)
+            }
+        }
+
+    /**
+     * 對某則訊息加上反應（`m.reaction` + `m.annotation` 關聯）。
+     * 同一個表情同一個人只能有一則，重複送伺服器會拒；要取消就 redact 自己那則。
+     */
+    suspend fun sendReaction(roomId: RoomId, target: EventId, key: String): Result<String> =
+        runCatching {
+            client.room.sendMessage(roomId) {
+                content(ReactionEventContent(RelatesTo.Annotation(eventId = target, key = key)))
             }
         }
 

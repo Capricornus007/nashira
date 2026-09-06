@@ -136,6 +136,8 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.foundation.layout.FlowRow
+import de.connect2x.trixnity.core.model.EventId
 
 private val DiscordRailWidth = 72.dp
 private val DiscordChannelWidth = 286.dp
@@ -1516,6 +1518,22 @@ private fun TimelinePane(
                                 }
                             }
                         },
+                        onToggleReaction = { key, mine ->
+                            val target = msg.eventId
+                            scope.launch {
+                                val result = if (mine != null) {
+                                    // 自己按過就撤回自己那則 reaction 事件
+                                    roomRepository.redact(room.roomId, mine).map { }
+                                } else if (target != null) {
+                                    roomRepository.sendReaction(room.roomId, target, key).map { }
+                                } else {
+                                    Result.success(Unit)
+                                }
+                                result.onFailure {
+                                    sendError = io.github.capricornus007.nashira.i18n.friendlyError(it)
+                                }
+                            }
+                        },
                     )
                     // 分隔線畫在這則訊息「上方」，reverseLayout 下要在 MessageRow 之後發出
                     if (newDay) DateDivider(formatDateDivider(msg.timestamp, today, strings))
@@ -1628,6 +1646,9 @@ private fun AttachRow(icon: androidx.compose.ui.graphics.vector.ImageVector, lab
         Text(label, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
     }
 }
+/** 選單裡的常用表情。完整選擇器還沒做，這幾個對齊 Discord 的預設快捷。 */
+private val QuickReactions = listOf("\uD83D\uDC4D", "\u2764\uFE0F", "\uD83D\uDE02", "\uD83C\uDF89", "\uD83D\uDC40")
+
 /** 兩則訊息合併顯示的最大間隔，對齊 Discord 的 7 分鐘。 */
 private const val GroupingWindowMillis = 7 * 60 * 1000L
 
@@ -1667,6 +1688,7 @@ private fun MessageRow(
     onCopyText: () -> Unit,
     onCopyLink: () -> Unit,
     onDelete: () -> Unit,
+    onToggleReaction: (String, EventId?) -> Unit,
 ) {
     var menuOpen by remember(msg.eventId) { mutableStateOf(false) }
     Box {
@@ -1723,11 +1745,66 @@ private fun MessageRow(
                         color = MaterialTheme.colorScheme.error,
                     )
                 }
+                // 反應：自己按過的用 primaryContainer 標出來，再點一下就撤回自己那則
+                if (msg.reactions.isNotEmpty()) {
+                    FlowRow(
+                        Modifier.fillMaxWidth().padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        msg.reactions.forEach { (key, info) ->
+                            val mine = info.mine != null
+                            Row(
+                                Modifier
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(
+                                        if (mine) MaterialTheme.colorScheme.primaryContainer
+                                        else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    )
+                                    .clickable { onToggleReaction(key, info.mine) }
+                                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(key, style = MaterialTheme.typography.labelLarge)
+                                Text(
+                                    info.count.toString(),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (mine) MaterialTheme.colorScheme.onPrimaryContainer
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
         ContextMenuSurface(expanded = menuOpen, onDismiss = { menuOpen = false }) {
             // 還在 outbox 的訊息沒有 eventId，回覆／連結／刪除都無從指定
             val settled = msg.eventId != null
+            if (settled) {
+                // 常用表情一排（還沒有完整表情選擇器，先給這幾個最常用的）
+                Row(
+                    Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    QuickReactions.forEach { key ->
+                        val existing = msg.reactions[key]?.mine
+                        Text(
+                            key,
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(
+                                    if (existing != null) MaterialTheme.colorScheme.primaryContainer
+                                    else Color.Transparent,
+                                )
+                                .clickable { menuOpen = false; onToggleReaction(key, existing) }
+                                .padding(horizontal = 6.dp, vertical = 4.dp),
+                        )
+                    }
+                }
+            }
             if (settled) {
                 ContextMenuItem(strings.actionReply) { menuOpen = false; onReply() }
             }

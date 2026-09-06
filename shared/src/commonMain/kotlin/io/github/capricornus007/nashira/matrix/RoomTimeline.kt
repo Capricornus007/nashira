@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flow
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
+import de.connect2x.trixnity.core.model.events.m.ReactionEventContent
 
 /**
  * 以 Trixnity 有狀態的 `Timeline` 為核心的房間時間線包裝。
@@ -80,10 +81,13 @@ class RoomTimeline(
             // Timeline state 的元素是「事件流」。解密完成會更新該流並重新發射，
             // timeline.state 也因為事件流換值而重算；這裡在 Flow 的 suspend map 裡等每條流的最新值。
             flow {
+                // 先把每條事件流取到當下值：反應要先掃一遍才知道哪則訊息掛了哪些反應
+                val events = state.elements.map { eventFlow -> eventFlow.first() }
+                val reactions = aggregateReactions(events)
                 emit(
                     TimelinePage(
                         // elements 是舊→新，UI 要新→舊
-                        messages = state.elements.asReversed().mapNotNull { eventFlow -> toMessage(eventFlow, members) },
+                        messages = events.asReversed().mapNotNull { event -> toMessage(event, members, reactions) },
                         eventCount = state.elements.size,
                         canLoadMore = state.canLoadBefore,
                         loadingBefore = loadingBefore.value,
@@ -128,11 +132,33 @@ class RoomTimeline(
         )
     }
 
+    /**
+     * 把載入視窗內的 `m.reaction` 事件收成「目標事件 → 表情 → 統計」。
+     *
+     * 反應是獨立事件，只看訊息本身永遠看不到它們；而送出反應卻看不到結果的功能等於沒做。
+     * 只統計目前載入的這一段（跟 Element 一樣，往前翻更多歷史才會補上更早的反應）。
+     */
+    private fun aggregateReactions(events: List<TimelineEvent>): Map<EventId, Map<String, ReactionInfo>> {
+        val result = mutableMapOf<EventId, MutableMap<String, ReactionInfo>>()
+        events.forEach { event ->
+            val content = event.content?.getOrNull() ?: event.event.content
+            val reaction = content as? ReactionEventContent ?: return@forEach
+            val annotation = reaction.relatesTo ?: return@forEach
+            val target = annotation.eventId
+            val key = annotation.key ?: return@forEach
+            val bucket = result.getOrPut(target) { mutableMapOf() }
+            val previous = bucket[key]
+            val mine = if (event.event.sender == client.userId) event.event.id else previous?.mine
+            bucket[key] = ReactionInfo(count = (previous?.count ?: 0) + 1, mine = mine)
+        }
+        return result
+    }
+
     private suspend fun toMessage(
-        eventFlow: Flow<TimelineEvent>,
+        timelineEvent: TimelineEvent,
         members: Map<UserId, RoomUser>,
+        reactions: Map<EventId, Map<String, ReactionInfo>>,
     ): TimelineMessage? {
-        val timelineEvent = eventFlow.first()
         val roomEvent = timelineEvent.event
         val member = members[roomEvent.sender]
         return TimelineMessage(
@@ -144,6 +170,7 @@ class RoomTimeline(
             senderAvatarUrl = member?.event?.content?.avatarUrl,
             body = timelineEvent.messageBodyOrNull() ?: return null,
             timestamp = roomEvent.originTimestamp,
+            reactions = reactions[roomEvent.id].orEmpty(),
         )
     }
 }
