@@ -113,13 +113,15 @@ sealed interface MessageBody {
     /** 純文字、emote、通知 */
     data class Text(val text: String) : MessageBody
 
-    /** 圖片或貼圖。[caption] 是原始 body（檔名或描述），貼圖不畫背景也不裁切。 */
+    /** 圖片或貼圖。[caption] 是原始 body（檔名或描述），貼圖不畫背景也不裁切。
+     *  [mimeType] 用來分出 Telegram 橋的 video/webm 動態貼圖（要抽幀顯示）。 */
     data class Image(
         val caption: String,
         val source: MediaSource,
         val width: Int?,
         val height: Int?,
         val isSticker: Boolean,
+        val mimeType: String? = null,
     ) : MessageBody
 
     /** 檔案／音訊／影片：先用檔名標示，還沒做內建播放 */
@@ -722,7 +724,7 @@ private fun imageBody(
         ?: file?.let(MediaSource::Encrypted)
         ?: url?.let(MediaSource::Plain)
         ?: return MessageBody.Attachment(caption)
-    return MessageBody.Image(caption, source, info?.width, info?.height, isSticker)
+    return MessageBody.Image(caption, source, info?.width, info?.height, isSticker, info?.mimeType)
 }
 
 /** 貼圖事件的形狀跟 m.image 相同（body/url/file/info），只是型別沒被 Trixnity 註冊。 */
@@ -745,6 +747,7 @@ private fun stickerBody(raw: JsonObject): MessageBody? {
         width = info?.get("w")?.let { (it as? JsonPrimitive)?.intOrNull },
         height = info?.get("h")?.let { (it as? JsonPrimitive)?.intOrNull },
         isSticker = true,
+        mimeType = info?.get("mimetype")?.let { (it as? JsonPrimitive)?.contentOrNull },
     )
 }
 

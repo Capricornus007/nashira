@@ -1952,6 +1952,7 @@ private fun MessageBodyContent(
             isSticker = body.isSticker,
             caption = body.caption,
             modifier = modifier,
+            mimeType = body.mimeType,
         )
         is MessageBody.Attachment -> Text(
             "📎 ${body.name}",

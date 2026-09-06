@@ -48,10 +48,14 @@ fun MessageImage(
     isSticker: Boolean,
     caption: String,
     modifier: Modifier = Modifier,
+    mimeType: String? = null,
 ) {
     val key = remember(source) { source.cacheKey() }
     var bitmap by remember(key) { mutableStateOf(MediaBitmapCache.get(key)) }
     var failed by remember(key) { mutableStateOf(false) }
+    // Telegram 橋的動態貼圖是 video/webm：縮圖端點回 400、圖片解碼器吃不下，
+    // 要抓原檔抽第一幀（與貼圖面板同一套 decodeVideoFrame）。
+    val isVideo = remember(mimeType) { mimeType?.startsWith("video/") == true }
     LaunchedEffect(client, key) {
         if (bitmap != null) return@LaunchedEffect
         // 啟動初期伺服器版本還沒讀進來，請求會走舊版媒體端點被 404，所以失敗要重試幾次
@@ -59,11 +63,22 @@ fun MessageImage(
             if (attempt > 0) delay(MediaRetryDelayMillis * attempt)
             val media = client.di.get<MediaService>().let { service ->
                 when (source) {
-                    is MediaSource.Plain -> service.getThumbnail(source.mxcUrl, 480, 480, maxSize = MaxMediaBytes)
+                    is MediaSource.Plain ->
+                        if (isVideo || attempt > 0) {
+                            // 影片沒有縮圖端點；圖片第一輪縮圖失敗也直接退原檔
+                            service.getMedia(source.mxcUrl, maxSize = MaxMediaBytes)
+                        } else {
+                            service.getThumbnail(source.mxcUrl, 480, 480, maxSize = MaxMediaBytes)
+                        }
                     is MediaSource.Encrypted -> service.getEncryptedMedia(source.file, maxSize = MaxMediaBytes)
                 }
             }.getOrNull()
-            val decoded = media?.toByteArray(this)?.let { decodeImageBitmap(it) }
+            val bytes = media?.toByteArray(this) ?: return@repeat
+            val decoded = if (isVideo) {
+                decodeVideoFrame(bytes, maxDimension = 512)
+            } else {
+                bytes.let { decodeImageBitmap(it) }
+            }
             if (decoded != null) {
                 MediaBitmapCache.put(key, decoded)
                 bitmap = decoded
@@ -93,12 +108,20 @@ fun MessageImage(
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        else -> Box(
-            frame.fillMaxWidth().aspectRatio(ratio)
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
-            contentAlignment = Alignment.Center,
-        ) {
-            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+        // 貼圖的佔位不畫灰底：多數貼圖有透明背景，灰塊會在載入前一閃，看起來
+        // 像是「貼圖壞了」。圖片訊息保留灰底（裁切圓角需要一個可見的版位）。
+        else -> if (isSticker) {
+            Box(frame.fillMaxWidth().aspectRatio(ratio), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            }
+        } else {
+            Box(
+                frame.fillMaxWidth().aspectRatio(ratio)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            }
         }
     }
 }

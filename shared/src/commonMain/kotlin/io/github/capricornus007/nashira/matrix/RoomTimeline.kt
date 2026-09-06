@@ -142,6 +142,7 @@ class RoomTimeline(
                     width = content.info?.width,
                     height = content.info?.height,
                     isSticker = true,
+                    mimeType = content.info?.mimeType,
                 )
                 else -> null
             }
