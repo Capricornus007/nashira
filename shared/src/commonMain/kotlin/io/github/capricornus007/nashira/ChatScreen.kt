@@ -28,6 +28,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -44,6 +48,8 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.Spring
@@ -138,12 +144,12 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.foundation.layout.FlowRow
 import de.connect2x.trixnity.core.model.EventId
-import androidx.compose.foundation.hoverable
-import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.ui.geometry.Offset
 
 private val DiscordRailWidth = 64.dp
+/** Space 欄底色：比清單深一階但不是純黑（Discord #1E1F22 的同位語彙）。 */
+private val DiscordRailColor = Color(0xFF17181C)
 private val DiscordChannelWidth = 286.dp
 
 /**
@@ -501,7 +507,7 @@ private fun ServerRail(
     val clipboard = LocalClipboardManager.current
     Column(
         modifier = modifier.width(DiscordRailWidth).fillMaxHeight()
-            .background(MaterialTheme.colorScheme.surfaceContainerLowest),
+            .background(DiscordRailColor),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         LazyColumn(
@@ -729,7 +735,7 @@ private fun ChannelPane(
     syncState: SyncState,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier.fillMaxHeight().statusBarsPadding().background(MaterialTheme.colorScheme.surfaceContainerLow)) {
+    Column(modifier.fillMaxHeight().statusBarsPadding().background(MaterialTheme.colorScheme.surfaceContainerHigh)) {
         // Discord 的清單標題不掛同步指示：清單空著時的空狀態已經說明在同步，
         // 常駐的轉圈只會讓人以為要手動刷新
         Row(
@@ -1066,7 +1072,7 @@ private fun MemberPane(session: MatrixSession, roomRepository: RoomRepository, r
     val strings = stringsFor(LocalUiState.current.language)
     val flow = remember(roomRepository, room.roomId) { roomRepository.members(room.roomId) }
     val members by flow.collectAsState(initial = emptyList())
-    Column(Modifier.width(DiscordMemberWidth).fillMaxHeight().background(MaterialTheme.colorScheme.surfaceContainerLow)) {
+    Column(Modifier.width(DiscordMemberWidth).fillMaxHeight().background(MaterialTheme.colorScheme.surfaceContainerHigh)) {
         Text(
             if (members.isEmpty()) strings.members else strings.membersCount.format(members.size),
             style = MaterialTheme.typography.titleSmall,
@@ -1111,7 +1117,7 @@ private fun EmptyTimeline(message: String) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun TimelinePane(
     roomRepository: RoomRepository,
@@ -1227,6 +1233,17 @@ private fun TimelinePane(
     var attachMenu by remember(room.roomId) { mutableStateOf(false) }
     val panelAbove = LocalUiState.current.stickerPanelAbove
     val sendShortcut = LocalUiState.current.sendShortcut
+    // 輸入法與貼圖面板互斥（Telegram／Discord mobile 行為）：輸入框拿到焦點
+    // （＝鍵盤要彈出）就收面板；反過來開面板要主動把鍵盤收掉——否則 Android 15
+    // 強制 edge-to-edge 下兩者疊在一起，鍵盤蓋住輸入列，看起來就是
+    // 「打字欄不跟輸入法配合」。不用 WindowInsets.isImeVisible 判斷：它在
+    // 部分裝置上不觸發重組，焦點事件才是可靠信號。
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    var composerFocused by remember(room.roomId) { mutableStateOf(false) }
+    LaunchedEffect(composerFocused) {
+        if (composerFocused) stickerPanel = false
+    }
     val stickerPanelContent: @Composable (Modifier) -> Unit = { panelModifier ->
         StickerPicker(
             roomRepository = roomRepository,
@@ -1287,7 +1304,7 @@ private fun TimelinePane(
             )
         },
         bottomBar = {
-            Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).navigationBarsPadding()) {
+            Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).navigationBarsPadding().imePadding()) {
                 // 回覆預覽：跟 Element／Telegram 一樣掛在輸入列上方——除了「回覆給誰」
                 // 還要顯示被引用的內容，否則挑錯訊息了也看不出來。左邊一條豎線標示引用。
                 replyTo?.let { target ->
@@ -1348,7 +1365,13 @@ private fun TimelinePane(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     IconButton(
-                        onClick = { stickerPanel = !stickerPanel },
+                        onClick = {
+                            stickerPanel = !stickerPanel
+                            if (stickerPanel) {
+                                keyboardController?.hide()
+                                focusManager.clearFocus()
+                            }
+                        },
                         modifier = Modifier.size(44.dp),
                     ) {
                         Icon(
@@ -1372,6 +1395,7 @@ private fun TimelinePane(
                             state = draft,
                             modifier = Modifier.fillMaxWidth()
                                 .heightIn(min = 44.dp)
+                                .onFocusChanged { composerFocused = it.isFocused }
                                 // 送出鍵：命中設定的組合就送並吃掉事件，其餘 Enter 交回去換行
                                 .onPreviewKeyEvent { event ->
                                     if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false

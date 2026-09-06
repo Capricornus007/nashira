@@ -66,6 +66,7 @@ import io.github.capricornus007.nashira.settings.SettingsSwitchItem
 import io.github.capricornus007.nashira.theme.ThemeMode
 import io.github.capricornus007.nashira.theme.dynamicColorSupported
 import io.github.capricornus007.nashira.theme.backgroundSyncSupported
+import io.github.capricornus007.nashira.theme.keyboardLayoutSettingsSupported
 import io.github.capricornus007.nashira.theme.applyBackgroundSync
 
 /** 設定的子頁。用單一 enum 表示，返回鍵逐層退回。 */
@@ -386,29 +387,32 @@ private fun ChatListPage(onBack: () -> Unit) {
                     onCheckedChange = { ui.showMessagePreview = it },
                 )
             }
-            item { shape ->
-                SettingsDropdownItem(
-                    shape = shape,
-                    title = strings.sendShortcut,
-                    description = strings.sendShortcutHint,
-                    current = sendShortcutLabel(ui.sendShortcut, strings),
-                ) { close ->
-                    SendShortcut.entries.forEach { option ->
-                        SettingsMenuOption(sendShortcutLabel(option, strings), ui.sendShortcut == option) {
-                            ui.sendShortcut = option
-                            close()
+            // 送出鍵與貼圖面板位置是實體鍵盤／桌面視窗的慣例，手機上不顯示
+            if (keyboardLayoutSettingsSupported) {
+                item { shape ->
+                    SettingsDropdownItem(
+                        shape = shape,
+                        title = strings.sendShortcut,
+                        description = strings.sendShortcutHint,
+                        current = sendShortcutLabel(ui.sendShortcut, strings),
+                    ) { close ->
+                        SendShortcut.entries.forEach { option ->
+                            SettingsMenuOption(sendShortcutLabel(option, strings), ui.sendShortcut == option) {
+                                ui.sendShortcut = option
+                                close()
+                            }
                         }
                     }
                 }
-            }
-            item { shape ->
-                SettingsSwitchItem(
-                    shape = shape,
-                    title = strings.stickerPanelPosition,
-                    description = if (ui.stickerPanelAbove) strings.stickerPanelAbove else strings.stickerPanelBelow,
-                    checked = ui.stickerPanelAbove,
-                    onCheckedChange = { ui.stickerPanelAbove = it },
-                )
+                item { shape ->
+                    SettingsSwitchItem(
+                        shape = shape,
+                        title = strings.stickerPanelPosition,
+                        description = if (ui.stickerPanelAbove) strings.stickerPanelAbove else strings.stickerPanelBelow,
+                        checked = ui.stickerPanelAbove,
+                        onCheckedChange = { ui.stickerPanelAbove = it },
+                    )
+                }
             }
         }
         // 背景同步只有 Android 有這回事（桌面視窗開著就一直同步）

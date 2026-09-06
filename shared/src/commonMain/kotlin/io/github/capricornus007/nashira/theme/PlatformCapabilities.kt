@@ -9,5 +9,11 @@ expect val dynamicColorSupported: Boolean
  */
 expect val backgroundSyncSupported: Boolean
 
+/**
+ * 「送出鍵」「貼圖面板位置」這類實體鍵盤／桌面視窗慣例的設定是否顯示。
+ * 手機上 Enter 行為由輸入法自己決定，面板位置也固定，顯示這兩項只會誤導。
+ */
+expect val keyboardLayoutSettingsSupported: Boolean
+
 /** 套用背景同步設定（Android 啟動／停止前台服務；桌面 no-op）。 */
 expect fun applyBackgroundSync(enabled: Boolean)

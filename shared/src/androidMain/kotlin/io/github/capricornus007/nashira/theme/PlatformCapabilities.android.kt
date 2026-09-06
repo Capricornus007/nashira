@@ -5,6 +5,7 @@ import io.github.capricornus007.nashira.appContext
 actual val dynamicColorSupported: Boolean = android.os.Build.VERSION.SDK_INT >= 31
 
 actual val backgroundSyncSupported: Boolean = true
+actual val keyboardLayoutSettingsSupported: Boolean = false
 
 /**
  * 啟動／停止背景同步。服務類別在 androidApp 模組（shared 看不到它），

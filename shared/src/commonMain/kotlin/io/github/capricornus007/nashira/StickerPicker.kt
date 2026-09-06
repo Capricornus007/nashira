@@ -143,11 +143,19 @@ private fun PackTab(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
-    val cover = remember(pack) {
-        pack.avatarUrl?.let { url ->
-            StickerItem(shortcode = label, body = label, mxcUrl = url, file = null, info = null, mimeType = null)
-        } ?: pack.stickers.firstOrNull()
+    // 封面候選鏈：pack.avatar → 第一張「圖片」貼圖 → 第一張貼圖。avatar 在矩陣上
+    // 常見「設了但媒體已 404／被配額清掉」，單一候選會讓圖示永遠卡 ↻。
+    val candidates = remember(pack) {
+        buildList {
+            pack.avatarUrl?.let { url ->
+                add(StickerItem(shortcode = label, body = label, mxcUrl = url, file = null, info = null, mimeType = null))
+            }
+            pack.stickers.firstOrNull { it.mimeType?.startsWith("video/") != true }?.let(::add)
+            pack.stickers.firstOrNull()?.let(::add)
+        }.distinctBy { it.mxcUrl ?: it.file?.url ?: it.shortcode }
     }
+    var attempt by remember(pack) { mutableStateOf(0) }
+    val cover = candidates.getOrNull(attempt)
     Box(
         Modifier
             .size(40.dp)
@@ -157,8 +165,11 @@ private fun PackTab(
             .padding(4.dp),
         contentAlignment = Alignment.Center,
     ) {
-        if (cover != null) StickerThumb(client, cover)
-        else Text(label.take(1).uppercase(), style = MaterialTheme.typography.labelMedium)
+        if (cover != null) {
+            StickerThumb(client, cover, onFailed = { attempt += 1 })
+        } else {
+            Text(label.take(1).uppercase(), style = MaterialTheme.typography.labelMedium)
+        }
     }
 }
 
@@ -185,7 +196,12 @@ private fun StickerGrid(pack: StickerPack, client: MatrixClient, onSend: (Sticke
 }
 
 @Composable
-private fun StickerThumb(client: MatrixClient, sticker: StickerItem) {
+private fun StickerThumb(
+    client: MatrixClient,
+    sticker: StickerItem,
+    /** 載入失敗時交給呼叫端接手（PackTab 換下一個封面候選）；null 時顯示 ↻ 重試磚。 */
+    onFailed: (() -> Unit)? = null,
+) {
     val key = remember(sticker) { sticker.mxcUrl ?: sticker.file?.url ?: sticker.shortcode }
     var bitmap by remember(key) { mutableStateOf(MediaBitmapCache.get(key)) }
     var failed by remember(key) { mutableStateOf(false) }
@@ -230,6 +246,7 @@ private fun StickerThumb(client: MatrixClient, sticker: StickerItem) {
             }
         }
         failed = true
+        onFailed?.invoke()
     }
     val loaded = bitmap
     when {
@@ -239,7 +256,8 @@ private fun StickerThumb(client: MatrixClient, sticker: StickerItem) {
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Fit,
         )
-        failed -> Box(
+        // 呼叫端接手失敗（PackTab 換候選）時不畫重試磚——重試磚是給格狀圖用的
+        failed && onFailed == null -> Box(
             Modifier
                 .fillMaxSize()
                 .clip(RoundedCornerShape(10.dp))
