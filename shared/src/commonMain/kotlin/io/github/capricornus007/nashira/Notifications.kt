@@ -13,6 +13,9 @@ import io.github.capricornus007.nashira.matrix.messageBodyOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flatMapLatest
 
 /** 平台通知能力接口；Android 在 MainActivity 注入實現，桌面用 notify-send。 */
 interface NotificationPlatform {
@@ -51,35 +54,41 @@ object AppNotifications {
  * **不是 composable**：以前掛在 Compose 樹上，App 一離開前台、UI 不再重組就停了，
  * 而通知恰恰只在背景才需要發。現在跟著 MatrixSession 的生命週期跑。
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 internal suspend fun watchNotifications(client: MatrixClient, myUserId: UserId) {
     val rooms = RoomRepository(client)
-    client.notification.getNotifications().collect { notification ->
-        if (AppNotifications.foreground.value) return@collect
-        // 規則說要通知才通知（Trixnity 只發需要通知的事件，這裡是保險）
-        if (notification.actions.none { it is PushAction.Notify }) return@collect
-        val event = notification.event as? ClientEvent.RoomEvent.MessageEvent<*> ?: return@collect
-        if (event.sender == myUserId) return@collect
-        val strings = stringsFor(persistedLanguage())
-        val body = event.content.messageBodyOrNull() ?: return@collect
-        val text = when (body) {
-            is MessageBody.Text -> body.text
-            is MessageBody.Image -> if (body.isSticker) strings.notifSticker else strings.notifImage
-            is MessageBody.Attachment -> body.name
-            MessageBody.Undecryptable -> strings.notifUndecryptable
+    // 前台完全不訂閱：getNotifications 會把 sync 回來的每一則事件都解密並過推播規則，
+    // 啟動時幾十個房間一起來，暫時分配會衝到數百 MB（實測 Java heap 峰值 512MB）。
+    // 前台本來就不發通知，所以直接不收；退到背景才開始收。
+    AppNotifications.foreground
+        .flatMapLatest { inForeground ->
+            if (inForeground) emptyFlow() else client.notification.getNotifications()
         }
-        val roomId = event.roomId
-        val roomName = rooms.roomSummaries().firstOrNull()
-            ?.firstOrNull { summary -> summary.roomId == roomId }?.name
-            ?: roomId.full
-        val senderName = rooms.memberName(roomId, event.sender)
-            ?: event.sender.full.removePrefix("@").substringBefore(':')
-        val count = client.notification.getCount(roomId).firstOrNull() ?: 0
-        AppNotifications.show(
-            roomKey = roomId.full,
-            title = "$roomName · $senderName",
-            body = text,
-            mentionCount = count,
-        )
+        .collect { notification ->
+            // 規則說要通知才通知（Trixnity 只發需要通知的事件，這裡是保險）
+            if (notification.actions.none { it is PushAction.Notify }) return@collect
+            val event = notification.event as? ClientEvent.RoomEvent.MessageEvent<*> ?: return@collect
+            if (event.sender == myUserId) return@collect
+            val strings = stringsFor(persistedLanguage())
+            val body = event.content.messageBodyOrNull() ?: return@collect
+            val text = when (body) {
+                is MessageBody.Text -> body.text
+                is MessageBody.Image -> if (body.isSticker) strings.notifSticker else strings.notifImage
+                is MessageBody.Attachment -> body.name
+                MessageBody.Undecryptable -> strings.notifUndecryptable
+            }
+            val roomId = event.roomId
+            // 單一房間查詢就好：每來一則通知都展開整份摘要流會炸記憶體
+            val roomName = rooms.roomName(roomId) ?: roomId.full
+            val senderName = rooms.memberName(roomId, event.sender)
+                ?: event.sender.full.removePrefix("@").substringBefore(':')
+            val count = client.notification.getCount(roomId).firstOrNull() ?: 0
+            AppNotifications.show(
+                roomKey = roomId.full,
+                title = "$roomName · $senderName",
+                body = text,
+                mentionCount = count,
+            )
     }
 }
 

@@ -138,6 +138,10 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.foundation.layout.FlowRow
 import de.connect2x.trixnity.core.model.EventId
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.ui.geometry.Offset
 
 private val DiscordRailWidth = 72.dp
 private val DiscordChannelWidth = 286.dp
@@ -182,8 +186,22 @@ fun ChatScreen(
     // 未讀提示與訊息預覽都可在設定關掉
     val showUnread = LocalUiState.current.showUnreadIndicators
     val showPreview = LocalUiState.current.showMessagePreview
-    val summaries = selectedSpace?.let { space -> snapshot.rooms.filter { space.roomId in it.spaceIds } }
-        ?: snapshot.rooms
+    // 標籤整份收一次（見 RoomRepository.tagsByRoom 的註解：放進摘要流會被多處重複展開）
+    val tagsFlow = remember(roomRepository) { roomRepository.tagsByRoom() }
+    val tagsByRoom by tagsFlow.collectAsState(initial = emptyMap())
+    val summaries = remember(snapshot, selectedSpace, tagsByRoom) {
+        val inSpace = selectedSpace?.let { space -> snapshot.rooms.filter { space.roomId in it.spaceIds } }
+            ?: snapshot.rooms
+        // 置頂在最前、置底在最後，同組內維持原本的活動時間排序
+        inSpace.map { it.copy(tags = tagsByRoom[it.roomId].orEmpty()) }
+            .sortedBy { room ->
+                when {
+                    "m.favourite" in room.tags -> 0
+                    "m.lowpriority" in room.tags -> 2
+                    else -> 1
+                }
+            }
+    }
     val channelTitle = selectedSpace?.name ?: strings.allRooms
     val spaceRooms = remember(snapshot) {
         snapshot.spaces.associate { space ->
@@ -512,13 +530,14 @@ private fun ServerRail(
             items(spaces, key = { it.roomId.full }) { space ->
                 val unread = unreadBySpace[space.roomId] ?: UnreadState()
                 var menuOpen by remember(space.roomId) { mutableStateOf(false) }
+                var menuAnchor by remember(space.roomId) { mutableStateOf(Offset.Unspecified) }
                 var inviteFor by remember(space.roomId) { mutableStateOf(false) }
                 Box {
                     RailSlot(
                         selected = selectedSpace?.roomId == space.roomId,
                         unread = unread,
                         onClick = { onSelectSpace(space) },
-                        onContextMenu = { menuOpen = true },
+                        onContextMenu = { position -> menuAnchor = position; menuOpen = true },
                     ) { shape ->
                         SpaceIcon(
                             client = client,
@@ -528,7 +547,7 @@ private fun ServerRail(
                             shape = shape,
                         )
                     }
-                    ContextMenuSurface(expanded = menuOpen, onDismiss = { menuOpen = false }) {
+                    ContextMenuSurface(expanded = menuOpen, onDismiss = { menuOpen = false }, anchor = menuAnchor) {
                         ContextMenuItem(strings.spaceHome) { menuOpen = false; onSelectSpace(space) }
                         ContextMenuItem(strings.actionCopyLink) {
                             menuOpen = false
@@ -566,7 +585,7 @@ private fun RailSlot(
     selected: Boolean,
     unread: UnreadState,
     onClick: () -> Unit,
-    onContextMenu: (() -> Unit)? = null,
+    onContextMenu: ((Offset) -> Unit)? = null,
     content: @Composable (shape: RoundedCornerShape) -> Unit,
 ) {
     val corner by animateDpAsState(
@@ -766,16 +785,16 @@ private fun ChannelPane(
             if (query.isBlank()) summaries else summaries.filter { it.name.contains(query.trim(), ignoreCase = true) }
         }
         if (visible.isEmpty()) {
-            Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    when {
-                        query.isNotBlank() -> Text(strings.noSearchResults, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        syncState == SyncState.INITIAL_SYNC || syncState == SyncState.STARTED || syncState == SyncState.TIMEOUT -> {
-                            CircularProgressIndicator()
-                            Text(strings.syncingRooms, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        else -> Text(strings.noRooms, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+            when {
+                // 同步中不擺佔畫面的轉圈：畫骨架，讓等待看起來是內容在長出來
+                query.isBlank() &&
+                    (syncState == SyncState.INITIAL_SYNC || syncState == SyncState.STARTED || syncState == SyncState.TIMEOUT) ->
+                    RoomListSkeleton(Modifier.fillMaxWidth().weight(1f))
+                else -> Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                    Text(
+                        if (query.isNotBlank()) strings.noSearchResults else strings.noRooms,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         } else {
@@ -870,7 +889,9 @@ private fun RoomListItem(
     val scope = rememberCoroutineScope()
     var inviteBusy by remember(room.roomId) { mutableStateOf(false) }
     var menuOpen by remember(room.roomId) { mutableStateOf(false) }
+    var menuAnchor by remember(room.roomId) { mutableStateOf(Offset.Unspecified) }
     var tags by remember(room.roomId) { mutableStateOf<Set<String>>(emptySet()) }
+    var muted by remember(room.roomId) { mutableStateOf(false) }
     var inviteFor by remember(room.roomId) { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
     Column(
@@ -887,9 +908,13 @@ private fun RoomListItem(
             // 邀請中的房間不能點進去，但長按／右鍵仍要能拒絕與離開
             .contextMenuGestures(
                 onClick = { if (!room.isInvite) onSelect(room) },
-                onContextMenu = {
+                onContextMenu = { position ->
+                    menuAnchor = position
                     menuOpen = true
-                    scope.launch { tags = roomRepository.tags(room.roomId) }
+                    scope.launch {
+                        tags = roomRepository.tags(room.roomId)
+                        muted = roomRepository.isMuted(room.roomId)
+                    }
                 },
             ),
     ) {
@@ -964,7 +989,7 @@ private fun RoomListItem(
                 ) { Text(strings.declineInvite) }
             }
         }
-        ContextMenuSurface(expanded = menuOpen, onDismiss = { menuOpen = false }) {
+        ContextMenuSurface(expanded = menuOpen, onDismiss = { menuOpen = false }, anchor = menuAnchor) {
             val favourite = "m.favourite" in tags
             val lowPriority = "m.lowpriority" in tags
             if (!room.isInvite) {
@@ -996,6 +1021,14 @@ private fun RoomListItem(
                     scope.launch {
                         roomRepository.setTag(room.roomId, "m.lowpriority", !lowPriority)
                         tags = roomRepository.tags(room.roomId)
+                    }
+                }
+                // 靜音就是伺服器端的 room 推播規則，Element 等其他客戶端會看到同一個狀態
+                ContextMenuItem(if (muted) strings.actionUnmute else strings.actionMute) {
+                    menuOpen = false
+                    scope.launch {
+                        roomRepository.setMuted(room.roomId, !muted)
+                        muted = roomRepository.isMuted(room.roomId)
                     }
                 }
                 ContextMenuItem(strings.actionCopyLink) {
@@ -1142,6 +1175,9 @@ private fun TimelinePane(
     // 滾到最舊的一端（reverseLayout 下是視覺最上方）就再要一頁歷史。
     // 判斷用 page 的事件總數與 canLoadMore，不要用「純文字訊息數」——過濾後永遠偏小。
     // snapshotFlow 必須拿來讀這些 state：derivedStateOf 搭 remember 會把當下值凍結在閉包裡。
+    // 全部事件都被過濾掉的房間（治理房、只有 state 事件的貼圖倉庫房）會讓
+    // needsAutoLoad 一直成立，於是無限往前翻，記憶體一路漲到 OOM。限次數。
+    var autoLoads by remember(room.roomId) { mutableStateOf(0) }
     LaunchedEffect(room.roomId, listState) {
         snapshotFlow {
             val shown = messages?.size ?: 0
@@ -1156,8 +1192,9 @@ private fun TimelinePane(
                 val atOldest = shown > 0 && lastVisible >= shown - PrefetchThreshold
                 // 全部可顯示事件被過濾掉（治理房整片 server_acl）或房間訊息數 0 時沒有可滾動內容，
                 // 使用者無從觸發載入——直接自動往前翻，直到撈到能顯示的訊息或沒有更多為止。
-                val needsAutoLoad = shown == 0 && canLoad
+                val needsAutoLoad = shown == 0 && canLoad && autoLoads < MaxAutoLoads
                 if ((atOldest || needsAutoLoad) && canLoad && !loading) {
+                    if (needsAutoLoad) autoLoads += 1
                     timelineScope.launch { timeline.loadBefore() }
                 }
             }
@@ -1518,6 +1555,14 @@ private fun TimelinePane(
                                 }
                             }
                         },
+                        onTogglePin = {
+                            msg.eventId?.let { id ->
+                                scope.launch {
+                                    roomRepository.togglePin(room.roomId, id, !msg.pinned)
+                                        .onFailure { sendError = io.github.capricornus007.nashira.i18n.friendlyError(it) }
+                                }
+                            }
+                        },
                         onToggleReaction = { key, mine ->
                             val target = msg.eventId
                             scope.launch {
@@ -1539,8 +1584,10 @@ private fun TimelinePane(
                     if (newDay) DateDivider(formatDateDivider(msg.timestamp, today, strings))
                 }
             }
-            // reverseLayout 下最後發出的項目在視覺最上方：正在補歷史時擺一顆轉圈
-            if (loadingMore) {
+            // reverseLayout 下最後發出的項目在視覺最上方：正在補歷史時擺一顆轉圈。
+            // 只有「已經有內容、往前補更早的歷史」才畫它——第一頁還在載入時
+            // 上面那個 loaded == null 的分支已經有一顆轉圈了，兩顆同時出現很怪。
+            if (loadingMore && !loaded.isNullOrEmpty()) {
                 item {
                     Row(
                         Modifier.fillMaxWidth().padding(vertical = 12.dp),
@@ -1652,6 +1699,9 @@ private val QuickReactions = listOf("\uD83D\uDC4D", "\u2764\uFE0F", "\uD83D\uDE0
 /** 兩則訊息合併顯示的最大間隔，對齊 Discord 的 7 分鐘。 */
 private const val GroupingWindowMillis = 7 * 60 * 1000L
 
+/** 「一則都顯示不出來」時自動往前翻的次數上限；再多就等使用者自己滾。 */
+private const val MaxAutoLoads = 5
+
 /** 還剩幾則就開始預抓下一頁，避免滾到底才卡一下。 */
 private const val PrefetchThreshold = 10
 
@@ -1689,13 +1739,18 @@ private fun MessageRow(
     onCopyLink: () -> Unit,
     onDelete: () -> Unit,
     onToggleReaction: (String, EventId?) -> Unit,
+    onTogglePin: () -> Unit,
 ) {
     var menuOpen by remember(msg.eventId) { mutableStateOf(false) }
+    var menuAnchor by remember(msg.eventId) { mutableStateOf(Offset.Unspecified) }
+    val hoverSource = remember { MutableInteractionSource() }
+    val hovered by hoverSource.collectIsHoveredAsState()
     Box {
         Row(
             Modifier.fillMaxWidth()
                 // 長按（手機）／右鍵（桌面）開選單，對齊 Element 與 Discord
-                .contextMenuGestures { menuOpen = true }
+                .contextMenuGestures { position -> menuAnchor = position; menuOpen = true }
+                .hoverable(hoverSource)
                 .padding(
                     start = 16.dp,
                     end = 16.dp,
@@ -1779,7 +1834,40 @@ private fun MessageRow(
                 }
             }
         }
-        ContextMenuSurface(expanded = menuOpen, onDismiss = { menuOpen = false }) {
+        // 滑鼠懸停時的快捷列（Element 桌面的做法）。觸控不會觸發 hover，所以手機不受影響。
+        if (hovered && msg.eventId != null) {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                shape = RoundedCornerShape(10.dp),
+                shadowElevation = 4.dp,
+                modifier = Modifier.align(Alignment.TopEnd).padding(end = 16.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = { onToggleReaction(QuickReactions.first(), msg.reactions[QuickReactions.first()]?.mine) },
+                        modifier = Modifier.size(32.dp),
+                    ) { Text(QuickReactions.first(), style = MaterialTheme.typography.labelLarge) }
+                    IconButton(onClick = onReply, modifier = Modifier.size(32.dp)) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = strings.actionReply,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                    IconButton(
+                        onClick = { menuAnchor = Offset.Unspecified; menuOpen = true },
+                        modifier = Modifier.size(32.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.MoreVert,
+                            contentDescription = strings.more,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                }
+            }
+        }
+        ContextMenuSurface(expanded = menuOpen, onDismiss = { menuOpen = false }, anchor = menuAnchor) {
             // 還在 outbox 的訊息沒有 eventId，回覆／連結／刪除都無從指定
             val settled = msg.eventId != null
             if (settled) {
@@ -1813,6 +1901,14 @@ private fun MessageRow(
             }
             if (settled) {
                 ContextMenuItem(strings.actionCopyLink) { menuOpen = false; onCopyLink() }
+                ContextMenuItem(if (msg.pinned) strings.actionUnpin else strings.actionPin) {
+                    menuOpen = false
+                    onTogglePin()
+                }
+                // 橋接訊息才有 external_url（例如 Telegram 橋會指回原訊息）
+                msg.externalUrl?.let { url ->
+                    ContextMenuItem(strings.actionSourceUrl) { menuOpen = false; openLink(url) }
+                }
                 if (isOwn) {
                     ContextMenuItem(strings.actionDelete, destructive = true) { menuOpen = false; onDelete() }
                 }

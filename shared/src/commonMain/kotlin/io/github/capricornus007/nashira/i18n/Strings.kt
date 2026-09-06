@@ -88,6 +88,11 @@ interface Strings {
     val actionDelete: String
     val actionMarkUnread: String
     val actionMarkRead: String
+    val actionMute: String
+    val actionUnmute: String
+    val actionPin: String
+    val actionUnpin: String
+    val actionSourceUrl: String
     val sendShortcut: String
     val sendShortcutHint: String
     val keyEnter: String
@@ -274,14 +279,19 @@ object ZhTwStrings : Strings {
     override val actionDelete = "刪除訊息"
     override val actionMarkUnread = "標記為未讀"
     override val actionMarkRead = "標記為已讀"
+    override val actionMute = "靜音通知"
+    override val actionUnmute = "取消靜音"
+    override val actionPin = "圖釘"
+    override val actionUnpin = "取消圖釘"
+    override val actionSourceUrl = "來源網址"
     override val sendShortcut = "送出鍵"
     override val sendShortcutHint = "命中的組合送出，其餘 Enter 換行"
     override val keyEnter = "Enter"
     override val keyCtrlEnter = "Ctrl + Enter"
     override val keyAltEnter = "Alt + Enter"
     override val keyShiftEnter = "Shift + Enter"
-    override val actionFavourite = "收藏（排在最前）"
-    override val actionLowPriority = "低優先（排到最後）"
+    override val actionFavourite = "置頂"
+    override val actionLowPriority = "置底"
     override val actionInvite = "邀請"
     override val actionLeave = "離開"
     override val inviteHint = "輸入要邀請的 Matrix ID（@user:server）"
@@ -515,14 +525,19 @@ object EnStrings : Strings {
     override val actionDelete = "Remove message"
     override val actionMarkUnread = "Mark as unread"
     override val actionMarkRead = "Mark as read"
+    override val actionMute = "Mute notifications"
+    override val actionUnmute = "Unmute"
+    override val actionPin = "Pin"
+    override val actionUnpin = "Unpin"
+    override val actionSourceUrl = "Source URL"
     override val sendShortcut = "Send shortcut"
     override val sendShortcutHint = "The chosen combo sends; other Enter presses insert a newline"
     override val keyEnter = "Enter"
     override val keyCtrlEnter = "Ctrl + Enter"
     override val keyAltEnter = "Alt + Enter"
     override val keyShiftEnter = "Shift + Enter"
-    override val actionFavourite = "Favourite (top of list)"
-    override val actionLowPriority = "Low priority (bottom of list)"
+    override val actionFavourite = "Pin to top"
+    override val actionLowPriority = "Move to bottom"
     override val actionInvite = "Invite"
     override val actionLeave = "Leave"
     override val inviteHint = "Enter the Matrix ID to invite (@user:server)"

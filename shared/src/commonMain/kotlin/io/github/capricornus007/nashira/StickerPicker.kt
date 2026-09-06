@@ -205,7 +205,8 @@ private fun StickerThumb(client: MatrixClient, sticker: StickerItem) {
                 is MediaSource.Encrypted -> service.getEncryptedMedia(source.file, maxSize = MaxMediaBytes)
                 null -> null
             }?.getOrNull()
-            val decoded = media?.toByteArray(this)?.let { decodeImageBitmap(it) }
+            // 貼圖只有 256px 的顯示需求；抓原圖那條退路若不降採樣會把堆積吃光
+            val decoded = media?.toByteArray(this)?.let { decodeImageBitmap(it, maxDimension = 256) }
             if (decoded != null) {
                 MediaBitmapCache.put(key, decoded)
                 bitmap = decoded

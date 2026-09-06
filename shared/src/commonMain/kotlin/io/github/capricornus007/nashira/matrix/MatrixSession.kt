@@ -21,6 +21,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * 各平台的 ktor 引擎：桌面 CIO 引擎在 keep-alive 連接被伺服器關閉時會拋
@@ -71,7 +73,9 @@ object MatrixEngine {
     private val syncFilter = Filters(
         room = Filters.RoomFilter(
             state = Filters.RoomFilter.RoomEventFilter(lazyLoadMembers = true),
-            timeline = Filters.RoomFilter.RoomEventFilter(limit = 50),
+            // 每房 20 則就夠填第一屏與清單預覽；50 則 × 幾十個房間的首次 sync
+            // 會讓解析與解密的暫時分配衝到 250MB（Android 堆積上限 256MB）
+            timeline = Filters.RoomFilter.RoomEventFilter(limit = 20),
         ),
     )
 
@@ -95,12 +99,22 @@ object MatrixEngine {
         _restoring.value = false
     }
 
-    /** 啟動恢復：磁碟有 token 則直接建 client（免密碼重登）；token 失效自動清除 */
-    suspend fun restoreFromDisk() {
-        if (_session.value != null) return
+    /**
+     * 啟動恢復：磁碟有 token 則直接建 client（免密碼重登）；token 失效自動清除。
+     *
+     * **必須互斥**：Android 端有兩個呼叫者——前台服務的 onCreate 與 Compose 的
+     * LaunchedEffect——只靠 `_session.value != null` 這個檢查擋不住，兩邊都會在
+     * MatrixClient.create 這個 suspend 點之前通過檢查，於是建出兩個 client、
+     * 兩條 sync 迴圈壓同一個 SQLite 檔，記憶體翻倍、同步反而更慢
+     *（實測啟動 40 秒內堆積衝到 252MB 然後 OOM）。
+     */
+    private val restoreLock = Mutex()
+
+    suspend fun restoreFromDisk() = restoreLock.withLock {
+        if (_session.value != null) return@withLock
         val stored = storage.load() ?: run {
             _restoring.value = false
-            return
+            return@withLock
         }
         _restoring.value = true
         val key = databaseKey(stored.baseUrl, stored.userId)
@@ -121,7 +135,7 @@ object MatrixEngine {
         ).getOrNull() ?: run {
             storage.clear()
             _restoring.value = false
-            return
+            return@withLock
         }
         val session = MatrixSession(client)
         session.start()

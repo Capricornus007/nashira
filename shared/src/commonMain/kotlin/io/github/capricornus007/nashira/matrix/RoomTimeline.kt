@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.flow
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 import de.connect2x.trixnity.core.model.events.m.ReactionEventContent
+import de.connect2x.trixnity.core.model.events.MessageEventContent
 
 /**
  * 以 Trixnity 有狀態的 `Timeline` 為核心的房間時間線包裝。
@@ -42,6 +43,9 @@ class RoomTimeline(
     private val memberMap: Flow<Map<UserId, RoomUser>>,
 ) {
     private val timeline = client.room.getTimeline { it }
+
+    /** 圖釘清單：訊息選單要顯示「圖釘／取消圖釘」，還要在訊息上標出來 */
+    private val pinned = RoomRepository(client).pinnedEvents(roomId)
 
     private val initState = MutableStateFlow(false)
     private val loadingBefore = MutableStateFlow(false)
@@ -77,17 +81,24 @@ class RoomTimeline(
         // 只在建頁時取一次 memberMap 的當下值，發送者名字會全部退回 localpart，
         // 而且之後成員到了也不會重畫——使用者看到的就是「一部分有名字一部分是 telegram_數字」。
         .combine(memberMap) { state, members -> state to members }
-        .flatMapLatest { (state, members) ->
+        .combine(pinned) { (state, members), pinnedIds -> Triple(state, members, pinnedIds) }
+        .flatMapLatest { (state, members, pinnedIds) ->
             // Timeline state 的元素是「事件流」。解密完成會更新該流並重新發射，
             // timeline.state 也因為事件流換值而重算；這裡在 Flow 的 suspend map 裡等每條流的最新值。
             flow {
+                // 只取最新的一段：elements 會隨著往前翻歷史無限增長，而每個元素都是
+                // 一條事件流。整份materialize 會把整個房間歷史留在堆積裡——治理房或
+                // 幾乎沒有訊息的房間（自動往前翻）實測會撐到 255MB/256MB 然後 OOM。
+                val windowed = state.elements.takeLast(TimelineWindowSize)
                 // 先把每條事件流取到當下值：反應要先掃一遍才知道哪則訊息掛了哪些反應
-                val events = state.elements.map { eventFlow -> eventFlow.first() }
+                val events = windowed.map { eventFlow -> eventFlow.first() }
                 val reactions = aggregateReactions(events)
                 emit(
                     TimelinePage(
                         // elements 是舊→新，UI 要新→舊
-                        messages = events.asReversed().mapNotNull { event -> toMessage(event, members, reactions) },
+                        messages = events.asReversed().mapNotNull { event ->
+                            toMessage(event, members, reactions, pinnedIds)
+                        },
                         eventCount = state.elements.size,
                         canLoadMore = state.canLoadBefore,
                         loadingBefore = loadingBefore.value,
@@ -158,6 +169,7 @@ class RoomTimeline(
         timelineEvent: TimelineEvent,
         members: Map<UserId, RoomUser>,
         reactions: Map<EventId, Map<String, ReactionInfo>>,
+        pinnedIds: List<EventId>,
     ): TimelineMessage? {
         val roomEvent = timelineEvent.event
         val member = members[roomEvent.sender]
@@ -171,6 +183,10 @@ class RoomTimeline(
             body = timelineEvent.messageBodyOrNull() ?: return null,
             timestamp = roomEvent.originTimestamp,
             reactions = reactions[roomEvent.id].orEmpty(),
+            externalUrl = (timelineEvent.content?.getOrNull() ?: roomEvent.content).let { content ->
+                (content as? MessageEventContent)?.externalUrl
+            },
+            pinned = roomEvent.id in pinnedIds,
         )
     }
 }
@@ -181,6 +197,12 @@ class RoomTimeline(
  * UI 就能標成「無法解密」而不是整頁空白。
  */
 private val TimelineDecryptTimeout: Duration = 4.seconds
+
+/**
+ * 一次映射到 UI 的事件上限。往前翻歷史時 Trixnity 的 elements 只增不減，
+ * 不設窗就等於把整個房間留在記憶體裡。
+ */
+private const val TimelineWindowSize = 300
 
 /** 抓缺檔（sync gap）的上限。 */
 private val TimelineFetchTimeout: Duration = 30.seconds

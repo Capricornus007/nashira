@@ -20,6 +20,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.isSpecified
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.DpOffset
 
 /**
  * 長按（觸控）與右鍵（滑鼠）都能開的內容選單觸發器。
@@ -31,22 +35,25 @@ import androidx.compose.runtime.setValue
 @OptIn(ExperimentalFoundationApi::class)
 fun Modifier.contextMenuGestures(
     onClick: (() -> Unit)? = null,
-    onContextMenu: () -> Unit,
+    onContextMenu: (Offset) -> Unit,
 ): Modifier = this
     .pointerInput(onContextMenu) {
         awaitPointerEventScope {
             while (true) {
                 val event = awaitPointerEvent(PointerEventPass.Main)
                 if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed) {
+                    // 位置要一起帶出去：桌面選單要開在指標處，不然滑鼠在右邊、選單卻從列首彈出
+                    val position = event.changes.firstOrNull()?.position ?: Offset.Zero
                     event.changes.forEach { it.consume() }
-                    onContextMenu()
+                    onContextMenu(position)
                 }
             }
         }
     }
+    // 觸控長按沒有「指標位置」的概念，用 Offset.Unspecified 表示「照預設位置開」
     .combinedClickable(
         onClick = { onClick?.invoke() },
-        onLongClick = onContextMenu,
+        onLongClick = { onContextMenu(Offset.Unspecified) },
     )
 
 /** 選單的一列；`destructive` 用錯誤色（離開房間、刪除訊息這類）。 */
@@ -72,11 +79,23 @@ fun ContextMenuItem(
 fun ContextMenuSurface(
     expanded: Boolean,
     onDismiss: () -> Unit,
+    /** 右鍵按下的位置（相對於錨點元件）；Unspecified 表示照 DropdownMenu 預設位置。 */
+    anchor: Offset = Offset.Unspecified,
     content: @Composable () -> Unit,
 ) {
+    val density = LocalDensity.current
+    // DropdownMenu 會自動避開畫面邊界（不夠位就往上／往左翻），所以只要給位移就不會被切掉
+    val offset = remember(anchor, density) {
+        if (anchor.isSpecified) {
+            with(density) { DpOffset(anchor.x.toDp(), anchor.y.toDp()) }
+        } else {
+            DpOffset.Zero
+        }
+    }
     DropdownMenu(
         expanded = expanded,
         onDismissRequest = onDismiss,
+        offset = offset,
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         shadowElevation = 8.dp,
     ) {

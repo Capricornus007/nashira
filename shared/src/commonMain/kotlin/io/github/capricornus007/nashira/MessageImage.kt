@@ -120,17 +120,28 @@ private fun MediaSource.cacheKey(): String = when (this) {
 }
 
 /** 進程內位圖快取：時間線來回滾動會反覆掛載同一則圖片訊息，貼圖面板也共用這份。 */
+/**
+ * 進程內位圖快取。**按位元組上限淘汰，不能只數個數**：64 張全解析度貼圖就能吃掉
+ * 兩百多 MB，把 Android 的 256MB 堆積上限撐爆（實測 OutOfMemoryError）。
+ */
 internal object MediaBitmapCache {
-    private const val MAX_ENTRIES = 64
+    /** 約 48MB：足夠一個貼圖面板與一屏訊息，離 256MB 上限還有很大餘裕。 */
+    private const val MAX_BYTES = 48L * 1024 * 1024
     private val entries = LinkedHashMap<String, ImageBitmap>()
+    private var bytes = 0L
+
+    private fun sizeOf(bitmap: ImageBitmap): Long = bitmap.width.toLong() * bitmap.height * 4
 
     fun get(key: String): ImageBitmap? = entries[key]
 
     fun put(key: String, bitmap: ImageBitmap) {
+        entries.remove(key)?.let { bytes -= sizeOf(it) }
         entries[key] = bitmap
-        if (entries.size > MAX_ENTRIES) {
-            val oldest = entries.keys.firstOrNull() ?: return
-            entries.remove(oldest)
+        bytes += sizeOf(bitmap)
+        // LinkedHashMap 的插入順序就是淘汰順序（最舊的先走）
+        while (bytes > MAX_BYTES && entries.size > 1) {
+            val oldest = entries.keys.firstOrNull() ?: break
+            entries.remove(oldest)?.let { bytes -= sizeOf(it) }
         }
     }
 }

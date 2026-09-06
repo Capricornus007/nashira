@@ -28,35 +28,99 @@ import androidx.compose.ui.unit.dp
 import io.github.capricornus007.nashira.i18n.stringsFor
 import io.github.capricornus007.nashira.theme.NashiraGold
 import io.github.capricornus007.nashira.theme.NashiraStarWhite
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 
 /**
- * 啟動頁：磁碟有登入憑證時顯示。
+ * 啟動頁：磁碟有登入憑證、但 MatrixClient 還在開庫時顯示。
  *
- * 形態參考 SchildiChat 的啟動畫面（居中品牌標記 + 底部細進度條），但用自己的品牌語彙：
- * 品牌圖示是 N 星圖，載入指示是一條金色細線在底部來回掠過，而不是轉圈。
+ * **形態是「聊天室清單的骨架」而不是品牌啟動畫面**。實機錄影逐幀對照
+ * moregramX(Telegram)：它 1.5 秒就畫出應用框架（標題列＋底部欄＋空清單），
+ * 2.0 秒填上本機快取的清單，同步狀態只用標題列的一行小字提示，
+ * 全程沒有佔滿畫面的轉圈。Nashira 原本擺一張居中品牌圖＋轉圈到開庫結束，
+ * 同樣的等待時間會被讀成「還沒開始同步」。骨架跟真清單同構，切換時不跳版。
  */
 @Composable
 fun StartupScreen() {
     val strings = stringsFor(LocalUiState.current.language)
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        NashiraMark(Modifier.size(96.dp))
-        Text(
-            strings.appName,
-            style = MaterialTheme.typography.headlineSmall,
-            color = MaterialTheme.colorScheme.onSurface,
-            fontWeight = FontWeight.Bold,
+    Column(modifier = Modifier.fillMaxSize()) {
+        // 標題列：跟 ChannelPane 同高同位置，真清單接上時不位移
+        Row(
+            modifier = Modifier.fillMaxWidth().statusBarsPadding().height(56.dp)
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            NashiraMark(Modifier.size(24.dp))
+            Text(
+                strings.allRooms,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                strings.restoringSession,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        // 搜尋膠囊佔位
+        Box(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)
+                .height(40.dp).clip(RoundedCornerShape(20.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
         )
-        Text(
-            strings.restoringSession,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        // 清單列佔位：頭像圓 + 兩行長條，尺寸對齊 RoomListItem
+        RoomListSkeleton()
+        Box(Modifier.fillMaxWidth().weight(1f))
         SweepIndicator()
     }
+}
+
+/** 骨架列數：填滿一屏就夠，多畫只是浪費。 */
+private const val SkeletonRows = 8
+
+/**
+ * 聊天室清單骨架列。啟動頁與「清單還沒到、但已經在同步」的階段共用同一份，
+ * 讓整段等待看起來是「內容正在長出來」而不是「空的 + 轉圈」
+ *（逐幀對照 Telegram：它全程沒有佔畫面的轉圈）。
+ */
+@Composable
+fun RoomListSkeleton(modifier: Modifier = Modifier, rows: Int = SkeletonRows) {
+    Column(modifier) {
+        repeat(rows) { index ->
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Box(
+                    Modifier.size(44.dp).clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    SkeletonBar(width = (150 - (index % 3) * 22).dp, height = 13.dp)
+                    SkeletonBar(width = (210 - (index % 4) * 26).dp, height = 11.dp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SkeletonBar(width: androidx.compose.ui.unit.Dp, height: androidx.compose.ui.unit.Dp) {
+    Box(
+        Modifier.width(width).height(height)
+            .clip(RoundedCornerShape(height / 2))
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+    )
 }
 
 /**

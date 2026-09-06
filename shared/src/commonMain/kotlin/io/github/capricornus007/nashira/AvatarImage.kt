@@ -46,7 +46,7 @@ fun AvatarImage(
             val media = client.di.get<MediaService>()
                 .getThumbnail(mxcUrl, 96, 96, maxSize = 512_000)
                 .getOrNull()
-            val decoded = media?.toByteArray(this)?.let { decodeImageBitmap(it) }
+            val decoded = media?.toByteArray(this)?.let { decodeImageBitmap(it, maxDimension = 128) }
             if (decoded != null) {
                 cache.put(mxcUrl, decoded)
                 bitmap = decoded

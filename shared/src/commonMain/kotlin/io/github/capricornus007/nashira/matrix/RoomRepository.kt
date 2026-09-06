@@ -57,6 +57,10 @@ import de.connect2x.trixnity.core.model.events.m.TagEventContent
 import io.github.capricornus007.nashira.PickedFile
 import de.connect2x.trixnity.core.model.events.m.ReactionEventContent
 import de.connect2x.trixnity.core.model.events.m.RelatesTo
+import de.connect2x.trixnity.core.model.events.m.room.PinnedEventsEventContent
+import de.connect2x.trixnity.clientserverapi.model.push.SetPushRule
+import de.connect2x.trixnity.core.model.push.PushAction
+import de.connect2x.trixnity.core.model.push.PushRuleKind
 
 /** UI 友好的房間摘要 */
 data class RoomSummary(
@@ -146,6 +150,10 @@ data class TimelineMessage(
     val sendError: String? = null,
     /** 這則訊息上的反應：表情 → 統計。 */
     val reactions: Map<String, ReactionInfo> = emptyMap(),
+    /** 橋接訊息帶的 `external_url`（Telegram 橋等），有值才給「來源網址」。 */
+    val externalUrl: String? = null,
+    /** 這則訊息是否被圖釘（`m.room.pinned_events`）。 */
+    val pinned: Boolean = false,
 )
 
 /** 單一表情的反應統計。[mine] 非 null 表示自己按過，值是自己那則 reaction 事件（用來撤回）。 */
@@ -179,22 +187,31 @@ class RoomRepository(val client: MatrixClient) {
     private fun isSpace(room: Room): Boolean = room.type is CreateEventContent.RoomType.Space
 
     /** 全部已加入房間的摘要流（sync 後自動更新）。 */
-    @OptIn(ExperimentalCoroutinesApi::class)
+    /**
+     * 聊天室摘要。**這裡刻意不帶 m.tag**：摘要流被多處收（清單、貼圖面板、通知），
+     * 每個呼叫者都展開一次「每個房間一條標籤流」的 combine 會炸記憶體
+     * （實測 release 版直接 OutOfMemoryError）。標籤走 [tagsByRoom] 單獨收一次。
+     */
     fun roomSummaries(): Flow<List<RoomSummary>> =
         joinedRooms()
-            .map { rooms -> rooms.filterNot(::isSpace).map(::summaryOf) }
-            .flatMapLatest { summaries ->
-                if (summaries.isEmpty()) {
-                    flowOf(emptyList())
+            .map { rooms -> rooms.filterNot(::isSpace).map(::summaryOf).sortedByActivity() }
+            .flowOn(Dispatchers.Default)
+
+    /**
+     * 每個房間的 `m.tag` 集合，形狀與 [unreadByRoom] 一樣：整份收一次，由 UI 併進排序。
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun tagsByRoom(): Flow<Map<RoomId, Set<String>>> =
+        joinedRooms()
+            .map { rooms -> rooms.filterNot(::isSpace).map { it.roomId } }
+            .distinctUntilChanged()
+            .flatMapLatest { ids ->
+                if (ids.isEmpty()) {
+                    flowOf(emptyMap())
                 } else {
-                    // 標籤要進排序：不然「收藏／低優先」按了只是寫給別的客戶端看，
-                    // Nashira 自己的清單毫無變化，使用者當然覺得那兩個選項沒作用。
-                    combine(summaries.map { summary -> tagsOf(summary.roomId).map { summary.copy(tags = it) } }) {
-                        it.toList().sortedByTagsAndActivity()
-                    }
-                        // combine 要等每個房間的標籤流都先發一次才會有第一次輸出；
-                        // 冷啟動時那段空白會讓清單看起來像「還沒同步」。先給不帶標籤的排序結果。
-                        .onStart { emit(summaries.sortedByTagsAndActivity()) }
+                    combine(ids.map { id -> tagsOf(id).map { id to it } }) { it.toMap() }
+                        // combine 要等每條標籤流都先發一次才有第一次輸出，先給空的免得清單空等
+                        .onStart { emit(emptyMap()) }
                 }
             }
             .flowOn(Dispatchers.Default)
@@ -375,20 +392,21 @@ class RoomRepository(val client: MatrixClient) {
             .distinctUntilChanged()
             .flowOn(Dispatchers.Default)
 
+    /** 單一房間的顯示名（通知用；不要為了一個名字展開整份摘要流）。 */
+    suspend fun roomName(roomId: RoomId): String? =
+        client.room.getById(roomId).firstOrNull()?.let { displayNameOf(it) }
+
     /**
      * 單一成員的顯示名。**通知路徑必須用這個而不是 [members]**：members 為了不卡住大房
      * 會先發一次空表（大房 membersLoaded=false 時 getAll 根本不發），
      * 取 first() 就永遠拿到空的、於是每個發送者都退回 localpart。
-     * 這裡直接讀單一成員，讀不到才觸發一次載入再試。
      *
-     * 回 null 的情況是該帳號在 Matrix 側真的沒有可用顯示名（Telegram 橋接使用者常見：
-     * displayname 只由不可見字元組成），這種情況所有客戶端都只能顯示 localpart。
+     * **只讀 store，絕不呼叫 loadMembers**：那會把整個房間的成員抓進記憶體，
+     * 而一則通知可能來自任何房間——實測幾千人的房間連續觸發幾次就把 Android 的
+     * 256MB 堆積填滿並 OOM。讀不到就退回 localpart，等房間開起來時成員自然會載入。
      */
-    suspend fun memberName(roomId: RoomId, userId: UserId): String? {
-        client.user.getById(roomId, userId).firstOrNull()?.name.visibleNameOrNull()?.let { return it }
-        runCatching { client.user.loadMembers(roomId) }
-        return client.user.getById(roomId, userId).firstOrNull()?.name.visibleNameOrNull()
-    }
+    suspend fun memberName(roomId: RoomId, userId: UserId): String? =
+        client.user.getById(roomId, userId).firstOrNull()?.name.visibleNameOrNull()
 
     /** 單一成員的頭像；私訊沒有房間頭像時用對方的頭像（與 Element 行為一致）。 */
     fun memberAvatar(roomId: RoomId, userId: UserId): Flow<String?> =
@@ -410,25 +428,38 @@ class RoomRepository(val client: MatrixClient) {
      */
     fun timeline(roomId: RoomId): RoomTimeline = RoomTimeline(client, roomId, memberMap(roomId))
 
-    /** 聊天室清單的最後一則訊息預覽（含發送者），對齊 Discord 的兩行列。 */
+    /**
+     * 聊天室清單第二行的預覽。
+     *
+     * **只查發送者一個人，不能用 [memberMap]**：memberMap 會 loadMembers，
+     * 而清單上每個房間都有預覽 —— 幾十個房間、其中幾個有數千名成員，
+     * 一次把全部成員抓進記憶體，實測 Android 端在啟動約 20 秒後就把 256MB 堆積填滿並 OOM
+     * （堆積裡全是小物件、LOS 為 0，正是成員事件而不是位圖）。
+     * 查不到成員就退回 localpart：預覽只有一行，房間開起來時名字自然會補齊。
+     */
     @OptIn(ExperimentalCoroutinesApi::class)
     fun lastMessage(roomId: RoomId): Flow<TimelineMessage?> =
         client.room.getLastTimelineEvent(roomId)
             .flatMapLatest { eventFlow -> eventFlow ?: flowOf(null) }
-            .combine(memberMap(roomId)) { timelineEvent, members ->
-                val roomEvent = timelineEvent?.event ?: return@combine null
-                val body = timelineEvent.messageBodyOrNull() ?: return@combine null
-                val member = members[roomEvent.sender]
-                TimelineMessage(
-                    eventId = roomEvent.id,
-                    roomId = roomId,
-                    sender = roomEvent.sender,
-                    senderName = member?.name.visibleNameOrNull()
-                        ?: roomEvent.sender.full.removePrefix("@").substringBefore(':'),
-                    senderAvatarUrl = member?.event?.content?.avatarUrl,
-                    body = body,
-                    timestamp = roomEvent.originTimestamp,
-                )
+            .flatMapLatest { timelineEvent ->
+                val roomEvent = timelineEvent?.event
+                val body = timelineEvent?.messageBodyOrNull()
+                if (roomEvent == null || body == null) {
+                    flowOf(null)
+                } else {
+                    client.user.getById(roomId, roomEvent.sender).map { member ->
+                        TimelineMessage(
+                            eventId = roomEvent.id,
+                            roomId = roomId,
+                            sender = roomEvent.sender,
+                            senderName = member?.name.visibleNameOrNull()
+                                ?: roomEvent.sender.full.removePrefix("@").substringBefore(':'),
+                            senderAvatarUrl = member?.event?.content?.avatarUrl,
+                            body = body,
+                            timestamp = roomEvent.originTimestamp,
+                        )
+                    }
+                }
             }
             .distinctUntilChanged()
             .flowOn(Dispatchers.Default)
@@ -502,6 +533,60 @@ class RoomRepository(val client: MatrixClient) {
         client.api.room.getTags(client.userId, roomId).getOrNull()
             ?.tags?.keys?.map { it.name }?.toSet()
             ?: emptySet()
+
+    /** 目前被圖釘的事件（`m.room.pinned_events`）。 */
+    fun pinnedEvents(roomId: RoomId): Flow<List<EventId>> =
+        client.room.getState<PinnedEventsEventContent>(roomId)
+            .map { event -> event?.content?.pinned.orEmpty() }
+            .distinctUntilChanged()
+
+    /**
+     * 圖釘／取消圖釘一則訊息。整份清單是一個 state 事件，所以要先讀現況再整份寫回；
+     * 沒有 `m.room.pinned_events` 的權限時伺服器會拒（M_FORBIDDEN）。
+     */
+    suspend fun togglePin(roomId: RoomId, eventId: EventId, pinned: Boolean): Result<Unit> =
+        runCatching {
+            val current = client.room.getState<PinnedEventsEventContent>(roomId)
+                .firstOrNull()?.content?.pinned.orEmpty()
+            val next = if (pinned) {
+                if (eventId in current) current else current + eventId
+            } else {
+                current - eventId
+            }
+            client.api.room.sendStateEvent(roomId, PinnedEventsEventContent(next)).getOrThrow()
+            Unit
+        }
+
+    /**
+     * 這個房間是否被靜音。
+     *
+     * 靜音在 Matrix 就是一條 `room` kind 的推播規則：rule_id 是房間 ID、actions 為空
+     *（Element 按下靜音寫的就是這個，所以所有客戶端共用同一份狀態）。
+     */
+    suspend fun isMuted(roomId: RoomId): Boolean {
+        val rules = client.api.push.getPushRules().getOrNull() ?: return false
+        return rules.global.room.orEmpty().any { rule ->
+            rule.ruleId == roomId.full && rule.enabled && rule.actions.none { it is PushAction.Notify }
+        }
+    }
+
+    /**
+     * 靜音／取消靜音。靜音＝新增一條 actions 為空的 room 規則；
+     * 取消＝把那條規則刪掉（回到預設規則，該通知就通知）。
+     */
+    suspend fun setMuted(roomId: RoomId, muted: Boolean): Result<Unit> = runCatching {
+        if (muted) {
+            client.api.push.setPushRule(
+                scope = "global",
+                kind = PushRuleKind.ROOM,
+                ruleId = roomId.full,
+                pushRule = SetPushRule.Request(actions = emptySet()),
+            ).getOrThrow()
+        } else {
+            client.api.push.deletePushRule("global", PushRuleKind.ROOM, roomId.full).getOrThrow()
+        }
+        Unit
+    }
 
     /** 離開房間或 Space。 */
     suspend fun leave(roomId: RoomId): Result<Unit> =
