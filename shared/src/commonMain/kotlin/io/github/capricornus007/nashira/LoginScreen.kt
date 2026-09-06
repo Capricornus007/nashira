@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
@@ -47,6 +48,13 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        // 寬視窗（桌面）別把輸入框拉成整屏寬：限寬置中，Element/Discord 登入頁同款。
+        // 手機屏寬 < 480dp 時 fillMaxWidth 不受影響。
+        Column(
+            modifier = Modifier.fillMaxWidth().widthIn(max = 420.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
         Text(
             strings.appName,
             style = MaterialTheme.typography.headlineMedium,
@@ -117,6 +125,7 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
                 )
             }
             Text(strings.loginSubmit)
+        }
         }
     }
 }
