@@ -76,6 +76,11 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
     /** 送出鍵；其餘 Enter 組合換行。 */
     var sendShortcut by mutableStateOf(stored.enumOr("sendShortcut", SendShortcut.ENTER))
 
+    /** 被隱藏的媒體（mxc 網址）。「隱藏圖片」後時間線改畫佔位，點佔位恢復。 */
+    var hiddenMedia by mutableStateOf(
+        stored["hiddenMedia"]?.split('\n')?.filter { it.isNotBlank() }?.toSet() ?: emptySet()
+    )
+
     init {
         loaded = true
     }
@@ -96,6 +101,7 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
             "membersPanelOpen" to membersPanelOpen.toString(),
             "backgroundSync" to backgroundSync.toString(),
             "sendShortcut" to sendShortcut.name,
+            "hiddenMedia" to hiddenMedia.joinToString("\n"),
         ) + (accent?.let { mapOf("accent" to it.name) } ?: emptyMap())
         if (snapshot == lastPersisted) return
         lastPersisted = snapshot

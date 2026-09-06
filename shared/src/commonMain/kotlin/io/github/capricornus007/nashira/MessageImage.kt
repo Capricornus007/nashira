@@ -1,6 +1,7 @@
 package io.github.capricornus007.nashira
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
@@ -26,6 +27,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import de.connect2x.trixnity.client.MatrixClient
 import de.connect2x.trixnity.client.media.MediaService
+import de.connect2x.trixnity.utils.toByteArray
 import kotlinx.coroutines.delay
 import io.github.capricornus007.nashira.matrix.MediaSource
 
@@ -49,6 +51,10 @@ fun MessageImage(
     caption: String,
     modifier: Modifier = Modifier,
     mimeType: String? = null,
+    /** 點圖開全螢幕檢視器；null（例如被隱藏的佔位）就不吃點擊。 */
+    onOpen: (() -> Unit)? = null,
+    /** 隱藏時顯示的佔位文案；null 表示未隱藏。 */
+    hiddenLabel: String? = null,
 ) {
     val key = remember(source) { source.cacheKey() }
     var bitmap by remember(key) { mutableStateOf(MediaBitmapCache.get(key)) }
@@ -96,10 +102,24 @@ fun MessageImage(
         .then(if (isSticker) Modifier else Modifier.clip(RoundedCornerShape(12.dp)))
     val loaded = bitmap
     when {
+        // 隱藏的圖片：佔位可點擊恢復（Element 的「隱藏」也是可逆的）
+        hiddenLabel != null -> Box(
+            frame.fillMaxWidth().height(96.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                hiddenLabel,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         loaded != null -> Image(
             bitmap = loaded,
             contentDescription = caption.takeIf { it.isNotBlank() },
-            modifier = frame.fillMaxWidth().aspectRatio(ratio),
+            modifier = frame
+                .fillMaxWidth()
+                .aspectRatio(ratio)
+                .then(if (onOpen != null) Modifier.clickable(onClick = onOpen) else Modifier),
             contentScale = if (isSticker) ContentScale.Fit else ContentScale.Crop,
         )
         // 載入失敗就退回檔名，至少看得出這裡本來有東西
@@ -167,4 +187,14 @@ internal object MediaBitmapCache {
             entries.remove(oldest)?.let { bytes -= sizeOf(it) }
         }
     }
+}
+
+/** 抓原檔位元組（檢視器與「下載」選單共用；32MB 上限擋異常大檔）。 */
+internal suspend fun fetchMediaBytes(client: MatrixClient, source: MediaSource): ByteArray? {
+    val service = client.di.get<MediaService>()
+    val media = when (source) {
+        is MediaSource.Plain -> service.getMedia(source.mxcUrl, maxSize = 32L * 1024 * 1024)
+        is MediaSource.Encrypted -> service.getEncryptedMedia(source.file, maxSize = 32L * 1024 * 1024)
+    }.getOrNull() ?: return null
+    return kotlinx.coroutines.coroutineScope { runCatching { media.toByteArray(this) }.getOrNull() }
 }

@@ -124,6 +124,7 @@ import de.connect2x.trixnity.client.room
 import io.github.capricornus007.nashira.i18n.stringsFor
 import io.github.capricornus007.nashira.matrix.MatrixSession
 import io.github.capricornus007.nashira.matrix.RoomRepository
+import io.github.capricornus007.nashira.matrix.MediaSource
 import io.github.capricornus007.nashira.matrix.RoomSummary
 import de.connect2x.trixnity.core.model.RoomId
 import io.github.capricornus007.nashira.matrix.UnreadState
@@ -1254,6 +1255,14 @@ private fun TimelinePane(
     var viewSourceLoading by remember(room.roomId) { mutableStateOf(false) }
     // 「轉寄」選目標房間
     var forwardTarget by remember(room.roomId) { mutableStateOf<TimelineMessage?>(null) }
+    // 全螢幕圖片檢視器與下載結果提示
+    var viewerTarget by remember(room.roomId) { mutableStateOf<MessageBody.Image?>(null) }
+    // 刪除確認：Discord 式「不可復原」+ Element 式選填原因（redact reason）
+    var deleteTarget by remember(room.roomId) { mutableStateOf<TimelineMessage?>(null) }
+    var deleteReason by remember(room.roomId) { mutableStateOf("") }
+    var downloadNotice by remember(room.roomId) { mutableStateOf<String?>(null) }
+    val imageSaver = rememberImageSaver()
+    val uiState = LocalUiState.current
     val stickerPanelContent: @Composable (Modifier) -> Unit = { panelModifier ->
         StickerPicker(
             roomRepository = roomRepository,
@@ -1364,6 +1373,14 @@ private fun TimelinePane(
                         it,
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
+                    )
+                }
+                downloadNotice?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
                     )
                 }
@@ -1570,12 +1587,8 @@ private fun TimelinePane(
                             }
                         },
                         onDelete = {
-                            msg.eventId?.let { id ->
-                                scope.launch {
-                                    roomRepository.redact(room.roomId, id)
-                                        .onFailure { sendError = io.github.capricornus007.nashira.i18n.friendlyError(it) }
-                                }
-                            }
+                            deleteReason = ""
+                            deleteTarget = msg
                         },
                         onTogglePin = {
                             msg.eventId?.let { id ->
@@ -1584,6 +1597,26 @@ private fun TimelinePane(
                                         .onFailure { sendError = io.github.capricornus007.nashira.i18n.friendlyError(it) }
                                 }
                             }
+                        },
+                        onOpenImage = { viewerTarget = it },
+                        onDownloadImage = { img ->
+                            scope.launch {
+                                val bytes = fetchMediaBytes(roomRepository.client, img.source)
+                                if (bytes == null) {
+                                    downloadNotice = strings.downloadFailed
+                                } else {
+                                    imageSaver(bytes, img.caption.ifBlank { "nashira-media" }, img.mimeType ?: "image/png")
+                                        .onSuccess { downloadNotice = it }
+                                        .onFailure { downloadNotice = strings.downloadFailed }
+                                }
+                            }
+                        },
+                        onHideImage = { img ->
+                            val mxc: String? = when (val s = img.source) {
+                                is MediaSource.Plain -> s.mxcUrl
+                                is MediaSource.Encrypted -> s.file.url
+                            }
+                            if (mxc != null) uiState.hiddenMedia = uiState.hiddenMedia + mxc
                         },
                         onViewSource = {
                             msg.eventId?.let { id ->
@@ -1773,6 +1806,81 @@ private fun TimelinePane(
             },
         )
     }
+    // 刪除確認（Telegram/Discord 式）：預覽 + 選填原因直通 redact
+    deleteTarget?.let { msg ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            confirmButton = {
+                TextButton(onClick = {
+                    val id = msg.eventId
+                    deleteTarget = null
+                    if (id != null) {
+                        val reason = deleteReason.trim().ifEmpty { null }
+                        scope.launch {
+                            roomRepository.redact(room.roomId, id, reason)
+                                .onFailure { sendError = io.github.capricornus007.nashira.i18n.friendlyError(it) }
+                        }
+                    }
+                }) {
+                    Text(
+                        strings.actionDelete,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
+            },
+            dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text(strings.cancel) } },
+            title = { Text(strings.deleteConfirmTitle) },
+            text = {
+                Column {
+                    // 被刪對象的預覽：sender + 內容摘要，避免刪錯（Telegram 同款）
+                    Text(
+                        msg.senderName,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        msg.body.previewText(strings),
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        strings.deleteCannotUndo,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 6.dp, bottom = 10.dp),
+                    )
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        BasicTextField(
+                            value = deleteReason,
+                            onValueChange = { deleteReason = it },
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                        )
+                    }
+                }
+            },
+        )
+    }
+
+
+    // 全螢幕圖片檢視器：雙指縮放／雙擊縮放／下載
+    viewerTarget?.let { img ->
+        ImageViewer(
+            client = roomRepository.client,
+            source = img.source,
+            caption = img.caption,
+            fileName = img.caption.ifBlank { "nashira-media" },
+            mimeType = img.mimeType,
+            onDismiss = { viewerTarget = null },
+        )
+    }
 }
 
 
@@ -1875,6 +1983,9 @@ private fun MessageRow(
     onForward: () -> Unit,
     onToggleReaction: (String, EventId?) -> Unit,
     onTogglePin: () -> Unit,
+    onOpenImage: (MessageBody.Image) -> Unit = {},
+    onDownloadImage: (MessageBody.Image) -> Unit = {},
+    onHideImage: (MessageBody.Image) -> Unit = {},
 ) {
     var menuOpen by remember(msg.eventId) { mutableStateOf(false) }
     var menuAnchor by remember(msg.eventId) { mutableStateOf(Offset.Unspecified) }
@@ -1927,6 +2038,7 @@ private fun MessageRow(
                     modifier = Modifier
                         .padding(top = if (grouped) 0.dp else 2.dp)
                         .alpha(if (msg.pending && msg.sendError == null) 0.55f else 1f),
+                    onOpenImage = onOpenImage,
                 )
                 msg.sendError?.let {
                     Text(
@@ -2043,6 +2155,11 @@ private fun MessageRow(
                 }
                 ContextMenuItem(strings.actionViewSource) { menuOpen = false; onViewSource() }
                 ContextMenuItem(strings.actionForward) { menuOpen = false; onForward() }
+                (msg.body as? MessageBody.Image)?.let { img ->
+                    ContextMenuItem(strings.actionDownload) { menuOpen = false; onDownloadImage(img) }
+                    // 貼圖沒有「隱藏」——它本來就是內容本體，不是敏感縮圖
+                    if (!img.isSticker) ContextMenuItem(strings.actionHideImage) { menuOpen = false; onHideImage(img) }
+                }
                 if (isOwn) {
                     ContextMenuItem(strings.actionDelete, destructive = true) { menuOpen = false; onDelete() }
                 }
@@ -2058,7 +2175,9 @@ private fun MessageBodyContent(
     body: MessageBody,
     strings: io.github.capricornus007.nashira.i18n.Strings,
     modifier: Modifier = Modifier,
+    onOpenImage: ((MessageBody.Image) -> Unit)? = null,
 ) {
+    val ui = LocalUiState.current
     when (body) {
         is MessageBody.Text -> Text(
             body.text,
@@ -2066,16 +2185,30 @@ private fun MessageBodyContent(
             color = MaterialTheme.colorScheme.onSurface,
             modifier = modifier,
         )
-        is MessageBody.Image -> MessageImage(
-            client = client,
-            source = body.source,
-            width = body.width,
-            height = body.height,
-            isSticker = body.isSticker,
-            caption = body.caption,
-            modifier = modifier,
-            mimeType = body.mimeType,
-        )
+        is MessageBody.Image -> {
+            val mxc: String? = when (val s = body.source) {
+                is MediaSource.Plain -> s.mxcUrl
+                is MediaSource.Encrypted -> s.file.url
+            }
+            val hidden = mxc != null && mxc in ui.hiddenMedia
+            MessageImage(
+                client = client,
+                source = body.source,
+                width = body.width,
+                height = body.height,
+                isSticker = body.isSticker,
+                caption = body.caption,
+                modifier = modifier,
+                mimeType = body.mimeType,
+                onOpen = if (hidden) {
+                    // 佔位點一下直接取消隱藏，不用再進選單
+                    { if (mxc != null) ui.hiddenMedia = ui.hiddenMedia - mxc }
+                } else {
+                    onOpenImage?.let { open -> { open(body) } }
+                },
+                hiddenLabel = if (hidden) strings.hiddenImage else null,
+            )
+        }
         is MessageBody.Attachment -> Text(
             "📎 ${body.name}",
             style = MaterialTheme.typography.bodyMedium,

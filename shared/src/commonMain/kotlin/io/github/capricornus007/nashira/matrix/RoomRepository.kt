@@ -509,7 +509,6 @@ class RoomRepository(val client: MatrixClient) {
         val event = client.api.room.getEvent(roomId, eventId).getOrThrow()
         val mappings = client.di.get<EventContentSerializerMappings>()
         val json = Json {
-            serializersModule = createMatrixEventSerializersModule(mappings)
             prettyPrint = true
             prettyPrintIndent = "  "
             encodeDefaults = false
@@ -619,9 +618,9 @@ class RoomRepository(val client: MatrixClient) {
             }
         }
 
-    /** 撤回訊息（m.room.redaction）。只有自己的訊息或有權限時伺服器才會接受。 */
-    suspend fun redact(roomId: RoomId, eventId: EventId): Result<Unit> =
-        runCatching { client.api.room.redactEvent(roomId, eventId).getOrThrow() }.map { }
+    /** 撤回訊息（m.room.redaction）。只有自己的訊息或有權限時伺服器才會接受。[reason] 會顯示給其他客戶端。 */
+    suspend fun redact(roomId: RoomId, eventId: EventId, reason: String? = null): Result<Unit> =
+        runCatching { client.api.room.redactEvent(roomId, eventId, reason).getOrThrow() }.map { }
 
     /**
      * 標記／取消標記未讀（MSC2867 `m.marked_unread`）。
