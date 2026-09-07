@@ -57,18 +57,22 @@ object AppNotifications {
 @OptIn(ExperimentalCoroutinesApi::class)
 internal suspend fun watchNotifications(client: MatrixClient, myUserId: UserId) {
     val rooms = RoomRepository(client)
-    // 前台完全不訂閱：getNotifications 會把 sync 回來的每一則事件都解密並過推播規則，
-    // 啟動時幾十個房間一起來，暫時分配會衝到數百 MB（實測 Java heap 峰值 512MB）。
-    // 前台本來就不發通知，所以直接不收；退到背景才開始收。
+    // flatMapLatest 重新進入背景時，Trixnity 可能重播通知流中已有事件；以事件 ID
+    // 去重，避免同一則同步事件再次觸發 Android/Desktop 系統通知。只保留有限窗口，
+    // 避免長時間同步讓這個觀察器無界增長。
+    val notifiedEventIds = LinkedHashSet<String>()
     AppNotifications.foreground
         .flatMapLatest { inForeground ->
             if (inForeground) emptyFlow() else client.notification.getNotifications()
         }
         .collect { notification ->
-            // 規則說要通知才通知（Trixnity 只發需要通知的事件，這裡是保險）
             if (notification.actions.none { it is PushAction.Notify }) return@collect
             val event = notification.event as? ClientEvent.RoomEvent.MessageEvent<*> ?: return@collect
             if (event.sender == myUserId) return@collect
+            if (!notifiedEventIds.add(event.id.full)) return@collect
+            if (notifiedEventIds.size > MaxRememberedNotificationIds) {
+                notifiedEventIds.remove(notifiedEventIds.first())
+            }
             val strings = stringsFor(persistedLanguage())
             val body = event.content.messageBodyOrNull() ?: return@collect
             val text = when (body) {
@@ -96,3 +100,5 @@ private fun persistedLanguage(): AppLanguage {
     val stored = runCatching { SettingsStorage().load() }.getOrNull()?.get("language")
     return AppLanguage.entries.firstOrNull { it.name == stored } ?: AppLanguage.ZH_TW
 }
+
+private const val MaxRememberedNotificationIds = 512
