@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -23,7 +24,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.capricornus007.nashira.i18n.stringsFor
 import io.github.capricornus007.nashira.theme.NashiraGold
@@ -32,7 +32,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -41,29 +40,24 @@ import androidx.compose.ui.draw.clip
 /**
  * 啟動頁：磁碟有登入憑證、但 MatrixClient 還在開庫時顯示。
  *
- * **形態是「聊天室清單的骨架」而不是品牌啟動畫面**。實機錄影逐幀對照
- * moregramX(Telegram)：它 1.5 秒就畫出應用框架（標題列＋底部欄＋空清單），
- * 2.0 秒填上本機快取的清單，同步狀態只用標題列的一行小字提示，
- * 全程沒有佔滿畫面的轉圈。Nashira 原本擺一張居中品牌圖＋轉圈到開庫結束，
- * 同樣的等待時間會被讀成「還沒開始同步」。骨架跟真清單同構，切換時不跳版。
+ * **形態對照真機冷啟動錄屏（2026-09-07）**：Telegram 與 Discord 都是
+ * 「全屏 splash——品牌標記 + 置中轉圈 + 一行小字」，載入指示在正中央
+ * （y50%），不是中上也不是中下。骨架清單形態曾在此用過，實測被評
+ * 「太醜」；骨架只留在 ChannelPane（清單已出現、還在同步的階段）。
  */
 @Composable
 fun StartupScreen() {
     val strings = stringsFor(LocalUiState.current.language)
-    Column(modifier = Modifier.fillMaxSize()) {
-        // 標題列：跟 ChannelPane 同高同位置，真清單接上時不位移
-        Row(
-            modifier = Modifier.fillMaxWidth().statusBarsPadding().height(56.dp)
-                .padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            NashiraMark(Modifier.size(24.dp))
-            Text(
-                strings.allRooms,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                fontWeight = FontWeight.Bold,
+            NashiraMark(Modifier.size(72.dp))
+            CircularProgressIndicator(
+                modifier = Modifier.size(28.dp),
+                strokeWidth = 3.dp,
+                color = NashiraGold,
             )
             Text(
                 strings.restoringSession,
@@ -71,21 +65,6 @@ fun StartupScreen() {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        // 搜尋膠囊佔位
-        Box(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)
-                .height(40.dp).clip(RoundedCornerShape(20.dp))
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
-        )
-        // 載入指示：細掃線掛在「清單頭部」而不是視窗底邊——貼著底邊來回掃
-        // 看起來像一條位置詭異的進度條（2026-09-07 桌面端實測被打回）。
-        // Discord 的載入條也在頻道列表頂部。
-        Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp), contentAlignment = Alignment.CenterStart) {
-            SweepIndicator()
-        }
-        // 清單列佔位：頭像圓 + 兩行長條，尺寸對齊 RoomListItem
-        RoomListSkeleton()
-        Box(Modifier.fillMaxWidth().weight(1f))
     }
 }
 
@@ -186,32 +165,3 @@ private fun NashiraMark(modifier: Modifier) {
 
 private val StarBlue = Color(0xFFAEC1F5)
 
-/** 細線載入指示：金色線段在軌道上來回掠過，掛在清單頭部（Discord 頻道列表頂部同款）。 */
-@Composable
-private fun SweepIndicator() {
-    val transition = rememberInfiniteTransition(label = "startup_sweep")
-    val progress by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1100, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "sweep",
-    )
-    val track = MaterialTheme.colorScheme.surfaceContainerHighest
-    val head = MaterialTheme.colorScheme.primary
-    Canvas(Modifier.size(width = 120.dp, height = 3.dp)) {
-        val y = size.height / 2f
-        drawLine(track, Offset(0f, y), Offset(size.width, y), strokeWidth = size.height, cap = StrokeCap.Round)
-        val segment = size.width * 0.32f
-        val start = (size.width - segment) * progress
-        drawLine(
-            head,
-            Offset(start, y),
-            Offset(start + segment, y),
-            strokeWidth = size.height,
-            cap = StrokeCap.Round,
-        )
-    }
-}
