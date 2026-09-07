@@ -83,6 +83,15 @@ data class RoomSummary(
     val tags: Set<String> = emptySet(),
 )
 
+data class PublicRoom(
+    val roomId: RoomId,
+    val name: String,
+    val alias: String?,
+    val topic: String,
+    val avatarUrl: String?,
+    val joinedMembersCount: Long,
+)
+
 /** Space／房間的未讀狀態：Discord 用小白點表示有未讀、紅圈數字表示提及數。 */
 data class UnreadState(
     val unread: Boolean = false,
@@ -782,6 +791,26 @@ class RoomRepository(val client: MatrixClient) {
         client.room.sendMessage(roomId) {
             content(content)
         }
+    }
+
+    /** 公開聊天室目錄：只查公開房間，不改動本地同步資料。 */
+    suspend fun publicRooms(search: String = ""): Result<List<PublicRoom>> = runCatching {
+        val response = client.api.room.getPublicRooms(limit = 50, since = null, server = null).getOrThrow()
+        val query = search.trim()
+        response.chunk.mapNotNull { room ->
+            val roomId = room.roomId
+            val name = room.name ?: room.canonicalAlias?.full ?: roomId.full
+            val alias = room.canonicalAlias?.full
+            val topic = room.topic.orEmpty()
+            val haystack = listOf(name, alias.orEmpty(), topic).joinToString(" ")
+            if (query.isNotEmpty() && !haystack.contains(query, ignoreCase = true)) return@mapNotNull null
+            PublicRoom(roomId, name, alias, topic, room.avatarUrl, room.joinedMembersCount)
+        }
+    }
+
+    suspend fun joinPublicRoom(roomId: RoomId): Result<Unit> = runCatching {
+        client.api.room.joinRoom(roomId).getOrThrow()
+        Unit
     }
 }
 

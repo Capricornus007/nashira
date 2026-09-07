@@ -179,6 +179,7 @@ fun ChatScreen(
     var selectedSpace by remember { mutableStateOf<SpaceSummary?>(null) }
     var mobileRoomOpen by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
+    var directoryOpen by remember { mutableStateOf(false) }
     val roomRepository = remember(session) { RoomRepository(session.client) }
     val syncState by session.client.syncState.collectAsState()
     val spaceIconMode = LocalUiState.current.spaceIconMode
@@ -243,21 +244,19 @@ fun ChatScreen(
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val compact = maxWidth < 720.dp
+        PlatformBackHandler(enabled = directoryOpen) { directoryOpen = false }
         PlatformBackHandler(enabled = settingsOpen) { settingsOpen = false }
-        PlatformBackHandler(enabled = !settingsOpen && compact && mobileRoomOpen) { mobileRoomOpen = false }
-        // Discord 的使用者設定是從底部推上來的整頁，返回時往下退出
         AnimatedContent(
             targetState = settingsOpen,
             transitionSpec = {
-                if (targetState) {
-                    slideInVertically { it } togetherWith slideOutVertically { -it / 8 }
-                } else {
-                    slideInVertically { -it / 8 } togetherWith slideOutVertically { it }
-                }
+                if (targetState) slideInVertically { it } togetherWith slideOutVertically { -it / 8 }
+                else slideInVertically { -it / 8 } togetherWith slideOutVertically { it }
             },
             label = "settings_navigation",
         ) { showSettings ->
-            if (showSettings) {
+            if (directoryOpen) {
+                PublicRoomDirectory(roomRepository, strings) { directoryOpen = false }
+            } else if (showSettings) {
                 SettingsScreen(session, { settingsOpen = false }, onLogout)
             } else if (compact) {
                 MobileChatShell(
@@ -278,6 +277,7 @@ fun ChatScreen(
                     onOpen = { mobileRoomOpen = true },
                     onBack = { mobileRoomOpen = false },
                     onSettings = { settingsOpen = true },
+                    onOpenDirectory = { directoryOpen = true },
                     channelTitle = channelTitle,
                     accountId = accountId,
                     strings = strings,
@@ -310,6 +310,7 @@ fun ChatScreen(
                                 showPreview = showPreview,
                                 onSelect = { selected = it },
                                 channelTitle = channelTitle,
+                                onOpenDirectory = { directoryOpen = true },
                                 strings = strings,
                                 syncState = syncState,
                             )
@@ -332,13 +333,95 @@ fun ChatScreen(
                             )
                         } ?: EmptyTimeline(strings.noRoomSelected)
                     }
-                    // 成員欄由標題列的人物圖示切換（Discord／Element 都不是一進房就展開）
                     AnimatedVisibility(
                         visible = LocalUiState.current.membersPanelOpen,
                         enter = slideInHorizontally { it },
                         exit = slideOutHorizontally { it },
                     ) {
                         MemberPane(session, roomRepository, selected)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PublicRoomDirectory(
+    roomRepository: RoomRepository,
+    strings: io.github.capricornus007.nashira.i18n.Strings,
+    onClose: () -> Unit,
+) {
+    var query by remember { mutableStateOf("") }
+    var rooms by remember { mutableStateOf<List<io.github.capricornus007.nashira.matrix.PublicRoom>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var joining by remember { mutableStateOf<RoomId?>(null) }
+    val scope = rememberCoroutineScope()
+    fun reload() {
+        scope.launch {
+            loading = true
+            error = null
+            roomRepository.publicRooms(query).fold(
+                onSuccess = { rooms = it },
+                onFailure = { error = it.message ?: "Unable to load public rooms" },
+            )
+            loading = false
+        }
+    }
+    LaunchedEffect(Unit) { reload() }
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(strings.findOrStartConversation) },
+                navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.Filled.ArrowBack, contentDescription = strings.back) } },
+            )
+        },
+    ) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                singleLine = true,
+                label = { Text(strings.search) },
+                trailingIcon = { IconButton(onClick = { reload() }) { Icon(Icons.Filled.Search, contentDescription = strings.search) } },
+            )
+            LaunchedEffect(query) {
+                kotlinx.coroutines.delay(350)
+                reload()
+            }
+            when {
+                loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                error != null -> Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(error!!, color = MaterialTheme.colorScheme.error)
+                    TextButton(onClick = { reload() }) { Text(strings.search) }
+                }
+                rooms.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(strings.noSearchResults) }
+                else -> LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 16.dp)) {
+                    items(rooms, key = { it.roomId.full }) { room ->
+                        Surface(Modifier.fillMaxWidth(), tonalElevation = 2.dp, shape = RoundedCornerShape(10.dp)) {
+                            Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(room.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(room.alias ?: room.roomId.full, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    if (room.topic.isNotBlank()) Text(room.topic, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    Text("${room.joinedMembersCount} members", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                Button(
+                                    enabled = joining == null,
+                                    onClick = {
+                                        joining = room.roomId
+                                        scope.launch {
+                                            roomRepository.joinPublicRoom(room.roomId)
+                                                .onSuccess { onClose() }
+                                                .onFailure { error = it.message ?: "Unable to join room" }
+                                            joining = null
+                                        }
+                                    },
+                                ) { Text(strings.add) }
+                            }
+                        }
                     }
                 }
             }
@@ -365,6 +448,7 @@ private fun MobileChatShell(
     onOpen: () -> Unit,
     onBack: () -> Unit,
     onSettings: () -> Unit,
+    onOpenDirectory: () -> Unit,
     channelTitle: String,
     accountId: String,
     strings: io.github.capricornus007.nashira.i18n.Strings,
@@ -444,6 +528,7 @@ private fun MobileChatShell(
                     showPreview = showPreview,
                     onSelect = onSelect,
                     channelTitle = channelTitle,
+                    onOpenDirectory = onOpenDirectory,
                     strings = strings,
                     syncState = syncState,
                     modifier = Modifier.weight(1f).fillMaxHeight(),
@@ -736,6 +821,7 @@ private fun ChannelPane(
     showPreview: Boolean,
     onSelect: (RoomSummary) -> Unit,
     channelTitle: String,
+    onOpenDirectory: () -> Unit,
     strings: io.github.capricornus007.nashira.i18n.Strings,
     syncState: SyncState,
     modifier: Modifier = Modifier,
@@ -772,15 +858,7 @@ private fun ChannelPane(
                     textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
                     cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                     decorationBox = { inner ->
-                        if (query.isEmpty()) {
-                            Text(
-                                strings.findOrStartConversation,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
+                        if (query.isEmpty()) Text(strings.findOrStartConversation, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         inner()
                     },
                 )
@@ -788,6 +866,9 @@ private fun ChannelPane(
                     IconButton(onClick = { query = "" }, modifier = Modifier.size(24.dp)) {
                         Icon(Icons.Filled.Close, contentDescription = strings.clearSearch, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                     }
+                }
+                IconButton(onClick = onOpenDirectory, modifier = Modifier.size(30.dp)) {
+                    Icon(Icons.Filled.Add, contentDescription = strings.add, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                 }
             }
         }
