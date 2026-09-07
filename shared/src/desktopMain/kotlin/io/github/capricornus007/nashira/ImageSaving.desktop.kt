@@ -14,7 +14,7 @@ import javax.swing.filechooser.FileNameExtensionFilter
 actual fun rememberImageSaver(): suspend (bytes: ByteArray, fileName: String, mimeType: String) -> Result<String> =
     remember {
         saver@{ bytes, fileName, _ ->
-            val target = withContext(Dispatchers.Main.immediate) {
+            val target = withContext(Dispatchers.IO) {
                 chooseSaveTarget(fileName)
             } ?: return@saver Result.failure(CancellationException("cancelled"))
             withContext(Dispatchers.IO) {
