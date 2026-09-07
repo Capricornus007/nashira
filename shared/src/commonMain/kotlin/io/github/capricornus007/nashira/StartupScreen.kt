@@ -77,10 +77,15 @@ fun StartupScreen() {
                 .height(40.dp).clip(RoundedCornerShape(20.dp))
                 .background(MaterialTheme.colorScheme.surfaceContainerHigh),
         )
+        // 載入指示：細掃線掛在「清單頭部」而不是視窗底邊——貼著底邊來回掃
+        // 看起來像一條位置詭異的進度條（2026-09-07 桌面端實測被打回）。
+        // Discord 的載入條也在頻道列表頂部。
+        Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp), contentAlignment = Alignment.CenterStart) {
+            SweepIndicator()
+        }
         // 清單列佔位：頭像圓 + 兩行長條，尺寸對齊 RoomListItem
         RoomListSkeleton()
         Box(Modifier.fillMaxWidth().weight(1f))
-        SweepIndicator()
     }
 }
 
@@ -181,7 +186,7 @@ private fun NashiraMark(modifier: Modifier) {
 
 private val StarBlue = Color(0xFFAEC1F5)
 
-/** 底部細線指示：一段金色線段在軌道上來回掠過，比轉圈更安靜。 */
+/** 細線載入指示：金色線段在軌道上來回掠過，掛在清單頭部（Discord 頻道列表頂部同款）。 */
 @Composable
 private fun SweepIndicator() {
     val transition = rememberInfiniteTransition(label = "startup_sweep")
