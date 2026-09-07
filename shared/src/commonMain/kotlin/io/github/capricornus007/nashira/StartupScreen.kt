@@ -1,11 +1,5 @@
 package io.github.capricornus007.nashira
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,6 +18,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.capricornus007.nashira.i18n.stringsFor
 import io.github.capricornus007.nashira.theme.NashiraGold
@@ -61,20 +56,19 @@ fun StartupScreen() {
             )
             Text(
                 strings.restoringSession,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface,
             )
         }
     }
 }
-
 /** 骨架列數：填滿一屏就夠，多畫只是浪費。 */
 private const val SkeletonRows = 8
 
 /**
- * 聊天室清單骨架列。啟動頁與「清單還沒到、但已經在同步」的階段共用同一份，
- * 讓整段等待看起來是「內容正在長出來」而不是「空的 + 轉圈」
- *（逐幀對照 Telegram：它全程沒有佔畫面的轉圈）。
+ * 聊天室清單骨架列。只用在 ChannelPane「清單尚未到、但已經在同步」的階段；
+ * StartupScreen 本身是全屏置中 splash，不再渲染這份骨架。
  */
 @Composable
 fun RoomListSkeleton(modifier: Modifier = Modifier, rows: Int = SkeletonRows) {
