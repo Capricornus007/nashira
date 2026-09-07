@@ -9,6 +9,8 @@ import okio.Path.Companion.toPath
 import de.connect2x.trixnity.clientserverapi.client.MatrixClientAuthProviderData
 import de.connect2x.trixnity.clientserverapi.client.classic
 import de.connect2x.trixnity.clientserverapi.client.classicLogin
+import de.connect2x.trixnity.clientserverapi.client.unauthenticated
+import de.connect2x.trixnity.clientserverapi.client.classicLoginWithToken
 import de.connect2x.trixnity.client.create
 import de.connect2x.trixnity.clientserverapi.model.authentication.IdentifierType
 import de.connect2x.trixnity.clientserverapi.model.user.Filters
@@ -185,6 +187,63 @@ object MatrixEngine {
             userId = client.userId.full,
             deviceId = client.deviceId,
             accessToken = authData.accessToken,
+        )
+        val session = MatrixSession(client)
+        session.start()
+        _session.value = session
+        return Result.success(Unit)
+    }
+
+    /**
+     * SSO callback token exchange. The callback token is exchanged with the
+     * homeserver through Matrix's m.login.token flow before creating a client.
+     */
+    suspend fun loginWithToken(baseUrl: String, loginToken: String): Result<Unit> {
+        if (_session.value != null) return Result.failure(IllegalStateException("already logged in"))
+        val unauthenticatedClient = MatrixClient.create(
+            repositoriesModule = persistentRepositories(databaseKey(baseUrl, "sso")),
+            mediaStoreModule = persistentMediaStore(databaseKey(baseUrl, "sso")),
+            cryptoDriverModule = CryptoDriverModule.vodozemac(),
+            authProviderData = MatrixClientAuthProviderData.unauthenticated(Url(baseUrl)),
+            configuration = {
+                this.httpClientEngine = platformHttpEngine()
+            },
+        ).getOrElse { return Result.failure(it) }
+        val response = try {
+            unauthenticatedClient.api.authentication.login(
+                identifier = null,
+                password = null,
+                token = loginToken,
+                type = de.connect2x.trixnity.clientserverapi.model.authentication.LoginType.Token(),
+                deviceId = null,
+                initialDeviceDisplayName = "Nashira",
+                refreshToken = null,
+            ).getOrElse { return Result.failure(it) }
+        } finally {
+            unauthenticatedClient.close()
+        }
+        val authData = MatrixClientAuthProviderData.classic(
+            baseUrl = Url(baseUrl),
+            accessToken = response.accessToken,
+            refreshToken = response.refreshToken,
+        )
+        val key = databaseKey(baseUrl, response.userId.full)
+        val client = MatrixClient.create(
+            repositoriesModule = persistentRepositories(key),
+            mediaStoreModule = persistentMediaStore(key),
+            cryptoDriverModule = CryptoDriverModule.vodozemac(),
+            authProviderData = authData,
+            configuration = {
+                this.syncFilter = MatrixEngine.syncFilter
+                this.modulesFactories = trixnityModuleFactoriesWithPonies()
+                this.httpClientEngine = platformHttpEngine()
+            },
+        ).getOrElse { return Result.failure(it) }
+        storage.save(
+            baseUrl = baseUrl,
+            userId = response.userId.full,
+            deviceId = response.deviceId,
+            accessToken = response.accessToken,
         )
         val session = MatrixSession(client)
         session.start()
