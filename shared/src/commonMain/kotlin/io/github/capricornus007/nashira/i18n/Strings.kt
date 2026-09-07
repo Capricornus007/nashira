@@ -81,6 +81,8 @@ interface Strings {
     val attachFile: String
     val attach: String
     val spaceHome: String
+    val actionCopyRoomLink: String
+    val actionCopySpaceLink: String
     val notifications: String
     val backgroundSync: String
     val backgroundSyncHint: String
@@ -88,6 +90,11 @@ interface Strings {
     val actionCopyText: String
     val actionCopyLink: String
     val actionDelete: String
+    val actionSelectMessages: String
+    val actionCancelSelection: String
+    val actionCopySelected: String
+    val actionDeleteSelected: String
+    val selectedMessages: String
     val actionMarkUnread: String
     val actionMarkRead: String
     val actionMute: String
@@ -288,6 +295,8 @@ object ZhTwStrings : Strings {
     override val attachFile = "檔案"
     override val attach = "附件"
     override val spaceHome = "聊天空間首頁"
+    override val actionCopyRoomLink = "複製聊天室鏈接"
+    override val actionCopySpaceLink = "複製聊天空間鏈接"
     override val notifications = "通知"
     override val backgroundSync = "背景同步"
     override val backgroundSyncHint = "常駐連線，離開 app 也收得到新訊息通知"
@@ -295,6 +304,11 @@ object ZhTwStrings : Strings {
     override val actionCopyText = "複製文字"
     override val actionCopyLink = "複製訊息連結"
     override val actionDelete = "刪除訊息"
+    override val actionSelectMessages = "選取訊息"
+    override val actionCancelSelection = "取消選取"
+    override val actionCopySelected = "複製"
+    override val actionDeleteSelected = "刪除"
+    override val selectedMessages = "已選取 %d 則訊息"
     override val actionMarkUnread = "標記為未讀"
     override val actionMarkRead = "標記為已讀"
     override val actionMute = "靜音通知"
@@ -551,6 +565,8 @@ object EnStrings : Strings {
     override val attachFile = "File"
     override val attach = "Attach"
     override val spaceHome = "Space home"
+    override val actionCopyRoomLink = "Copy room link"
+    override val actionCopySpaceLink = "Copy Space link"
     override val notifications = "Notifications"
     override val backgroundSync = "Background sync"
     override val backgroundSyncHint = "Keeps the connection open so notifications arrive in the background"
@@ -558,6 +574,11 @@ object EnStrings : Strings {
     override val actionCopyText = "Copy text"
     override val actionCopyLink = "Copy message link"
     override val actionDelete = "Remove message"
+    override val actionSelectMessages = "Select messages"
+    override val actionCancelSelection = "Cancel selection"
+    override val actionCopySelected = "Copy"
+    override val actionDeleteSelected = "Delete"
+    override val selectedMessages = "%d messages selected"
     override val actionMarkUnread = "Mark as unread"
     override val actionMarkRead = "Mark as read"
     override val actionMute = "Mute notifications"

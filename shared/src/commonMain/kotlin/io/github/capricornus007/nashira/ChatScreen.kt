@@ -84,6 +84,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.MoreVert
@@ -645,7 +646,7 @@ private fun ServerRail(
                     }
                     ContextMenuSurface(expanded = menuOpen, onDismiss = { menuOpen = false }, anchor = menuAnchor) {
                         ContextMenuItem(strings.spaceHome) { menuOpen = false; onSelectSpace(space) }
-                        ContextMenuItem(strings.actionCopyLink) {
+                        ContextMenuItem(strings.actionCopySpaceLink) {
                             menuOpen = false
                             scope.launch { clipboard.setText(AnnotatedString(spacePermalink(space))) }
                         }
@@ -1111,7 +1112,7 @@ private fun RoomListItem(
                         muted = roomRepository.isMuted(room.roomId)
                     }
                 }
-                ContextMenuItem(strings.actionCopyLink) {
+                ContextMenuItem(strings.actionCopyRoomLink) {
                     menuOpen = false
                     scope.launch { clipboard.setText(AnnotatedString(roomRepository.permalink(room.roomId))) }
                 }
@@ -1340,6 +1341,13 @@ private fun TimelinePane(
     // 刪除確認：Discord 式「不可復原」+ Element 式選填原因（redact reason）
     var deleteTarget by remember(room.roomId) { mutableStateOf<TimelineMessage?>(null) }
     var deleteReason by remember(room.roomId) { mutableStateOf("") }
+    var selectionMode by remember(room.roomId) { mutableStateOf(false) }
+    var selectedEventIds by remember(room.roomId) { mutableStateOf<Set<EventId>>(emptySet()) }
+    var bulkDeleteConfirm by remember(room.roomId) { mutableStateOf(false) }
+    val selectedMessages = messages.orEmpty().filter { it.eventId in selectedEventIds }
+    val selectedOwnMessages = selectedMessages.filter {
+        it.sender == roomRepository.client.userId && it.eventId != null
+    }
     var downloadNotice by remember(room.roomId) { mutableStateOf<String?>(null) }
     val imageSaver = rememberImageSaver()
     val uiState = LocalUiState.current
@@ -1374,33 +1382,57 @@ private fun TimelinePane(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                navigationIcon = { if (onBack != null) IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, contentDescription = strings.back) } },
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        RoomAvatar(roomRepository, room, Modifier.size(34.dp).clip(CircleShape))
-                        Column(Modifier.padding(start = 10.dp)) {
-                            Text(room.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
-                            // 別名和房間名常常一樣，只在不同時才顯示副行
-                            alias?.takeIf { it.substringBefore(':') != room.name }?.let {
-                                Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (selectionMode) {
+                TopAppBar(
+                    navigationIcon = {
+                        IconButton(onClick = {
+                            selectionMode = false
+                            selectedEventIds = emptySet()
+                        }) {
+                            Icon(Icons.Filled.Close, contentDescription = strings.actionCancelSelection)
+                        }
+                    },
+                    title = { Text(strings.selectedMessages.format(selectedEventIds.size)) },
+                    actions = {
+                        if (selectedMessages.any { it.body is MessageBody.Text }) {
+                            IconButton(onClick = {
+                                val text = selectedMessages.mapNotNull { (it.body as? MessageBody.Text)?.text }
+                                    .joinToString("\\n")
+                                if (text.isNotBlank()) clipboard.setText(AnnotatedString(text))
+                            }) {
+                                Icon(Icons.Filled.Check, contentDescription = strings.actionCopySelected)
                             }
                         }
-                    }
-                },
-                actions = {
-                    // 成員欄只存在於寬版面：窄版面不給這顆按鈕，避免按了沒反應
-                    if (onToggleMembers != null) {
-                        IconButton(onClick = onToggleMembers) {
-                            Icon(
-                                Icons.Filled.Person,
-                                contentDescription = strings.members,
-                                tint = if (membersOpen) MaterialTheme.colorScheme.primary else LocalContentColor.current,
-                            )
+                        if (selectedOwnMessages.isNotEmpty()) {
+                            IconButton(onClick = { bulkDeleteConfirm = true }) {
+                                Icon(Icons.Filled.Delete, contentDescription = strings.actionDeleteSelected, tint = MaterialTheme.colorScheme.error)
+                            }
                         }
-                    }
-                },
-            )
+                    },
+                )
+            } else {
+                TopAppBar(
+                    navigationIcon = { if (onBack != null) IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, contentDescription = strings.back) } },
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            RoomAvatar(roomRepository, room, Modifier.size(34.dp).clip(CircleShape))
+                            Column(Modifier.padding(start = 10.dp)) {
+                                Text(room.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+                                alias?.takeIf { it.substringBefore(':') != room.name }?.let {
+                                    Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+                    },
+                    actions = {
+                        if (onToggleMembers != null) {
+                            IconButton(onClick = onToggleMembers) {
+                                Icon(Icons.Filled.Person, contentDescription = strings.members, tint = if (membersOpen) MaterialTheme.colorScheme.primary else LocalContentColor.current)
+                            }
+                        }
+                    },
+                )
+            }
         },
         bottomBar = {
             Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).navigationBarsPadding().imePadding()) {
@@ -1655,6 +1687,19 @@ private fun TimelinePane(
                         grouped = grouped,
                         strings = strings,
                         isOwn = msg.sender == roomRepository.client.userId,
+                        selected = msg.eventId in selectedEventIds,
+                        selectionMode = selectionMode,
+                        onToggleSelection = {
+                            msg.eventId?.let { id ->
+                                selectedEventIds = if (id in selectedEventIds) selectedEventIds - id else selectedEventIds + id
+                            }
+                        },
+                        onEnterSelection = {
+                            msg.eventId?.let { id ->
+                                selectionMode = true
+                                selectedEventIds = selectedEventIds + id
+                            }
+                        },
                         onReply = { replyTo = msg },
                         onCopyText = {
                             (msg.body as? MessageBody.Text)?.let { text ->
@@ -1714,7 +1759,6 @@ private fun TimelinePane(
                             val target = msg.eventId
                             scope.launch {
                                 val result = if (mine != null) {
-                                    // 自己按過就撤回自己那則 reaction 事件
                                     roomRepository.redact(room.roomId, mine).map { }
                                 } else if (target != null) {
                                     roomRepository.sendReaction(room.roomId, target, key).map { }
@@ -1843,6 +1887,7 @@ private fun TimelinePane(
                     ) {
                         BasicTextField(
                             value = forwardQuery,
+
                             onValueChange = { forwardQuery = it },
                             singleLine = true,
                             textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
@@ -1886,6 +1931,30 @@ private fun TimelinePane(
             },
         )
     }
+    // 刪除確認（Telegram/Discord 式）：預覽 + 選填原因直通 redact
+    if (bulkDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { bulkDeleteConfirm = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    bulkDeleteConfirm = false
+                    val targets = selectedOwnMessages.mapNotNull { it.eventId }
+                    selectionMode = false
+                    selectedEventIds = emptySet()
+                    scope.launch {
+                        targets.forEach { id ->
+                            roomRepository.redact(room.roomId, id)
+                                .onFailure { sendError = io.github.capricornus007.nashira.i18n.friendlyError(it) }
+                        }
+                    }
+                }) { Text(strings.actionDeleteSelected, color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { bulkDeleteConfirm = false }) { Text(strings.cancel) } },
+            title = { Text(strings.actionDeleteSelected) },
+            text = { Text(strings.selectedMessages.format(selectedOwnMessages.size)) },
+        )
+    }
+
     // 刪除確認（Telegram/Discord 式）：預覽 + 選填原因直通 redact
     deleteTarget?.let { msg ->
         AlertDialog(
@@ -2055,6 +2124,10 @@ private fun MessageRow(
     grouped: Boolean,
     strings: io.github.capricornus007.nashira.i18n.Strings,
     isOwn: Boolean,
+    selected: Boolean,
+    selectionMode: Boolean,
+    onToggleSelection: () -> Unit,
+    onEnterSelection: () -> Unit,
     onReply: () -> Unit,
     onCopyText: () -> Unit,
     onCopyLink: () -> Unit,
@@ -2066,16 +2139,25 @@ private fun MessageRow(
     onOpenImage: (MessageBody.Image) -> Unit = {},
     onDownloadImage: (MessageBody.Image) -> Unit = {},
     onHideImage: (MessageBody.Image) -> Unit = {},
-) {
+)
+{
     var menuOpen by remember(msg.eventId) { mutableStateOf(false) }
     var menuAnchor by remember(msg.eventId) { mutableStateOf(Offset.Unspecified) }
     val hoverSource = remember { MutableInteractionSource() }
     val hovered by hoverSource.collectIsHoveredAsState()
-    Box {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .background(if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.42f) else Color.Transparent),
+    ) {
         Row(
             Modifier.fillMaxWidth()
-                // 長按（手機）／右鍵（桌面）開選單，對齊 Element 與 Discord
-                .contextMenuGestures { position -> menuAnchor = position; menuOpen = true }
+                .contextMenuGestures(
+                    onClick = { if (selectionMode) onToggleSelection() },
+                    onContextMenu = {
+                        if (msg.eventId != null) onEnterSelection() else { menuAnchor = Offset.Unspecified; menuOpen = true }
+                    },
+                )
                 .hoverable(hoverSource)
                 .padding(
                     start = 16.dp,
