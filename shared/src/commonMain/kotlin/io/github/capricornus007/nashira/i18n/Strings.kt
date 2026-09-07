@@ -163,6 +163,7 @@ interface Strings {
     val recoveryKeySaved: String
     val compareEmojiHint: String
     val sessions: String
+    val refreshSessions: String
     val sessionsLoadFailed: String
     val sessionLogoutFailed: String
     val sessionVerified: String
@@ -377,6 +378,7 @@ object ZhTwStrings : Strings {
     override val recoveryKeySaved = "我已保存"
     override val compareEmojiHint = "確認兩台裝置顯示的表情符號完全相同。"
     override val sessions = "工作階段"
+    override val refreshSessions = "刷新工作階段"
     override val sessionsLoadFailed = "無法讀取工作階段清單"
     override val sessionLogoutFailed = "登出此工作階段失敗"
     override val sessionVerified = "已驗證"
@@ -521,6 +523,7 @@ object EnStrings : Strings {
     override val recoveryKeySaved = "I saved it"
     override val compareEmojiHint = "Check that both devices show exactly the same emoji."
     override val sessions = "Sessions"
+    override val refreshSessions = "Refresh sessions"
     override val sessionsLoadFailed = "Could not load sessions"
     override val sessionLogoutFailed = "Could not sign out this session"
     override val sessionVerified = "Verified"

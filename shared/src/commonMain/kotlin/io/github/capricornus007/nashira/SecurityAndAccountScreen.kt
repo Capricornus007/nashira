@@ -78,15 +78,22 @@ fun SecurityAndAccountScreen(
 
     var sessions by remember(session) { mutableStateOf<List<DeviceSession>>(emptyList()) }
     var sessionsError by remember { mutableStateOf<String?>(null) }
+    var sessionsRefreshing by remember { mutableStateOf(false) }
     var secretPrompt by remember { mutableStateOf<SelfVerificationOption?>(null) }
     var recoveryKeyToShow by remember { mutableStateOf<String?>(null) }
     var busyMessage by remember { mutableStateOf<String?>(null) }
     var actionError by remember { mutableStateOf<String?>(null) }
+    var secretVerificationBusy by remember { mutableStateOf(false) }
 
-    suspend fun reloadSessions() {
-        repository.sessions()
-            .onSuccess { sessions = it; sessionsError = null }
-            .onFailure { sessionsError = it.message ?: strings.sessionsLoadFailed }
+    suspend fun reloadSessions(showBusy: Boolean = false) {
+        if (showBusy) sessionsRefreshing = true
+        try {
+            repository.sessions()
+                .onSuccess { sessions = it; sessionsError = null }
+                .onFailure { sessionsError = it.message ?: strings.sessionsLoadFailed }
+        } finally {
+            if (showBusy) sessionsRefreshing = false
+        }
     }
 
     LaunchedEffect(repository, selfStatus) { reloadSessions() }
@@ -115,8 +122,10 @@ fun SecurityAndAccountScreen(
             strings = strings,
             status = selfStatus,
             bootstrapping = bootstrapping,
+            busy = secretVerificationBusy || busyMessage != null,
             onUseSecret = { secretPrompt = it },
             onUseOtherDevice = { option ->
+                if (busyMessage != null) return@SelfVerificationSection
                 scope.launch {
                     busyMessage = strings.verificationWaitingOtherDevice
                     repository.startOtherDeviceVerification(option)
@@ -137,27 +146,33 @@ fun SecurityAndAccountScreen(
             strings = strings,
             sessions = sessions,
             error = sessionsError,
-            onRefresh = { scope.launch { reloadSessions() } },
+            refreshing = sessionsRefreshing,
+            onRefresh = { scope.launch { reloadSessions(showBusy = true) } },
             onVerify = { deviceId ->
+                if (busyMessage != null) return@SessionsSection
                 scope.launch {
+                    busyMessage = strings.verificationInProgressShort
                     repository.requestDeviceVerification(deviceId)
                         .onFailure { actionError = it.message ?: strings.verificationFailed }
+                    busyMessage = null
                 }
             },
             onLogoutSession = { deviceId ->
+                if (busyMessage != null) return@SessionsSection
                 scope.launch {
+                    busyMessage = strings.verificationInProgressShort
                     repository.logoutSession(deviceId)
                         .onSuccess { outcome ->
                             when (outcome) {
                                 SessionLogout.Done -> reloadSessions()
                                 is SessionLogout.OpenAccountManagement -> {
-                                    // 委派認證伺服器（matrix.org）只能在帳戶管理頁登出裝置
                                     openLink(outcome.url)
                                     busyMessage = strings.sessionLogoutViaAccountPage
                                 }
                             }
                         }
                         .onFailure { actionError = it.message ?: strings.sessionLogoutFailed }
+                    if (busyMessage == strings.verificationInProgressShort) busyMessage = null
                 }
             },
         )
@@ -192,19 +207,21 @@ fun SecurityAndAccountScreen(
         SecretPromptDialog(
             strings = strings,
             option = option,
-            onDismiss = { secretPrompt = null },
+            busy = secretVerificationBusy,
+            onDismiss = { if (!secretVerificationBusy) secretPrompt = null },
             onConfirm = { secret ->
-                secretPrompt = null
+                if (secretVerificationBusy) return@SecretPromptDialog
                 scope.launch {
-                    busyMessage = strings.verificationInProgressShort
+                    secretVerificationBusy = true
+                    actionError = null
                     repository.verifyWithSecret(option, secret)
                         .onSuccess {
-                            // 密語完成的是本機交叉簽署；等服務狀態更新後再重查裝置 trust。
                             repository.selfVerification.first { it is SelfVerificationStatus.Verified }
+                            secretPrompt = null
                             reloadSessions()
                         }
                         .onFailure { actionError = it.message ?: strings.verificationFailed }
-                    busyMessage = null
+                    secretVerificationBusy = false
                 }
             },
         )
@@ -221,6 +238,7 @@ private fun SelfVerificationSection(
     strings: Strings,
     status: SelfVerificationStatus?,
     bootstrapping: Boolean,
+    busy: Boolean,
     onUseSecret: (SelfVerificationOption) -> Unit,
     onUseOtherDevice: (SelfVerificationOption.OtherDevice) -> Unit,
     onBootstrap: () -> Unit,
@@ -285,21 +303,21 @@ private fun SelfVerificationSection(
                                 icon = Icons.Filled.Lock,
                                 title = strings.verifyWithRecoveryKey,
                                 description = strings.verifyWithRecoveryKeyHint,
-                                onClick = { onUseSecret(option) },
+                                onClick = { if (!busy) onUseSecret(option) },
                             )
                             is SelfVerificationOption.Passphrase -> SettingsNavigationItem(
                                 shape = shape,
                                 icon = Icons.Filled.Lock,
                                 title = strings.verifyWithPassphrase,
                                 description = strings.verifyWithPassphraseHint,
-                                onClick = { onUseSecret(option) },
+                                onClick = { if (!busy) onUseSecret(option) },
                             )
                             is SelfVerificationOption.OtherDevice -> SettingsNavigationItem(
                                 shape = shape,
                                 icon = Icons.Filled.Person,
                                 title = strings.verifyWithOtherDevice,
                                 description = strings.verifyWithOtherDeviceHint,
-                                onClick = { onUseOtherDevice(option) },
+                                onClick = { if (!busy) onUseOtherDevice(option) },
                             )
                         }
                     }
@@ -309,18 +327,28 @@ private fun SelfVerificationSection(
     }
 }
 
-
-/** 工作階段清單：本裝置置頂，其他裝置可發起驗證或登出。 */
 @Composable
 private fun SessionsSection(
     strings: Strings,
     sessions: List<DeviceSession>,
     error: String?,
+    refreshing: Boolean,
     onRefresh: () -> Unit,
     onVerify: (String) -> Unit,
     onLogoutSession: (String) -> Unit,
 ) {
     SettingsGroup(title = strings.sessions) {
+        item { shape ->
+            SettingsItem(
+                shape = shape,
+                icon = Icons.Filled.Refresh,
+                title = strings.refreshSessions,
+                enabled = !refreshing,
+                onClick = onRefresh,
+            ) {
+                if (refreshing) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+            }
+        }
         if (error != null) {
             item { shape ->
                 SettingsItem(
@@ -407,11 +435,11 @@ private fun SessionRow(
 private fun SecretPromptDialog(
     strings: Strings,
     option: SelfVerificationOption,
+    busy: Boolean,
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit,
 ) {
     var secret by remember { mutableStateOf("") }
-    // 密語與復原金鑰預設遮蔽，右側眼睛可切明文
     var revealed by remember { mutableStateOf(false) }
     val isPassphrase = option is SelfVerificationOption.Passphrase
     AlertDialog(
@@ -427,6 +455,7 @@ private fun SecretPromptDialog(
                 OutlinedTextField(
                     value = secret,
                     onValueChange = { secret = it },
+                    enabled = !busy,
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     label = { Text(if (isPassphrase) strings.passphrase else strings.recoveryKey) },
@@ -443,11 +472,12 @@ private fun SecretPromptDialog(
             }
         },
         confirmButton = {
-            TextButton(enabled = secret.isNotBlank(), onClick = { onConfirm(secret) }) {
-                Text(strings.verifyThisDevice)
+            TextButton(enabled = !busy && secret.isNotBlank(), onClick = { onConfirm(secret) }) {
+                if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                else Text(strings.verifyThisDevice)
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(strings.cancel) } },
+        dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text(strings.cancel) } },
     )
 }
 
