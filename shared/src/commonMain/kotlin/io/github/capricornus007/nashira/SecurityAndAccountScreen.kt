@@ -55,6 +55,7 @@ import io.github.capricornus007.nashira.settings.SettingsGroup
 import io.github.capricornus007.nashira.settings.SettingsItem
 import io.github.capricornus007.nashira.settings.SettingsNavigationItem
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 
 /**
  * 帳戶與安全性頁：帳戶資訊、本裝置的自我驗證（復原金鑰／密語／另一台裝置）、
@@ -197,6 +198,11 @@ fun SecurityAndAccountScreen(
                 scope.launch {
                     busyMessage = strings.verificationInProgressShort
                     repository.verifyWithSecret(option, secret)
+                        .onSuccess {
+                            // 密語完成的是本機交叉簽署；等服務狀態更新後再重查裝置 trust。
+                            repository.selfVerification.first { it is SelfVerificationStatus.Verified }
+                            reloadSessions()
+                        }
                         .onFailure { actionError = it.message ?: strings.verificationFailed }
                     busyMessage = null
                 }
