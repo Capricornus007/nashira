@@ -44,6 +44,7 @@ private fun persistentMediaStore(databaseKey: String): MediaStoreModule =
  */
 class MatrixSession(
     val client: MatrixClient,
+    private val onAuthFailure: () -> Unit = {},
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) {
     fun start() {
@@ -51,6 +52,18 @@ class MatrixSession(
         // 通知在背景才需要發，所以觀察器綁在 session 上而不是 Compose 樹上
         scope.launch {
             io.github.capricornus007.nashira.watchNotifications(client, client.userId)
+        }
+        // token 失效（401 M_UNKNOWN_TOKEN）時 Trixnity 會把 loginState 轉成
+        // LOGGED_OUT／LOGGED_OUT_SOFT。此時清 session 回登入頁，而不是讓使用者
+        // 對著同步不動的聊天室。StateFlow 只在值改變時發射，所以不會重複觸發。
+        scope.launch {
+            client.loginState.collect { state ->
+                if (state == MatrixClient.LoginState.LOGGED_OUT ||
+                    state == MatrixClient.LoginState.LOGGED_OUT_SOFT
+                ) {
+                    onAuthFailure()
+                }
+            }
         }
     }
 
@@ -102,6 +115,18 @@ object MatrixEngine {
     }
 
     /**
+     * token 失效（401）時的軟登出：清 session 與 token 回登入頁，但**保留**本機資料庫。
+     * 與 logout() 的差別：這裡不刪庫——重新登入時 login() 已有 stale 庫處理
+     *（deviceId 不一致會清掉重建），所以保留庫不會擋登入，反而讓重登後能先讀本機快取。
+     */
+    private fun handleAuthFailure() {
+        _session.value?.close()
+        _session.value = null
+        storage.clear()
+        _restoring.value = false
+    }
+
+    /**
      * 啟動恢復：磁碟有 token 則直接建 client（免密碼重登）；token 失效自動清除。
      *
      * **必須互斥**：Android 端有兩個呼叫者——前台服務的 onCreate 與 Compose 的
@@ -127,7 +152,7 @@ object MatrixEngine {
             authProviderData = MatrixClientAuthProviderData.classic(
                 baseUrl = Url(stored.baseUrl),
                 accessToken = stored.accessToken,
-                refreshToken = null,
+                refreshToken = stored.refreshToken,
             ),
             configuration = {
                 this.syncFilter = MatrixEngine.syncFilter
@@ -139,7 +164,7 @@ object MatrixEngine {
             _restoring.value = false
             return@withLock
         }
-        val session = MatrixSession(client)
+        val session = MatrixSession(client, onAuthFailure = { handleAuthFailure() })
         session.start()
         _session.value = session
         _restoring.value = false
@@ -187,8 +212,9 @@ object MatrixEngine {
             userId = client.userId.full,
             deviceId = client.deviceId,
             accessToken = authData.accessToken,
+            refreshToken = authData.refreshToken,
         )
-        val session = MatrixSession(client)
+        val session = MatrixSession(client, onAuthFailure = { handleAuthFailure() })
         session.start()
         _session.value = session
         return Result.success(Unit)
@@ -244,8 +270,9 @@ object MatrixEngine {
             userId = response.userId.full,
             deviceId = response.deviceId,
             accessToken = response.accessToken,
+            refreshToken = response.refreshToken,
         )
-        val session = MatrixSession(client)
+        val session = MatrixSession(client, onAuthFailure = { handleAuthFailure() })
         session.start()
         _session.value = session
         return Result.success(Unit)

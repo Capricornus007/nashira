@@ -10,12 +10,13 @@ import kotlin.io.path.writeText
 actual class TokenStorage actual constructor() {
     private val file = Path(System.getProperty("user.home") ?: ".", ".nashira", "session.properties")
 
-    actual fun save(baseUrl: String, userId: String, deviceId: String, accessToken: String) {
+    actual fun save(baseUrl: String, userId: String, deviceId: String, accessToken: String, refreshToken: String?) {
         val props = Properties().apply {
             setProperty("baseUrl", baseUrl)
             setProperty("userId", userId)
             setProperty("deviceId", deviceId)
             setProperty("accessToken", accessToken)
+            if (refreshToken != null) setProperty("refreshToken", refreshToken)
         }
         file.createParentDirectories()
         file.writeText(props.entries.joinToString("\n") { (k, v) -> "$k=$v" })
@@ -30,6 +31,7 @@ actual class TokenStorage actual constructor() {
             userId = props.getProperty("userId") ?: "",
             deviceId = props.getProperty("deviceId") ?: "",
             accessToken = token,
+            refreshToken = props.getProperty("refreshToken"),
         )
     }
 

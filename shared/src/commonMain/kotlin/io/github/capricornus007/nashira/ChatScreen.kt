@@ -769,11 +769,11 @@ private val UnreadRed = Color(0xFFED4245)
 @Composable
 private fun RailSeparator() {
     Box(
-        Modifier.padding(vertical = 4.dp)
-            .width(32.dp)
-            .height(2.dp)
-            .clip(RoundedCornerShape(1.dp))
-            .background(MaterialTheme.colorScheme.outlineVariant),
+        Modifier
+            .padding(horizontal = 10.dp, vertical = 2.dp)
+            .fillMaxWidth()
+            .height(1.dp)
+            .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
     )
 }
 

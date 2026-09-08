@@ -182,6 +182,10 @@ interface Strings {
     val logoutSession: String
     val cancel: String
     val loginUsername: String
+    val loginMethodPassword: String
+    val loginMethodSso: String
+    val loginSso: String
+    val loginSsoHint: String
     val today: String
     val yesterday: String
     val justNow: String
@@ -404,6 +408,10 @@ object ZhTwStrings : Strings {
     override val logoutSession = "登出"
     override val cancel = "取消"
     override val loginUsername = "使用者名稱"
+    override val loginMethodPassword = "帳號密碼"
+    override val loginMethodSso = "Matrix SSO"
+    override val loginSso = "使用 Matrix SSO 登入"
+    override val loginSsoHint = "將在瀏覽器開啟 homeserver 的官方登入頁"
     override val homeserver = "Homeserver"
     override val loginPassword = "密碼"
     override val loginSubmit = "登入"
@@ -549,6 +557,10 @@ object EnStrings : Strings {
     override val logoutSession = "Sign out"
     override val cancel = "Cancel"
     override val loginUsername = "Username"
+    override val loginMethodPassword = "Username and password"
+    override val loginMethodSso = "Matrix SSO"
+    override val loginSso = "Continue with Matrix SSO"
+    override val loginSsoHint = "The homeserver's official sign-in page opens in your browser"
     override val chatList = "Chat list"
     override val unreadIndicators = "Unread indicators"
     override val unreadIndicatorsHint = "Show the unread bar in the rail and count badges in the list"

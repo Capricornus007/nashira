@@ -2,6 +2,7 @@ package io.github.capricornus007.nashira
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
@@ -11,6 +12,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -27,6 +29,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import io.github.capricornus007.nashira.i18n.stringsFor
 import io.github.capricornus007.nashira.matrix.MatrixEngine
+import io.ktor.http.encodeURLParameter
 import kotlinx.coroutines.launch
 
 /** 登入頁：HS 位址 + 用戶名 + 密碼 */
@@ -39,6 +42,7 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var passwordRevealed by remember { mutableStateOf(false) }
+    var passwordMode by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
 
     Column(
@@ -65,6 +69,19 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (passwordMode) {
+                Button(onClick = {}, modifier = Modifier.weight(1f)) { Text(strings.loginMethodPassword) }
+                OutlinedButton(onClick = { passwordMode = false; error = null }, modifier = Modifier.weight(1f)) {
+                    Text(strings.loginMethodSso)
+                }
+            } else {
+                OutlinedButton(onClick = { passwordMode = true; error = null }, modifier = Modifier.weight(1f)) {
+                    Text(strings.loginMethodPassword)
+                }
+                Button(onClick = {}, modifier = Modifier.weight(1f)) { Text(strings.loginMethodSso) }
+            }
+        }
         OutlinedTextField(
             value = baseUrl,
             onValueChange = { baseUrl = it },
@@ -73,39 +90,49 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
         )
-        OutlinedTextField(
-            value = username,
-            onValueChange = { username = it },
-            label = { Text(strings.loginUsername) },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-        )
-        OutlinedTextField(
-            value = password,
-            onValueChange = { password = it },
-            label = { Text(strings.loginPassword) },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            visualTransformation = if (passwordRevealed) VisualTransformation.None else PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            trailingIcon = {
-                PasswordVisibilityToggle(
-                    visible = passwordRevealed,
-                    contentDescription = if (passwordRevealed) strings.hideSecret else strings.showSecret,
-                    onToggle = { passwordRevealed = !passwordRevealed },
-                )
-            },
-        )
-        error?.let {
-            Text(
-                it,
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall,
+        if (passwordMode) {
+            OutlinedTextField(
+                value = username,
+                onValueChange = { username = it },
+                label = { Text(strings.loginUsername) },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
             )
+            OutlinedTextField(
+                value = password,
+                onValueChange = { password = it },
+                label = { Text(strings.loginPassword) },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                visualTransformation = if (passwordRevealed) VisualTransformation.None else PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                trailingIcon = {
+                    PasswordVisibilityToggle(
+                        visible = passwordRevealed,
+                        contentDescription = if (passwordRevealed) strings.hideSecret else strings.showSecret,
+                        onToggle = { passwordRevealed = !passwordRevealed },
+                    )
+                },
+            )
+        } else {
+            Text(strings.loginSsoHint, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         }
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
         Button(
             onClick = {
                 if (busy) return@Button
+                if (!passwordMode) {
+                    val homeserver = baseUrl.trim().trimEnd('/')
+                    busy = true
+                    error = null
+                    scope.launch {
+                        // Android 回傳 null（deep link 由 MainActivity 處理）；Desktop 回傳交換結果
+                        val result = startSsoLogin(homeserver)
+                        result?.onFailure { error = io.github.capricornus007.nashira.i18n.friendlyLoginError(it) }
+                        busy = false
+                    }
+                    return@Button
+                }
                 busy = true
                 error = null
                 scope.launch {
@@ -115,17 +142,12 @@ fun LoginScreen(onLoginSuccess: () -> Unit) {
                     busy = false
                 }
             },
-            enabled = !busy && username.isNotBlank() && password.isNotBlank(),
+            enabled = !busy && (!passwordMode || (username.isNotBlank() && password.isNotBlank())) && baseUrl.isNotBlank(),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            if (busy) {
-                CircularProgressIndicator(
-                    modifier = Modifier.padding(end = 8.dp).size(16.dp),
-                    strokeWidth = 2.dp,
-                )
-            }
-            Text(strings.loginSubmit)
-        }
+            if (busy) CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp).size(16.dp), strokeWidth = 2.dp)
+            Text(if (passwordMode) strings.loginSubmit else strings.loginSso)
         }
     }
+}
 }

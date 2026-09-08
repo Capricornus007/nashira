@@ -14,12 +14,13 @@ actual class TokenStorage actual constructor() {
         ctx.getSharedPreferences("nashira_session", Context.MODE_PRIVATE)
     }
 
-    actual fun save(baseUrl: String, userId: String, deviceId: String, accessToken: String) {
+    actual fun save(baseUrl: String, userId: String, deviceId: String, accessToken: String, refreshToken: String?) {
         prefs.edit()
             .putString("baseUrl", baseUrl)
             .putString("userId", userId)
             .putString("deviceId", deviceId)
             .putString("accessToken", accessToken)
+            .putString("refreshToken", refreshToken)
             .apply()
     }
 
@@ -30,6 +31,7 @@ actual class TokenStorage actual constructor() {
             userId = prefs.getString("userId", "") ?: "",
             deviceId = prefs.getString("deviceId", "") ?: "",
             accessToken = token,
+            refreshToken = prefs.getString("refreshToken", null),
         )
     }
 
