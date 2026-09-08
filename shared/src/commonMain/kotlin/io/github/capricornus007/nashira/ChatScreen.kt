@@ -977,8 +977,8 @@ private fun RoomListItem(
     val clipboard = LocalClipboardManager.current
     Column(
         Modifier.fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 2.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .padding(horizontal = 6.dp, vertical = 1.dp)
+            .clip(RoundedCornerShape(8.dp))
             .background(
                 when {
                     room.isInvite -> MaterialTheme.colorScheme.surfaceContainer
@@ -1000,11 +1000,11 @@ private fun RoomListItem(
             ),
     ) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            RoomAvatar(roomRepository, room, Modifier.size(44.dp).clip(CircleShape))
-            Column(Modifier.padding(start = 12.dp).weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            RoomAvatar(roomRepository, room, Modifier.size(36.dp).clip(CircleShape))
+            Column(Modifier.padding(start = 10.dp).weight(1f), verticalArrangement = Arrangement.spacedBy(0.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         room.name,
@@ -1049,7 +1049,7 @@ private fun RoomListItem(
         }
         if (room.isInvite) {
             Row(
-                Modifier.fillMaxWidth().padding(start = 68.dp, end = 12.dp, bottom = 10.dp),
+                Modifier.fillMaxWidth().padding(start = 60.dp, end = 10.dp, bottom = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Button(
