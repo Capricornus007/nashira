@@ -58,6 +58,11 @@ import io.github.capricornus007.nashira.i18n.AppLanguage
 import io.github.capricornus007.nashira.i18n.stringsFor
 import io.github.capricornus007.nashira.matrix.MatrixSession
 import io.github.capricornus007.nashira.settings.SettingsDropdownItem
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.Row
+import androidx.compose.runtime.collectAsState
+import io.github.capricornus007.nashira.AvatarImage
 import io.github.capricornus007.nashira.settings.SettingsGroup
 import io.github.capricornus007.nashira.settings.SettingsItem
 import io.github.capricornus007.nashira.settings.SettingsMenuOption
@@ -128,6 +133,7 @@ private fun SettingsNavHost(
                 onBack = onBack,
                 hasAccount = session != null,
                 onNavigate = onNavigate,
+                session = session,
             )
             SettingsPage.ACCOUNT -> if (session != null) {
                 SecurityAndAccountScreen(
@@ -197,10 +203,26 @@ private fun SettingsRoot(
     onBack: (() -> Unit)?,
     hasAccount: Boolean,
     onNavigate: (SettingsPage) -> Unit,
+    session: MatrixSession? = null,
 ) {
     val ui = LocalUiState.current
     val strings = stringsFor(ui.language)
     SettingsScaffold(title = strings.settings, onBack = onBack) {
+        if (session != null) {
+            // Discord 風格用戶資料卡：大頭像 + 用戶名 + ID
+            val accountId = session.client.userId.full
+            val accountName = accountId.substringAfter('@').substringBefore(':').ifBlank { accountId }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                AvatarImage(session.client, null, accountName, Modifier.size(56.dp).clip(CircleShape))
+                Column(Modifier.padding(start = 14.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(accountName, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
+                    Text(accountId, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                }
+            }
+        }
         if (hasAccount) {
             SettingsGroup(title = strings.account) {
                 item { shape ->
