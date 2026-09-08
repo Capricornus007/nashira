@@ -1364,7 +1364,18 @@ private fun TimelinePane(
             strings = strings,
             onSend = { sticker ->
                 scope.launch {
-                    roomRepository.sendSticker(room.roomId, sticker)
+                    val result = roomRepository.sendSticker(room.roomId, sticker)
+                    // M_LIMIT_EXCEEDED 是速率限制：事件可能已送達（其他客戶端能看到），
+                    // 等 2 秒重試一次；仍然失敗才報錯
+                    val finalResult = if (result.isFailure) {
+                        val msg = result.exceptionOrNull()?.message.orEmpty()
+                        if (msg.contains("M_LIMIT_EXCEEDED")) {
+                            kotlinx.coroutines.delay(2000)
+                            roomRepository.sendSticker(room.roomId, sticker)
+                        } else result
+                    } else result
+                    finalResult
+                        .onSuccess { sendError = null }
                         .onFailure { sendError = io.github.capricornus007.nashira.i18n.friendlyError(it) }
                 }
             },
@@ -1376,6 +1387,7 @@ private fun TimelinePane(
     val imageLauncher = rememberImagePickerLauncher { image ->
         scope.launch {
             roomRepository.sendImage(room.roomId, image)
+                .onSuccess { sendError = null }
                 .onFailure { sendError = io.github.capricornus007.nashira.i18n.friendlyError(it) }
         }
     }
