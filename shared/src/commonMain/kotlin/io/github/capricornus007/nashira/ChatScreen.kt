@@ -1222,8 +1222,14 @@ private fun TimelinePane(
     val timelineScope = rememberCoroutineScope()
     // 冷流：進房時用最後一則事件初始化，讓 Trixnity 自己補 gap／解密
     LaunchedEffect(timeline) {
-        val last = roomRepository.client.room.getById(room.roomId).first()?.lastEventId
-        if (last != null) runCatching { timeline.init(last) }
+        val roomData = roomRepository.client.room.getById(room.roomId).first()
+        val last = roomData?.lastEventId
+        println("NASHIRA_TIMELINE: room=${room.roomId} lastEventId=$last roomData=${roomData != null}")
+        if (last != null) {
+            val result = runCatching { timeline.init(last) }
+            result.onFailure { println("NASHIRA_TIMELINE: init failed: ${it.message}") }
+            result.onSuccess { println("NASHIRA_TIMELINE: init OK") }
+        }
     }
     val pageFlow = remember(timeline) { timeline.pageFlow() }
     val page by pageFlow.collectAsState(initial = null)
