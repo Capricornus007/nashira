@@ -98,6 +98,21 @@ fun SecurityAndAccountScreen(
 
     LaunchedEffect(repository, selfStatus) { reloadSessions() }
 
+    // SAS 驗證結束（activeDeviceVerification 歸 null）時也刷 sessions：
+    // Trixnity 的 selfVerification 流在 SAS 完成後不一定重發射，
+    // 只靠 selfStatus 變化觸發 LaunchedEffect 會漏掉「已驗證但畫面不刷」的案例
+    LaunchedEffect(repository) {
+        var wasActive = false
+        repository.activeDeviceVerification.collect { active ->
+            if (wasActive && active == null) {
+                // 驗證剛結束（成功或取消），等一小下讓 trust level 落地再刷
+                kotlinx.coroutines.delay(500)
+                reloadSessions()
+            }
+            wasActive = active != null
+        }
+    }
+
     SettingsScaffold(title = strings.accountAndSecurity, onBack = onBack) {
         SettingsGroup(title = strings.account) {
             item { shape ->
