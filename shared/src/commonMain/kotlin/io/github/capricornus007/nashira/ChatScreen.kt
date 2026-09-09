@@ -127,6 +127,7 @@ import io.github.capricornus007.nashira.i18n.stringsFor
 import io.github.capricornus007.nashira.matrix.MatrixSession
 import io.github.capricornus007.nashira.matrix.RoomRepository
 import io.github.capricornus007.nashira.matrix.MediaSource
+import io.github.capricornus007.nashira.matrix.MessageSearchResult
 import io.github.capricornus007.nashira.matrix.RoomSummary
 import de.connect2x.trixnity.core.model.RoomId
 import io.github.capricornus007.nashira.matrix.UnreadState
@@ -367,7 +368,7 @@ private fun PublicRoomDirectory(
             error = null
             roomRepository.publicRooms(query).fold(
                 onSuccess = { rooms = it },
-                onFailure = { error = it.message ?: "Unable to load public rooms" },
+                onFailure = { error = it.message ?: strings.publicRoomsLoadFailed },
             )
             loading = false
         }
@@ -409,7 +410,11 @@ private fun PublicRoomDirectory(
                                     Text(room.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     Text(room.alias ?: room.roomId.full, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     if (room.topic.isNotBlank()) Text(room.topic, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                    Text("${room.joinedMembersCount} members", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(
+                                        strings.membersCount.replace("%d", room.joinedMembersCount.toString()),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
                                 }
                                 Button(
                                     enabled = joining == null,
@@ -418,7 +423,7 @@ private fun PublicRoomDirectory(
                                         scope.launch {
                                             roomRepository.joinPublicRoom(room.roomId)
                                                 .onSuccess { onClose() }
-                                                .onFailure { error = it.message ?: "Unable to join room" }
+                                                .onFailure { error = it.message ?: strings.joinRoomFailed }
                                             joining = null
                                         }
                                     },
@@ -1394,6 +1399,11 @@ private fun TimelinePane(
     var selectionMode by remember(room.roomId) { mutableStateOf(false) }
     var selectedEventIds by remember(room.roomId) { mutableStateOf<Set<EventId>>(emptySet()) }
     var bulkDeleteConfirm by remember(room.roomId) { mutableStateOf(false) }
+    var messageSearchOpen by remember(room.roomId) { mutableStateOf(false) }
+    var messageSearchQuery by remember(room.roomId) { mutableStateOf("") }
+    var messageSearchResults by remember(room.roomId) { mutableStateOf<List<MessageSearchResult>>(emptyList()) }
+    var messageSearchLoading by remember(room.roomId) { mutableStateOf(false) }
+    var messageSearchError by remember(room.roomId) { mutableStateOf(false) }
     val selectedMessages = messages.orEmpty().filter { it.eventId in selectedEventIds }
     val selectedOwnMessages = selectedMessages.filter {
         it.sender == roomRepository.client.userId && it.eventId != null
@@ -1401,6 +1411,29 @@ private fun TimelinePane(
     var downloadNotice by remember(room.roomId) { mutableStateOf<String?>(null) }
     val imageSaver = rememberImageSaver()
     val uiState = LocalUiState.current
+
+    // 房內訊息搜尋使用 Matrix `/search`，不會把搜尋詞送成聊天訊息；輸入停止後才查詢，
+    // 避免每打一個字都打一次伺服器。點結果會把時間線重新定位到那則事件附近。
+    LaunchedEffect(messageSearchOpen, messageSearchQuery) {
+        if (!messageSearchOpen) return@LaunchedEffect
+        val query = messageSearchQuery.trim()
+        messageSearchError = false
+        if (query.isEmpty()) {
+            messageSearchResults = emptyList()
+            messageSearchLoading = false
+            return@LaunchedEffect
+        }
+        delay(350)
+        messageSearchLoading = true
+        roomRepository.searchMessages(room.roomId, query)
+            .onSuccess { messageSearchResults = it }
+            .onFailure {
+                messageSearchResults = emptyList()
+                messageSearchError = true
+            }
+        messageSearchLoading = false
+    }
+
     val stickerPanelContent: @Composable (Modifier) -> Unit = { panelModifier ->
         StickerPicker(
             roomRepository = roomRepository,
@@ -1487,6 +1520,12 @@ private fun TimelinePane(
                         }
                     },
                     actions = {
+                        IconButton(onClick = {
+                            messageSearchOpen = true
+                            messageSearchError = false
+                        }) {
+                            Icon(Icons.Filled.Search, contentDescription = strings.searchMessages)
+                        }
                         if (onToggleMembers != null) {
                             IconButton(onClick = onToggleMembers) {
                                 Icon(Icons.Filled.Person, contentDescription = strings.members, tint = if (membersOpen) MaterialTheme.colorScheme.primary else LocalContentColor.current)
@@ -1955,6 +1994,117 @@ private fun TimelinePane(
                 )
             }
         }
+    }
+
+    // 房內訊息搜尋結果：結果來自伺服器，點一下會回到時間線並定位到原事件。
+    if (messageSearchOpen) {
+        AlertDialog(
+            onDismissRequest = {
+                messageSearchOpen = false
+                messageSearchQuery = ""
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = {
+                    messageSearchOpen = false
+                    messageSearchQuery = ""
+                }) { Text(strings.cancel) }
+            },
+            title = { Text(strings.searchMessages) },
+            text = {
+                Column {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        BasicTextField(
+                            value = messageSearchQuery,
+                            onValueChange = { messageSearchQuery = it },
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                            decorationBox = { inner ->
+                                if (messageSearchQuery.isEmpty()) {
+                                    Text(
+                                        strings.searchMessagesHint,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                inner()
+                            },
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    when {
+                        messageSearchLoading -> Row(
+                            Modifier.fillMaxWidth().padding(vertical = 20.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        }
+                        messageSearchError -> Text(
+                            strings.messageSearchFailed,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(vertical = 12.dp),
+                        )
+                        messageSearchQuery.isNotBlank() && messageSearchResults.isEmpty() -> Text(
+                            strings.noMessageSearchResults,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 12.dp),
+                        )
+                        else -> Column(
+                            Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState()),
+                        ) {
+                            messageSearchResults.forEach { result ->
+                                Row(
+                                    Modifier.fillMaxWidth()
+                                        .clickable {
+                                            messageSearchOpen = false
+                                            messageSearchQuery = ""
+                                            timelineScope.launch {
+                                                runCatching { timeline.jumpTo(result.eventId) }
+                                                    .onFailure { sendError = strings.messageSearchFailed }
+                                            }
+                                        }
+                                        .padding(horizontal = 4.dp, vertical = 9.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                result.senderName,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f, fill = false),
+                                            )
+                                            Text(
+                                                formatClock(result.timestamp),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.padding(start = 8.dp),
+                                            )
+                                        }
+                                        Text(
+                                            (result.body as? MessageBody.Text)?.text.orEmpty(),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.padding(top = 2.dp),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+        )
     }
 
     // 手機端的附件面板：從下往上（對照 SchildiChat 的做法）

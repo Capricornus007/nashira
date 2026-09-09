@@ -68,6 +68,20 @@ class RoomTimeline(
         initState.value = true
     }
 
+    /** 把時間線移到搜尋結果所在的事件附近。 */
+    suspend fun jumpTo(eventId: EventId) {
+        timeline.init(
+            roomId = roomId,
+            startFrom = eventId,
+            configStart = {
+                fetchTimeout = TimelineFetchTimeout
+                decryptionTimeout = TimelineDecryptTimeout
+            },
+            configBefore = { minSize = 1; maxSize = 60 },
+        )
+        initState.value = true
+    }
+
     /** 往前（更早）載入一頁歷史；UI 滾到最舊端時呼叫。返回前會等這一頁到位。 */
     suspend fun loadBefore() {
         loadingBefore.value = true

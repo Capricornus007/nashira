@@ -65,6 +65,8 @@ import de.connect2x.trixnity.core.model.events.m.ReactionEventContent
 import de.connect2x.trixnity.core.model.events.m.RelatesTo
 import de.connect2x.trixnity.core.model.events.m.room.PinnedEventsEventContent
 import de.connect2x.trixnity.clientserverapi.model.push.SetPushRule
+import de.connect2x.trixnity.clientserverapi.model.server.Search
+import de.connect2x.trixnity.clientserverapi.model.user.Filters
 import de.connect2x.trixnity.core.model.push.PushAction
 import de.connect2x.trixnity.core.model.push.PushRuleKind
 
@@ -173,6 +175,16 @@ data class TimelineMessage(
     val pinned: Boolean = false,
     /** 這則訊息被編輯過（聚合了最新的 m.replace 內容）。 */
     val edited: Boolean = false,
+)
+
+/** 伺服器全文搜尋回傳的訊息；搜尋結果不會改動目前時間線，只供結果清單定位。 */
+data class MessageSearchResult(
+    val eventId: EventId,
+    val roomId: RoomId,
+    val sender: UserId,
+    val senderName: String,
+    val body: MessageBody,
+    val timestamp: Long,
 )
 
 /** 單一表情的反應統計。[mine] 非 null 表示自己按過，值是自己那則 reaction 事件（用來撤回）。 */
@@ -557,6 +569,48 @@ class RoomRepository(val client: MatrixClient) {
             client.room.sendMessage(roomId) {
                 replace(originalEventId)
                 text(newBody)
+            }
+        }
+
+    /**
+     * 用 Matrix `/search` 搜尋目前房間的文字訊息。結果清單只保留可顯示的文字事件，
+     * 並限制在房間內，避免把其他房間的搜尋結果混進來。
+     */
+    suspend fun searchMessages(roomId: RoomId, searchTerm: String): Result<List<MessageSearchResult>> =
+        runCatching {
+            val term = searchTerm.trim()
+            if (term.isEmpty()) return@runCatching emptyList()
+            val filter = Filters.RoomFilter.RoomEventFilter(
+                limit = 50,
+                types = setOf("m.room.message"),
+                rooms = setOf(roomId.full),
+            )
+            val criteria = Search.Request.Categories.RoomEventsCriteria(
+                eventContext = null,
+                filter = filter,
+                groupings = null,
+                includeState = false,
+                keys = emptySet(),
+                orderBy = Search.Request.Categories.RoomEventsCriteria.Ordering.RECENT,
+                searchTerm = term,
+            )
+            val response = client.api.server.search(
+                Search.Request(Search.Request.Categories(criteria)),
+                nextBatch = null,
+            ).getOrThrow()
+            response.searchCategories?.roomEvents?.results.orEmpty().mapNotNull { item ->
+                val event = item.result ?: return@mapNotNull null
+                val body = event.content.messageBodyOrNull() as? MessageBody.Text ?: return@mapNotNull null
+                val member = client.user.getById(roomId, event.sender).firstOrNull()
+                MessageSearchResult(
+                    eventId = event.id,
+                    roomId = roomId,
+                    sender = event.sender,
+                    senderName = member?.name.visibleNameOrNull()
+                        ?: event.sender.full.removePrefix("@").substringBefore(':'),
+                    body = body,
+                    timestamp = event.originTimestamp,
+                )
             }
         }
 

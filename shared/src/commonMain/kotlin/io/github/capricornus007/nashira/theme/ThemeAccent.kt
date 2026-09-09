@@ -30,5 +30,25 @@ enum class ThemeAccent(
     BLUE_GREY(Color(0xFF607D8B), "藍灰色", "Blue grey"),
     GREY(Color(0xFF9E9E9E), "灰色", "Grey");
 
-    fun label(language: AppLanguage): String = if (language == AppLanguage.ZH_TW) labelZh else labelEn
+    fun label(language: AppLanguage): String = when (language) {
+        AppLanguage.ZH_TW -> labelZh
+        AppLanguage.EN -> labelEn
+        AppLanguage.JA -> JapaneseLabels[name] ?: labelEn
+        AppLanguage.KO -> KoreanLabels[name] ?: labelEn
+    }
+
+    private companion object {
+        val JapaneseLabels = mapOf(
+            "PINK" to "ピンク", "RED" to "赤", "ORANGE" to "オレンジ", "AMBER" to "アンバー",
+            "YELLOW" to "黄", "LIME" to "ライム", "GREEN" to "緑", "TEAL" to "ティール",
+            "CYAN" to "シアン", "LIGHT_BLUE" to "ライトブルー", "BLUE" to "青", "INDIGO" to "インディゴ",
+            "PURPLE" to "紫", "DEEP_PURPLE" to "濃い紫", "BLUE_GREY" to "ブルーグレー", "GREY" to "グレー",
+        )
+        val KoreanLabels = mapOf(
+            "PINK" to "분홍색", "RED" to "빨간색", "ORANGE" to "주황색", "AMBER" to "호박색",
+            "YELLOW" to "노란색", "LIME" to "라임색", "GREEN" to "초록색", "TEAL" to "청록색",
+            "CYAN" to "시안색", "LIGHT_BLUE" to "하늘색", "BLUE" to "파란색", "INDIGO" to "남색",
+            "PURPLE" to "보라색", "DEEP_PURPLE" to "진한 보라색", "BLUE_GREY" to "청회색", "GREY" to "회색",
+        )
+    }
 }
