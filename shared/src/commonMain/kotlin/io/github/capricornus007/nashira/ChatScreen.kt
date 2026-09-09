@@ -139,6 +139,7 @@ import de.connect2x.trixnity.clientserverapi.client.SyncState
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.TextFieldState
@@ -1263,24 +1264,32 @@ private fun TimelinePane(
     // 輸入通知（typing）：草稿非空時發 true（伺服器 20s 逾時，每 8s 續約一次），
     // 清空／送出／離開房間時發 false。離開房間的取消路徑靠 try/finally。
     LaunchedEffect(room.roomId) {
+        var typingRenewJob: Job? = null
         try {
             snapshotFlow { draft.text.toString().isNotBlank() }
                 .distinctUntilChanged()
                 .collect { active ->
                     if (active) {
                         roomRepository.setTyping(room.roomId, true)
-                        // 續約循環：只要還在輸入就每 8 秒重發，防止伺服器端逾時
-                        while (draft.text.toString().isNotBlank()) {
-                            delay(8_000)
-                            if (draft.text.toString().isNotBlank()) {
-                                roomRepository.setTyping(room.roomId, true)
+                        typingRenewJob?.cancel()
+                        typingRenewJob = launch {
+                            // 續約循環：只要還在輸入就每 8 秒重發，防止伺服器端逾時。
+                            // 獨立子工作讓草稿變空時，外層 collect 能立即收到 false。
+                            while (draft.text.toString().isNotBlank()) {
+                                delay(8_000)
+                                if (draft.text.toString().isNotBlank()) {
+                                    roomRepository.setTyping(room.roomId, true)
+                                }
                             }
                         }
                     } else {
+                        typingRenewJob?.cancel()
+                        typingRenewJob = null
                         roomRepository.setTyping(room.roomId, false)
                     }
                 }
         } finally {
+            typingRenewJob?.cancel()
             roomRepository.setTyping(room.roomId, false)
         }
     }
@@ -1348,8 +1357,9 @@ private fun TimelinePane(
             sending = true
             val target = replyTo?.eventId
             val edit = editTarget?.eventId
+            val editState = editTarget
             replyTo = null
-            editTarget = null
+            if (edit == null) editTarget = null
             scope.launch {
                 val result = if (edit != null) {
                     roomRepository.editText(room.roomId, edit, body)
@@ -1358,8 +1368,10 @@ private fun TimelinePane(
                 } else {
                     roomRepository.sendText(room.roomId, body)
                 }
+                result.onSuccess { editTarget = null }
                 result.onFailure {
                     draft.setTextAndPlaceCursorAtEnd(body)
+                    editTarget = editState
                     sendError = io.github.capricornus007.nashira.i18n.friendlyError(it)
                 }
                 sending = false
