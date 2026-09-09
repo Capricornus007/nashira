@@ -29,6 +29,9 @@ actual fun clearPersistentStore(databaseKey: String) {
 
 actual fun mediaStoreDirectory(databaseKey: String): String {
     val context = TokenStorage.context ?: error("TokenStorage.context 未注入")
-    // cacheDir：系統空間不足時可回收，媒體本來就能重新下載
-    return java.io.File(context.cacheDir, "media-${safeKey(databaseKey)}").absolutePath
+    // 不放 cacheDir：清除快取會把 Room/okio 媒體 store 的目錄與鎖檔一起刪掉，
+    // 下一次恢復可能在建庫階段失敗，舊版還會因此誤清 token。這是可重新下載的
+    // 媒體，但建立 client 的路徑不能依賴可被系統隨時刪掉的目錄；noBackupFilesDir
+    // 仍不會被「清除快取」刪除，也不會把大量媒體塞進裝置備份。
+    return java.io.File(context.noBackupFilesDir, "media-${safeKey(databaseKey)}").absolutePath
 }

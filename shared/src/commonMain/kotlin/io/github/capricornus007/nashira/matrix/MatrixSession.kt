@@ -145,22 +145,28 @@ object MatrixEngine {
         }
         _restoring.value = true
         val key = databaseKey(stored.baseUrl, stored.userId)
-        val client = MatrixClient.create(
-            repositoriesModule = persistentRepositories(key),
-            mediaStoreModule = persistentMediaStore(key),
-            cryptoDriverModule = CryptoDriverModule.vodozemac(),
-            authProviderData = MatrixClientAuthProviderData.classic(
-                baseUrl = Url(stored.baseUrl),
-                accessToken = stored.accessToken,
-                refreshToken = stored.refreshToken,
-            ),
-            configuration = {
-                this.syncFilter = MatrixEngine.syncFilter
-                this.modulesFactories = trixnityModuleFactoriesWithPonies()
-                this.httpClientEngine = platformHttpEngine()
-            },
-        ).getOrNull() ?: run {
-            storage.clear()
+        val client = runCatching {
+            MatrixClient.create(
+                repositoriesModule = persistentRepositories(key),
+                mediaStoreModule = persistentMediaStore(key),
+                cryptoDriverModule = CryptoDriverModule.vodozemac(),
+                authProviderData = MatrixClientAuthProviderData.classic(
+                    baseUrl = Url(stored.baseUrl),
+                    accessToken = stored.accessToken,
+                    refreshToken = stored.refreshToken,
+                ),
+                configuration = {
+                    this.syncFilter = MatrixEngine.syncFilter
+                    this.modulesFactories = trixnityModuleFactoriesWithPonies()
+                    this.httpClientEngine = platformHttpEngine()
+                },
+            ).getOrThrow()
+        }.onFailure {
+            // 建庫失敗不等於 token 失效：清除 Android 快取後，媒體目錄／鎖檔可能
+            // 正在重建。絕不能在這條暫時性錯誤路徑清掉登入憑證，否則使用者會被
+            // 無故登出；保留 token，下一次啟動或手動重試再恢復即可。
+            println("NASHIRA_RESTORE: client create failed: ${it.stackTraceToString()}")
+        }.getOrNull() ?: run {
             _restoring.value = false
             return@withLock
         }

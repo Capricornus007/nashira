@@ -6,6 +6,8 @@ import de.connect2x.trixnity.client.room.TimelineState
 import de.connect2x.trixnity.client.store.RoomUser
 import de.connect2x.trixnity.client.store.RoomOutboxMessage
 import de.connect2x.trixnity.client.store.TimelineEvent
+import de.connect2x.trixnity.core.model.events.m.room.RoomMessageEventContent
+import de.connect2x.trixnity.core.model.events.m.RelatesTo
 import de.connect2x.trixnity.core.model.EventId
 import de.connect2x.trixnity.core.model.RoomId
 import de.connect2x.trixnity.core.model.UserId
@@ -96,11 +98,12 @@ class RoomTimeline(
                 // 先把每條事件流取到當下值：反應要先掃一遍才知道哪則訊息掛了哪些反應
                 val events = windowed.map { eventFlow -> eventFlow.first() }
                 val reactions = aggregateReactions(events)
+                val edits = aggregateEdits(events)
                 emit(
                     TimelinePage(
                         // elements 是舊→新，UI 要新→舊
                         messages = events.asReversed().mapNotNull { event ->
-                            toMessage(event, members, reactions, pinnedIds)
+                            toMessage(event, members, reactions, pinnedIds, edits)
                         },
                         eventCount = state.elements.size,
                         canLoadMore = state.canLoadBefore,
@@ -182,14 +185,38 @@ class RoomTimeline(
         return result
     }
 
+    /**
+     * 把載入視窗內的 `m.replace` 事件收成「被編輯的事件 → 最新內容」。
+     * 跟反應同一套思路：只聚合目前載入的這一段；列表是舊→新，後掃到的覆蓋先前的
+     * （後到的編輯較新）。編輯事件本身會被 [toMessage] 濾掉，只在原訊息上生效。
+     */
+    private fun aggregateEdits(events: List<TimelineEvent>): Map<EventId, MessageEventContent> {
+        val result = mutableMapOf<EventId, MessageEventContent>()
+        events.forEach { event ->
+            val content = event.content?.getOrNull() ?: event.event.content
+            val replace = (content as? MessageEventContent)?.relatesTo as? RelatesTo.Replace ?: return@forEach
+            // 只認文字編輯：newContent 一定是 MessageEventContent，非文字的聚合無從渲染
+            val newContent = replace.newContent
+            if (newContent is RoomMessageEventContent.TextBased) {
+                result[replace.eventId] = newContent
+            }
+        }
+        return result
+    }
+
     private suspend fun toMessage(
         timelineEvent: TimelineEvent,
         members: Map<UserId, RoomUser>,
         reactions: Map<EventId, Map<String, ReactionInfo>>,
         pinnedIds: List<EventId>,
+        edits: Map<EventId, MessageEventContent> = emptyMap(),
     ): TimelineMessage? {
         val roomEvent = timelineEvent.event
+        // m.replace 編輯事件不單獨顯示：聚合後掛在原訊息上（見 aggregateEdits）
+        val eventContent = timelineEvent.content?.getOrNull() ?: roomEvent.content
+        if ((eventContent as? MessageEventContent)?.relatesTo is RelatesTo.Replace) return null
         val member = members[roomEvent.sender]
+        val edited = edits[roomEvent.id]
         return TimelineMessage(
             eventId = roomEvent.id,
             roomId = roomId,
@@ -197,8 +224,10 @@ class RoomTimeline(
             senderName = member?.name.visibleNameOrNull()
                 ?: roomEvent.sender.full.removePrefix("@").substringBefore(':'),
             senderAvatarUrl = member?.event?.content?.avatarUrl,
-            body = timelineEvent.messageBodyOrNull() ?: return null,
+            // 編輯過的訊息優先用最新內容；聚合到的 newContent 一定是 TextBased
+            body = edited?.messageBodyOrNull() ?: timelineEvent.messageBodyOrNull() ?: return null,
             timestamp = roomEvent.originTimestamp,
+            edited = edited != null,
             reactions = reactions[roomEvent.id].orEmpty(),
             externalUrl = (timelineEvent.content?.getOrNull() ?: roomEvent.content).let { content ->
                 (content as? MessageEventContent)?.externalUrl

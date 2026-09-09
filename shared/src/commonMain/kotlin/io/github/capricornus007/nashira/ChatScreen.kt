@@ -85,6 +85,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.MoreVert
@@ -136,6 +137,7 @@ import io.github.capricornus007.nashira.matrix.MessageBody
 import de.connect2x.trixnity.clientserverapi.client.SyncState
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.TextFieldState
@@ -1246,11 +1248,49 @@ private fun TimelinePane(
     var sendError by remember(room.roomId) { mutableStateOf<String?>(null) }
     /** 選了「回覆」之後要附上的目標訊息；送出後清掉。 */
     var replyTo by remember(room.roomId) { mutableStateOf<TimelineMessage?>(null) }
+    /** 選了「編輯」之後要替換的原訊息；取消或送出後清掉。 */
+    var editTarget by remember(room.roomId) { mutableStateOf<TimelineMessage?>(null) }
     val clipboard = LocalClipboardManager.current
     // 使用者一改動草稿就把上一次的錯誤訊息收掉
     LaunchedEffect(draft) {
         snapshotFlow { draft.text.toString() }.collect { sendError = null }
     }
+    // 輸入通知（typing）：草稿非空時發 true（伺服器 20s 逾時，每 8s 續約一次），
+    // 清空／送出／離開房間時發 false。離開房間的取消路徑靠 try/finally。
+    LaunchedEffect(room.roomId) {
+        try {
+            snapshotFlow { draft.text.toString().isNotBlank() }
+                .distinctUntilChanged()
+                .collect { active ->
+                    if (active) {
+                        roomRepository.setTyping(room.roomId, true)
+                        // 續約循環：只要還在輸入就每 8 秒重發，防止伺服器端逾時
+                        while (draft.text.toString().isNotBlank()) {
+                            delay(8_000)
+                            if (draft.text.toString().isNotBlank()) {
+                                roomRepository.setTyping(room.roomId, true)
+                            }
+                        }
+                    } else {
+                        roomRepository.setTyping(room.roomId, false)
+                    }
+                }
+        } finally {
+            roomRepository.setTyping(room.roomId, false)
+        }
+    }
+    val typingNames by remember(roomRepository, room.roomId) {
+        roomRepository.typingUsers(room.roomId)
+    }.collectAsState(initial = emptyList())
+    // 已讀提示（Element 式）：追蹤自己最新一則訊息的 m.read 回執人數。
+    // 列表新→舊排序，firstOrNull 找到的是自己最近的一則（別人後來發言不影響）。
+    val lastOwnEventId = remember(messages) {
+        messages?.firstOrNull { it.sender == roomRepository.client.userId }?.eventId
+    }
+    val ownReadCount by remember(roomRepository, room.roomId, lastOwnEventId) {
+        if (lastOwnEventId != null) roomRepository.readCount(room.roomId, lastOwnEventId)
+        else kotlinx.coroutines.flow.flowOf(0)
+    }.collectAsState(initial = 0)
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
@@ -1302,9 +1342,13 @@ private fun TimelinePane(
             draft.clearText()
             sending = true
             val target = replyTo?.eventId
+            val edit = editTarget?.eventId
             replyTo = null
+            editTarget = null
             scope.launch {
-                val result = if (target != null) {
+                val result = if (edit != null) {
+                    roomRepository.editText(room.roomId, edit, body)
+                } else if (target != null) {
                     roomRepository.sendReply(room.roomId, target, body)
                 } else {
                     roomRepository.sendText(room.roomId, body)
@@ -1454,6 +1498,22 @@ private fun TimelinePane(
         },
         bottomBar = {
             Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).navigationBarsPadding().imePadding()) {
+                // 正在輸入…（Discord 式）：1 人點名、2 人雙名、3+ 概括。掛在輸入列
+                // 最上方（回覆預覽之上），不佔輸入列本身的高度。
+                if (typingNames.isNotEmpty()) {
+                    Text(
+                        text = when (typingNames.size) {
+                            1 -> strings.typingOne.format(typingNames[0])
+                            2 -> strings.typingTwo.format(typingNames[0], typingNames[1])
+                            else -> strings.typingMany
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
+                    )
+                }
                 // 回覆預覽：跟 Element／Telegram 一樣掛在輸入列上方——除了「回覆給誰」
                 // 還要顯示被引用的內容，否則挑錯訊息了也看不出來。左邊一條豎線標示引用。
                 replyTo?.let { target ->
@@ -1489,6 +1549,45 @@ private fun TimelinePane(
                             )
                         }
                         IconButton(onClick = { replyTo = null }, modifier = Modifier.size(32.dp)) {
+                            Icon(
+                                Icons.Filled.Close,
+                                contentDescription = strings.cancel,
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+                // 編輯預覽：沿用同一個輸入列，明確顯示目前是在修改哪則訊息。
+                editTarget?.let { target ->
+                    Row(
+                        Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            Modifier.width(3.dp).height(32.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(MaterialTheme.colorScheme.primary),
+                        )
+                        Column(Modifier.weight(1f).padding(start = 10.dp)) {
+                            Text(
+                                strings.editingMessage,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                            )
+                            Text(
+                                (target.body as? MessageBody.Text)?.text.orEmpty(),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        IconButton(onClick = {
+                            editTarget = null
+                            draft.clearText()
+                        }, modifier = Modifier.size(32.dp)) {
                             Icon(
                                 Icons.Filled.Close,
                                 contentDescription = strings.cancel,
@@ -1719,6 +1818,13 @@ private fun TimelinePane(
                             }
                         },
                         onReply = { replyTo = msg },
+                        onEdit = {
+                            if (msg.body is MessageBody.Text && msg.eventId != null) {
+                                editTarget = msg
+                                replyTo = null
+                                draft.setTextAndPlaceCursorAtEnd((msg.body as MessageBody.Text).text)
+                            }
+                        },
                         onCopyText = {
                             (msg.body as? MessageBody.Text)?.let { text ->
                                 clipboard.setText(AnnotatedString(text.text))
@@ -1789,6 +1895,27 @@ private fun TimelinePane(
                             }
                         },
                     )
+                    // 已讀提示（Element 式 ✓）：掛在自己最新一則訊息的正下方，
+                    // 有人 m.read 到這則就顯示人數；reverseLayout 下這裡是視覺下方。
+                    if (msg.eventId == lastOwnEventId && ownReadCount > 0) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(end = 22.dp),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                Icons.Filled.Done,
+                                contentDescription = null,
+                                modifier = Modifier.size(13.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Text(
+                                " " + strings.readByCount.format(ownReadCount),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                     // 分隔線畫在這則訊息「上方」，reverseLayout 下要在 MessageRow 之後發出
                     if (newDay) DateDivider(formatDateDivider(msg.timestamp, today, strings))
                 }
@@ -2147,6 +2274,7 @@ private fun MessageRow(
     onToggleSelection: () -> Unit,
     onEnterSelection: () -> Unit,
     onReply: () -> Unit,
+    onEdit: () -> Unit,
     onCopyText: () -> Unit,
     onCopyLink: () -> Unit,
     onDelete: () -> Unit,
@@ -2207,6 +2335,14 @@ private fun MessageRow(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(start = 8.dp, bottom = 1.dp),
                         )
+                        if (msg.edited) {
+                            Text(
+                                strings.messageEdited,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(start = 6.dp, bottom = 1.dp),
+                            )
+                        }
                     }
                 }
                 // 送出中／送出失敗：Telegram 與 Element 都在本機先畫出來再標狀態，
@@ -2324,6 +2460,9 @@ private fun MessageRow(
                 ContextMenuItem(strings.actionCopyText) { menuOpen = false; onCopyText() }
             }
             if (settled) {
+                if (isOwn && msg.body is MessageBody.Text) {
+                    ContextMenuItem(strings.actionEdit) { menuOpen = false; onEdit() }
+                }
                 ContextMenuItem(strings.actionCopyLink) { menuOpen = false; onCopyLink() }
                 ContextMenuItem(if (msg.pinned) strings.actionUnpin else strings.actionPin) {
                     menuOpen = false

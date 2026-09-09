@@ -5,6 +5,7 @@ import de.connect2x.trixnity.client.room
 import de.connect2x.trixnity.client.notification
 import de.connect2x.trixnity.client.room.getAccountData
 import de.connect2x.trixnity.client.room.getState
+import de.connect2x.trixnity.client.room.message.replace
 import de.connect2x.trixnity.client.room.message.text
 import de.connect2x.trixnity.client.room.toFlowList
 import de.connect2x.trixnity.client.flattenNotNull
@@ -17,6 +18,7 @@ import de.connect2x.trixnity.client.user
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import de.connect2x.trixnity.core.model.EventId
+import de.connect2x.trixnity.core.model.events.m.ReceiptType
 import de.connect2x.trixnity.core.model.RoomId
 import de.connect2x.trixnity.core.model.events.m.room.EncryptionEventContent
 import de.connect2x.trixnity.core.model.events.m.room.ImageInfo
@@ -169,6 +171,8 @@ data class TimelineMessage(
     val externalUrl: String? = null,
     /** 這則訊息是否被圖釘（`m.room.pinned_events`）。 */
     val pinned: Boolean = false,
+    /** 這則訊息被編輯過（聚合了最新的 m.replace 內容）。 */
+    val edited: Boolean = false,
 )
 
 /** 單一表情的反應統計。[mine] 非 null 表示自己按過，值是自己那則 reaction 事件（用來撤回）。 */
@@ -488,11 +492,71 @@ class RoomRepository(val client: MatrixClient) {
         client.api.room.setReadMarkers(roomId, fullyRead = lastEventId, read = lastEventId)
     }
 
+    /**
+     * 通知房間自己正在（停止）輸入。伺服器端 typing 有逾時（這裡給 20s），
+ * 輸入期間由 UI 每 ~8s 重發一次續約；清空草稿／送出時發 false 立即收回。
+     */
+    suspend fun setTyping(roomId: RoomId, typing: Boolean) {
+        runCatching {
+            client.api.room.setTyping(
+                roomId, client.userId, typing, if (typing) 20_000L else null,
+            )
+        }
+    }
+
+    /** 正在輸入的其他用戶顯示名（不含自己）：輸入列上方的「正在輸入…」提示。 */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun typingUsers(roomId: RoomId): Flow<List<String>> =
+        client.room.usersTyping.flatMapLatest { typingByRoom ->
+            val others = typingByRoom[roomId]?.users?.filter { it != client.userId }.orEmpty()
+            if (others.isEmpty()) {
+                flowOf(emptyList())
+            } else {
+                combine(others.map { userId ->
+                    client.user.getById(roomId, userId).map { member ->
+                        member?.name.visibleNameOrNull()
+                            ?: userId.full.removePrefix("@").substringBefore(':')
+                    }
+                }) { names -> names.toList() }
+            }
+        }.distinctUntilChanged().flowOn(Dispatchers.Default)
+
+    /**
+     * 已讀到指定事件的其他用戶數（不含自己）：m.read 回執指向該事件即視為已讀。
+     * 顯示在自己最後一則訊息下方（Element 式已讀提示）。
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun readCount(roomId: RoomId, eventId: EventId): Flow<Int> =
+        client.user.getAllReceipts(roomId).flatMapLatest { receiptsByUser ->
+            val flows = receiptsByUser.map { (userId, receiptsFlow) ->
+                receiptsFlow.map { receipts ->
+                    // 內層流可為 null（該用戶尚無回執記錄）
+                    userId to (receipts?.receipts?.get(ReceiptType.Read)?.eventId == eventId)
+                }
+            }
+            if (flows.isEmpty()) {
+                flowOf(0)
+            } else {
+                combine(flows) { pairs ->
+                    pairs.count { (userId, read) -> read && userId != client.userId }
+                }
+            }
+        }.distinctUntilChanged().flowOn(Dispatchers.Default)
+
     /** 發送文字訊息 */
     suspend fun sendText(roomId: RoomId, body: String): Result<String> =
         runCatching {
             client.room.sendMessage(roomId) {
                 text(body)
+            }
+        }
+
+    /** 編輯自己已送出的文字訊息（m.replace + m.new_content）。 */
+    suspend fun editText(roomId: RoomId, originalEventId: EventId, newBody: String): Result<String> =
+        runCatching {
+            client.room.sendMessage(roomId) {
+                replace(originalEventId)
+                text(newBody)
             }
         }
 

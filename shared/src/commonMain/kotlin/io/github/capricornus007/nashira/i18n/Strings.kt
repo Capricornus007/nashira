@@ -34,6 +34,13 @@ interface Strings {
     val notifUndecryptable: String
     val sendImage: String
     val verified: String
+    val typingOne: String
+    val typingTwo: String
+    val typingMany: String
+    val readByCount: String
+    val actionEdit: String
+    val editingMessage: String
+    val messageEdited: String
     val tagline: String
     val appearance: String
     val darkTheme: String
@@ -260,6 +267,13 @@ object ZhTwStrings : Strings {
     override val notifUndecryptable = "[無法解密]"
     override val sendImage = "傳送圖片"
     override val verified = "已驗證"
+    override val typingOne = "%s 正在輸入…"
+    override val typingTwo = "%s 和 %s 正在輸入…"
+    override val typingMany = "好幾個人正在輸入…"
+    override val readByCount = "%d 人已讀"
+    override val actionEdit = "編輯訊息"
+    override val editingMessage = "編輯訊息"
+    override val messageEdited = "已編輯"
     override val tagline = "γ Capricorni · 報佳音之星"
     override val appearance = "外觀"
     override val darkTheme = "深色"
@@ -478,6 +492,13 @@ object EnStrings : Strings {
     override val notifUndecryptable = "[Undecryptable]"
     override val sendImage = "Send image"
     override val verified = "Verified"
+    override val typingOne = "%s is typing…"
+    override val typingTwo = "%s and %s are typing…"
+    override val typingMany = "Several people are typing…"
+    override val readByCount = "Read by %d"
+    override val actionEdit = "Edit message"
+    override val editingMessage = "Editing message"
+    override val messageEdited = "edited"
     override val tagline = "γ Capricorni, the bringer of good news"
     override val appearance = "Appearance"
     override val darkTheme = "Dark"
