@@ -17,3 +17,11 @@ expect val keyboardLayoutSettingsSupported: Boolean
 
 /** 套用背景同步設定（Android 啟動／停止前台服務；桌面 no-op）。 */
 expect fun applyBackgroundSync(enabled: Boolean)
+
+/**
+ * 裝置在伺服器上的顯示名（工作階段清單裡別人看到的名字）。
+ * 區分平台：Element 顯示 "Element Nightly on Nightly for Linux" 這種格式，
+ * Nashira 對應 "Nashira on Android" / "Nashira on Linux"——幾台裝置同時登入時
+ * 才分得出誰是誰（用戶工作階段清單真機實測需求）。
+ */
+expect val platformDeviceDisplayName: String

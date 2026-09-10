@@ -20,6 +20,7 @@ import io.github.capricornus007.nashira.theme.ThemeAccent
 import io.github.capricornus007.nashira.theme.ThemeMode
 import io.github.capricornus007.nashira.theme.dynamicColorSupported
 import io.github.capricornus007.nashira.theme.wallpaperSeedColor
+import io.github.capricornus007.nashira.i18n.stringsFor
 
 /**
  * 哪一種 Enter 組合送出訊息；其餘的 Enter 一律換行。
@@ -153,6 +154,8 @@ fun App(defaultDark: Boolean? = null) {
     // 配色補間（照 InstallerX：每槽 animateColorAsState(spring()) 物理彈簧曲線）
     val session by MatrixEngine.session.collectAsState()
     val restoring by MatrixEngine.restoring.collectAsState()
+    val loggingIn by MatrixEngine.loggingIn.collectAsState()
+    val strings = stringsFor(LocalUiState.current.language)
     androidx.compose.runtime.LaunchedEffect(Unit) { MatrixEngine.restoreFromDisk() }
     val animatedScheme = target.animateAsState()
 
@@ -167,8 +170,11 @@ fun App(defaultDark: Boolean? = null) {
                 // 裝置驗證請求可能在任何畫面到來，所以對話框掛在最外層（蓋住設定頁）
                 DeviceVerificationHost(current)
             }
-            // 磁碟有憑證時先顯示啟動頁，不再閃一次登入表單
+            // 磁碟有憑證時先顯示啟動頁，不再閃一次登入表單；
+            // SSO/密碼登入交換期間顯示「正在登入」——從瀏覽器跳回來時
+            // 停在帳密頁會讓人以為失敗（真機用戶實測回報）。
             restoring -> StartupScreen()
+            loggingIn -> StartupScreen(message = strings.loggingIn)
             else -> LoginScreen(onLoginSuccess = { })
         }
     }

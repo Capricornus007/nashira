@@ -212,6 +212,7 @@ interface Strings {
     /** 日期分隔線的完整日期，各語言自行排列年月日 */
     fun formatDate(year: Int, month: Int, day: Int): String
     val homeserver: String
+    val loggingIn: String
     val loginPassword: String
     val loginSubmit: String
     val logout: String
@@ -443,6 +444,7 @@ object ZhTwStrings : Strings {
     override val loginSso = "使用 Matrix SSO 登入"
     override val loginSsoHint = "將在瀏覽器開啟家伺服器的官方登入頁"
     override val homeserver = "家伺服器"
+    override val loggingIn = "正在登入…"
     override val loginPassword = "密碼"
     override val loginSubmit = "登入"
     override val today = "今天"
@@ -683,6 +685,7 @@ object JaStrings : Strings by EnStrings {
     override val yearsAgo = "%d 年前"
     override fun formatDate(year: Int, month: Int, day: Int) = "${year}年${month}月${day}日"
     override val homeserver = "ホームサーバー"
+    override val loggingIn = "ログイン中…"
     override val loginPassword = "パスワード"
     override val loginSubmit = "ログイン"
     override val logout = "ログアウト"
@@ -914,6 +917,7 @@ object KoStrings : Strings by EnStrings {
     override val yearsAgo = "%d년 전"
     override fun formatDate(year: Int, month: Int, day: Int) = "${year}년 ${month}월 ${day}일"
     override val homeserver = "홈서버"
+    override val loggingIn = "로그인 중…"
     override val loginPassword = "비밀번호"
     override val loginSubmit = "로그인"
     override val logout = "로그아웃"
@@ -1136,6 +1140,7 @@ object EnStrings : Strings {
     override val appearanceHint = "Theme mode, dynamic color, and palette"
     override val chatListHint = "Space icons, unread indicators, previews, and sticker panel"
     override val homeserver = "Home server"
+    override val loggingIn = "Signing in…"
     override val loginPassword = "Password"
     override val loginSubmit = "Log in"
     override val logout = "Log out"

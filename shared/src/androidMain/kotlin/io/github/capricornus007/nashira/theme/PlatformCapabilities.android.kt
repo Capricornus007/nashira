@@ -26,3 +26,5 @@ actual fun applyBackgroundSync(enabled: Boolean) {
         }
     }
 }
+
+actual val platformDeviceDisplayName: String = "Nashira on Android"

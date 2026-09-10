@@ -887,9 +887,12 @@ private fun ChannelPane(
         }
         if (visible.isEmpty()) {
             when {
-                // 同步中不擺佔畫面的轉圈：畫骨架，讓等待看起來是內容在長出來
-                query.isBlank() &&
-                    (syncState == SyncState.INITIAL_SYNC || syncState == SyncState.STARTED || syncState == SyncState.TIMEOUT) ->
+                // 同步中不擺佔畫面的轉圈：畫骨架，讓等待看起來是內容在長出來。
+                // 首次同步（SSO/新登入）在 syncState 已轉 RUNNING、首批房間數據
+                // 還沒落地時列表也是空的——只認 INITIAL_SYNC/STARTED 會閃過
+                // 「目前沒有可顯示的房間」再跳回骨架（真機 SSO 後實測）。
+                // 所以：清單空且同步循環還活著（未 STOPPED）一律畫骨架。
+                query.isBlank() && syncState != SyncState.STOPPED ->
                     RoomListSkeleton(Modifier.fillMaxWidth().weight(1f))
                 else -> Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                     Text(

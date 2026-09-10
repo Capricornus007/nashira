@@ -8,6 +8,7 @@ import de.connect2x.trixnity.client.media.okio.okio
 import okio.Path.Companion.toPath
 import de.connect2x.trixnity.clientserverapi.client.MatrixClientAuthProviderData
 import de.connect2x.trixnity.clientserverapi.client.classic
+import io.github.capricornus007.nashira.theme.platformDeviceDisplayName
 import de.connect2x.trixnity.clientserverapi.client.classicLogin
 import de.connect2x.trixnity.clientserverapi.client.unauthenticated
 import de.connect2x.trixnity.clientserverapi.client.classicLoginWithToken
@@ -83,6 +84,14 @@ object MatrixEngine {
     /** 磁碟憑證恢復中：UI 首帧就顯示啟動頁而不是登入表單 */
     private val _restoring = MutableStateFlow(runCatching { storage.load() != null }.getOrDefault(false))
     val restoring: StateFlow<Boolean> = _restoring.asStateFlow()
+
+    /**
+     * 登入交換中（密碼或 SSO token）：UI 顯示「正在登入」而不是閃回登入表單。
+     * SSO 從瀏覽器跳回 app 時特別重要——token 交換要好幾秒，停在帳密頁
+     * 會讓人以為登入失敗又再按一次（真機用戶實測回報）。
+     */
+    private val _loggingIn = MutableStateFlow(false)
+    val loggingIn: StateFlow<Boolean> = _loggingIn.asStateFlow()
 
     // 手機先同步最近訊息；限制初次同步資料量，避免房間清單長時間只顯示載入中。
     private val syncFilter = Filters(
@@ -183,11 +192,21 @@ object MatrixEngine {
      */
     suspend fun login(baseUrl: String, username: String, password: String): Result<Unit> {
         if (_session.value != null) return Result.failure(IllegalStateException("already logged in"))
+        _loggingIn.value = true
+        try {
+            return loginInternal(baseUrl, username, password)
+        } finally {
+            _loggingIn.value = false
+        }
+    }
+
+    private suspend fun loginInternal(baseUrl: String, username: String, password: String): Result<Unit> {
+        if (_session.value != null) return Result.failure(IllegalStateException("already logged in"))
         val authData = MatrixClientAuthProviderData.classicLogin(
             baseUrl = Url(baseUrl),
             identifier = IdentifierType.User(username),
             password = password,
-            initialDeviceDisplayName = "Nashira",
+            initialDeviceDisplayName = platformDeviceDisplayName,
         ).getOrElse { return Result.failure(it) }
 
         val key = databaseKey(baseUrl, username)
@@ -234,12 +253,22 @@ object MatrixEngine {
      */
     suspend fun loginWithToken(baseUrl: String, loginToken: String): Result<Unit> {
         if (_session.value != null) return Result.failure(IllegalStateException("already logged in"))
+        _loggingIn.value = true
+        try {
+            return loginWithTokenInternal(baseUrl, loginToken)
+        } finally {
+            _loggingIn.value = false
+        }
+    }
+
+    private suspend fun loginWithTokenInternal(baseUrl: String, loginToken: String): Result<Unit> {
+        if (_session.value != null) return Result.failure(IllegalStateException("already logged in"))
         val authData = MatrixClientAuthProviderData.classicLoginWithToken(
             baseUrl = Url(baseUrl),
             identifier = null,
             token = loginToken,
             deviceId = null,
-            initialDeviceDisplayName = "Nashira",
+            initialDeviceDisplayName = platformDeviceDisplayName,
             refreshToken = true,
             httpClientEngine = platformHttpEngine(),
         ).getOrElse { return Result.failure(it) }
@@ -258,8 +287,15 @@ object MatrixEngine {
             },
         )
 
-        // 臨時鍵先起一次 client 只為了拿 userId；再以真身分鍵重建（舊庫清理重試見 login()）。
-        val probe = create(tempKey).getOrElse { return Result.failure(it) }
+        // 臨時鍵先起一次 client 只為了拿 userId；再以真身分鍵重建。
+        // 兩段都要帶舊庫清理重試（見 login() 的說明）：probe 撞的可能是上次
+        // SSO 留下的 -sso 庫，realKey 撞的可能是同帳號先前登入的庫——
+        // 任一段的 deviceId 不一致都會 create 失敗（真機 logcat 實證）。
+        val probe = create(tempKey).getOrElse { first ->
+            if (!isStaleStoreError(first)) return Result.failure(first)
+            clearPersistentStore(tempKey)
+            create(tempKey).getOrElse { return Result.failure(it) }
+        }
         val realKey = databaseKey(baseUrl, probe.userId.full)
         val client = if (realKey == tempKey) {
             probe

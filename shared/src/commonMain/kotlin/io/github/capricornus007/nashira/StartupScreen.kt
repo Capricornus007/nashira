@@ -41,7 +41,7 @@ import androidx.compose.ui.draw.clip
  * 「太醜」；骨架只留在 ChannelPane（清單已出現、還在同步的階段）。
  */
 @Composable
-fun StartupScreen() {
+fun StartupScreen(message: String? = null) {
     val strings = stringsFor(LocalUiState.current.language)
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(
@@ -55,7 +55,7 @@ fun StartupScreen() {
                 color = NashiraGold,
             )
             Text(
-                strings.restoringSession,
+                message ?: strings.restoringSession,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium,
                 color = MaterialTheme.colorScheme.onSurface,
