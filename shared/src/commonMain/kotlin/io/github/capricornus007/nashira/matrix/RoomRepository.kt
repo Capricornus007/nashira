@@ -17,6 +17,8 @@ import de.connect2x.trixnity.client.store.type
 import de.connect2x.trixnity.client.user
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
+import de.connect2x.trixnity.core.model.events.m.IgnoredUserListEventContent
+import de.connect2x.trixnity.clientserverapi.model.user.ProfileField
 import de.connect2x.trixnity.core.model.EventId
 import de.connect2x.trixnity.core.model.events.m.ReceiptType
 import de.connect2x.trixnity.core.model.RoomId
@@ -128,7 +130,7 @@ data class RoomMember(
  */
 sealed interface MessageBody {
     /** 純文字、emote、通知 */
-    data class Text(val text: String) : MessageBody
+    data class Text(val text: String, val formattedBody: String? = null) : MessageBody
 
     /** 圖片或貼圖。[caption] 是原始 body（檔名或描述），貼圖不畫背景也不裁切。
      *  [mimeType] 用來分出 Telegram 橋的 video/webm 動態貼圖（要抽幀顯示）。 */
@@ -502,6 +504,43 @@ class RoomRepository(val client: MatrixClient) {
     suspend fun markRead(roomId: RoomId) {
         val lastEventId = client.room.getById(roomId).first()?.lastEventId ?: return
         client.api.room.setReadMarkers(roomId, fullyRead = lastEventId, read = lastEventId)
+    }
+
+    // ===== P4 功能對等（Element 對照） =====
+
+    /** P4-1：屏蔽用戶（m.ignored_user_list 全域 account data）。 */
+    fun ignoredUsers(): Flow<Set<UserId>> =
+        client.di.get<de.connect2x.trixnity.client.store.GlobalAccountDataStore>()
+            .get(IgnoredUserListEventContent::class)
+            .map { it?.content?.ignoredUsers?.keys ?: emptySet() }
+
+    /** P4-1：加入/移出屏蔽名單。 */
+    suspend fun setIgnored(userId: UserId, ignored: Boolean): Result<Unit> = runCatching {
+        val current = client.di.get<de.connect2x.trixnity.client.store.GlobalAccountDataStore>()
+            .get(IgnoredUserListEventContent::class).firstOrNull()?.content?.ignoredUsers ?: emptyMap()
+        val next = if (ignored) current + (userId to JsonObject(emptyMap())) else current - userId
+        client.api.user.setAccountData(IgnoredUserListEventContent(next), client.userId).getOrThrow()
+    }
+
+    /** P4-2：把房間標記為完全已讀（fully_read marker，消除未讀但不發 read receipt）。 */
+    suspend fun markFullyRead(roomId: RoomId) = runCatching {
+        val lastEventId = client.room.getById(roomId).first()?.lastEventId ?: return@runCatching
+        client.api.room.setReadMarkers(roomId, fullyRead = lastEventId, read = null)
+    }
+
+    /** P4-3：更新顯示名稱。 */
+    suspend fun setDisplayName(name: String): Result<Unit> = runCatching {
+        client.api.user.setProfileField(userId = client.userId, field = ProfileField.DisplayName(name))
+    }
+
+    /** P4-3：上傳頭像並設為自己的 avatar。 */
+    suspend fun setAvatar(bytes: ByteArray, contentType: String): Result<Unit> = runCatching {
+        val mediaService = client.di.get<de.connect2x.trixnity.client.media.MediaService>()
+        val mxcUrl: String = mediaService.prepareUploadMedia(
+            flowOf(bytes),
+            io.ktor.http.ContentType.parse(contentType),
+        )
+        client.api.user.setProfileField(userId = client.userId, field = ProfileField.AvatarUrl(mxcUrl))
     }
 
     /**
@@ -958,7 +997,9 @@ internal fun TimelineEvent.messageBodyOrNull(): MessageBody? {
  */
 internal fun de.connect2x.trixnity.core.model.events.EventContent.messageBodyOrNull(): MessageBody? =
     when (this) {
-        is RoomMessageEventContent.TextBased -> MessageBody.Text(body)
+        is RoomMessageEventContent.TextBased ->
+            // P4-4：帶 formatted_body（HTML）——UI 層用它渲染粗體/斜體/連結/代碼塊
+            MessageBody.Text(body, this.formattedBody?.takeIf { format == "org.matrix.custom.html" && it.isNotBlank() })
         is RoomMessageEventContent.FileBased.Image ->
             imageBody(body, url, file, info as? ImageInfo, isSticker = false)
         is RoomMessageEventContent.FileBased -> MessageBody.Attachment(fileName ?: body)

@@ -3,6 +3,7 @@ package io.github.capricornus007.nashira
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -12,6 +13,7 @@ import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
@@ -50,6 +52,8 @@ import io.github.capricornus007.nashira.matrix.SelfVerificationOption
 import io.github.capricornus007.nashira.matrix.SelfVerificationStatus
 import io.github.capricornus007.nashira.matrix.SessionTrust
 import io.github.capricornus007.nashira.matrix.SessionLogout
+import de.connect2x.trixnity.clientserverapi.model.user.displayName
+import io.github.capricornus007.nashira.matrix.RoomRepository
 import io.github.capricornus007.nashira.matrix.VerificationRepository
 import io.github.capricornus007.nashira.settings.SettingsGroup
 import io.github.capricornus007.nashira.settings.SettingsItem
@@ -70,6 +74,7 @@ fun SecurityAndAccountScreen(
 ) {
     val strings = stringsFor(LocalUiState.current.language)
     val repository = remember(session) { VerificationRepository(session) }
+    val roomRepository = remember(session) { RoomRepository(session.client) }
     val scope = rememberCoroutineScope()
     val selfStatus by repository.selfVerification.collectAsState(initial = null)
     val activeDevice by repository.activeDeviceVerification.collectAsState()
@@ -122,6 +127,45 @@ fun SecurityAndAccountScreen(
                     title = strings.accountId,
                     description = session.client.userId.full,
                 )
+            }
+            item { shape ->
+                // P4-3：編輯顯示名稱（Element 對照）
+                var editing by remember { mutableStateOf(false) }
+                var name by remember { mutableStateOf("") }
+                val profile by session.client.profile.collectAsState()
+                val currentName = profile?.displayName ?: ""
+                if (editing) {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
+                        Text(strings.editDisplayName, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            androidx.compose.foundation.text.BasicTextField(
+                                value = name,
+                                onValueChange = { name = it },
+                                singleLine = true,
+                                textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+                                modifier = Modifier.weight(1f),
+                            )
+                            androidx.compose.material3.TextButton(onClick = {
+                                editing = false
+                                if (name.isNotBlank() && name != currentName) {
+                                    scope.launch {
+                                        roomRepository.setDisplayName(name.trim())
+                                            .onFailure { actionError = it.message }
+                                    }
+                                }
+                            }) { Text(strings.send) }
+                            androidx.compose.material3.TextButton(onClick = { editing = false }) { Text(strings.cancel) }
+                        }
+                    }
+                } else {
+                    SettingsItem(
+                        shape = shape,
+                        icon = Icons.Filled.Edit,
+                        title = strings.editDisplayName,
+                        description = currentName,
+                        onClick = { name = currentName; editing = true },
+                    )
+                }
             }
             item { shape ->
                 SettingsItem(

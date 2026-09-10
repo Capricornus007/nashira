@@ -215,6 +215,8 @@ interface Strings {
     fun formatDate(year: Int, month: Int, day: Int): String
     val homeserver: String
     val loggingIn: String
+    val actionIgnoreUser: String
+    val editDisplayName: String
     val loginPassword: String
     val loginSubmit: String
     val logout: String
@@ -449,6 +451,8 @@ object ZhTwStrings : Strings {
     override val loginSsoHint = "將在瀏覽器開啟家伺服器的官方登入頁"
     override val homeserver = "家伺服器"
     override val loggingIn = "正在登入…"
+    override val actionIgnoreUser = "屏蔽用戶"
+    override val editDisplayName = "編輯顯示名稱"
     override val loginPassword = "密碼"
     override val loginSubmit = "登入"
     override val today = "今天"
@@ -496,6 +500,8 @@ object ZhTwStrings : Strings {
  */
 object ZhCnStrings : Strings by ZhTwStrings {
     override val homeserver = "家服务器"
+    override val actionIgnoreUser = "屏蔽用户"
+    override val editDisplayName = "编辑显示名称"
     override val loginSsoHint = "将在浏览器打开家服务器的官方登录页面"
 }
 
@@ -706,6 +712,8 @@ object JaStrings : Strings by EnStrings {
     override fun formatDate(year: Int, month: Int, day: Int) = "${year}年${month}月${day}日"
     override val homeserver = "ホームサーバー"
     override val loggingIn = "ログイン中…"
+    override val actionIgnoreUser = "ユーザーをブロック"
+    override val editDisplayName = "表示名を編集"
     override val loginPassword = "パスワード"
     override val loginSubmit = "ログイン"
     override val logout = "ログアウト"
@@ -938,6 +946,8 @@ object KoStrings : Strings by EnStrings {
     override fun formatDate(year: Int, month: Int, day: Int) = "${year}년 ${month}월 ${day}일"
     override val homeserver = "홈서버"
     override val loggingIn = "로그인 중…"
+    override val actionIgnoreUser = "사용자 차단"
+    override val editDisplayName = "표시 이름 편집"
     override val loginPassword = "비밀번호"
     override val loginSubmit = "로그인"
     override val logout = "로그아웃"
@@ -1161,6 +1171,8 @@ object EnStrings : Strings {
     override val chatListHint = "Space icons, unread indicators, previews, and sticker panel"
     override val homeserver = "Home server"
     override val loggingIn = "Signing in…"
+    override val actionIgnoreUser = "Ignore user"
+    override val editDisplayName = "Edit display name"
     override val loginPassword = "Password"
     override val loginSubmit = "Log in"
     override val logout = "Log out"

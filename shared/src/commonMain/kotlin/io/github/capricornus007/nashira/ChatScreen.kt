@@ -1102,8 +1102,10 @@ private fun RoomListItem(
                     ContextMenuItem(strings.actionMarkRead) {
                         menuOpen = false
                         scope.launch {
+                            // fully_read marker（Element 行為）：不發 read receipt，
+                            // 只把未讀位置推到最新——其他裝置不會看到「已讀到最後」
+                            roomRepository.markFullyRead(room.roomId)
                             roomRepository.markRead(room.roomId)
-                            // 手動標記過的也要一起清掉，否則清單上的未讀狀態不會消
                             if (unread.markedUnread) roomRepository.setMarkedUnread(room.roomId, false)
                         }
                     }
@@ -1889,6 +1891,12 @@ private fun TimelinePane(
                             }
                         },
                         onReply = { replyTo = msg },
+                        onIgnoreUser = {
+                            scope.launch {
+                                roomRepository.setIgnored(msg.sender, true)
+                                    .onFailure { sendError = it.message }
+                            }
+                        },
                         onEdit = {
                             if (msg.body is MessageBody.Text && msg.eventId != null) {
                                 editTarget = msg
@@ -2457,6 +2465,7 @@ private fun MessageRow(
     onReply: () -> Unit,
     onEdit: () -> Unit,
     onCopyText: () -> Unit,
+    onIgnoreUser: () -> Unit,
     onCopyLink: () -> Unit,
     onDelete: () -> Unit,
     onViewSource: () -> Unit,
@@ -2662,6 +2671,12 @@ private fun MessageRow(
                 }
                 if (isOwn) {
                     ContextMenuItem(strings.actionDelete, destructive = true) { menuOpen = false; onDelete() }
+                } else {
+                    // P4-1：屏蔽用戶（Element 對照）——不在自己的訊息上顯示
+                    ContextMenuItem(strings.actionIgnoreUser, destructive = true) {
+                        menuOpen = false
+                        onIgnoreUser()
+                    }
                 }
             }
         }
