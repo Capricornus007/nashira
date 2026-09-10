@@ -155,9 +155,22 @@ class VerificationRepository(private val session: MatrixSession) {
      * 顯示已驗證、Nashira 全部未驗證）。
      */
     suspend fun sessions(): Result<List<DeviceSession>> = runCatching {
-        // 補齊金鑰：device keys + cross-signing keys（MSK/SSK/USK 一併回來）
+        // 補齊金鑰：把自帳標記為 outdated，交給 Trixnity 的 OutdatedKeysHandler 重拉
+        // device keys + cross-signing keys 並「重算 trustLevel」。直接呼叫 keys API 拿回應
+        // 不會進 store（真機實證：Element 簽了本裝置後，本機快取仍是 not_cross_signed、
+        // 簽章列表缺 MSK——device_lists.changed 不通知自己，Trixnity 被動方永遠不知道）。
         runCatching {
-            session.client.api.key.getKeys(mapOf(session.client.userId to setOf()), null).getOrThrow()
+            val keyStore = session.client.di.get<de.connect2x.trixnity.client.store.KeyStore>()
+            val tm = session.client.di.get<de.connect2x.trixnity.client.store.StoreTransactionManager>()
+            // 把自帳標記進 outdated 集合；OutdatedKeysHandler 的 updateLoop 在收
+            // outdatedKeysFlow 非空時自動重拉 keys 並重算全部 trustLevel。
+            // （context receiver 語法在 writeTransaction lambda 內可用）
+            tm.writeTransaction {
+                keyStore.updateOutdatedKeys { outdated -> outdated + session.client.userId }
+            }
+        }.onFailure {
+            // Koin 拿不到就退回直接 API（至少別的裝置的 keys 能進來）
+            runCatching { session.client.api.key.getKeys(mapOf(session.client.userId to setOf()), null) }
         }
         val devices = session.client.api.device.getDevices().getOrThrow()
         devices.map { device ->
