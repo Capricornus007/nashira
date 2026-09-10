@@ -61,7 +61,6 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
     var showMessagePreview by mutableStateOf(stored["showMessagePreview"]?.toBooleanStrictOrNull() ?: true)
 
     /** 貼圖面板貼在輸入列上方（Discord/Telegram 慣例）或下方（面板不推走輸入列） */
-    var stickerPanelAbove by mutableStateOf(stored["stickerPanelAbove"]?.toBooleanStrictOrNull() ?: true)
 
     /**
      * 寬版面的成員欄。預設收起（Discord 與 Element 都不是一進房就展開），
@@ -102,7 +101,6 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
             "spaceIconMode" to spaceIconMode.name,
             "showUnreadIndicators" to showUnreadIndicators.toString(),
             "showMessagePreview" to showMessagePreview.toString(),
-            "stickerPanelAbove" to stickerPanelAbove.toString(),
             "membersPanelOpen" to membersPanelOpen.toString(),
             "backgroundSync" to backgroundSync.toString(),
             "sendShortcut" to sendShortcut.name,

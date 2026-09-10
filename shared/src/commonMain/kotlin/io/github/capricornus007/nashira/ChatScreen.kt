@@ -1395,7 +1395,6 @@ private fun TimelinePane(
     var stickerPanel by remember(room.roomId) { mutableStateOf(false) }
     // 「＋」的附件選單（桌面是小彈窗、手機是底部面板）
     var attachMenu by remember(room.roomId) { mutableStateOf(false) }
-    val panelAbove = LocalUiState.current.stickerPanelAbove
     val sendShortcut = LocalUiState.current.sendShortcut
     // 輸入法與貼圖面板互斥（Telegram／Discord mobile 行為）：輸入框拿到焦點
     // （＝鍵盤要彈出）就收面板；反過來開面板要主動把鍵盤收掉——否則 Android 15
@@ -1809,8 +1808,10 @@ private fun TimelinePane(
                         }
                     }
                 }
-                // 「下方」擺法：釘在輸入列底下，撐開 bottomBar
-                if (stickerPanel && !panelAbove) {
+                // Telegram/微信式：貼圖面板固定在輸入列底下（佔鍵盤的位置）。
+                // 面板與鍵盤等高互斥——開面板收鍵盤、點輸入框收面板彈鍵盤，
+                // 輸入列位置不動，時間線永遠可見（用戶錄屏各家 app 對照定案）。
+                if (stickerPanel) {
                     stickerPanelContent(Modifier.padding(horizontal = 8.dp).padding(bottom = 8.dp))
                 }
             }
@@ -1998,23 +1999,6 @@ private fun TimelinePane(
                 }
             }
         }
-            // 「上方」擺法：浮在訊息區上，不推動輸入列。點空白處關閉（同 Discord）。
-            if (stickerPanel && panelAbove) {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                        ) { stickerPanel = false },
-                )
-                stickerPanelContent(
-                    Modifier
-                        .align(Alignment.BottomStart)
-                        .padding(start = 8.dp, end = 8.dp, bottom = 4.dp)
-                        .widthIn(max = 380.dp),
-                )
-            }
         }
     }
 

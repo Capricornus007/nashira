@@ -419,15 +419,6 @@ private fun ChatListPage(onBack: () -> Unit) {
                         }
                     }
                 }
-                item { shape ->
-                    SettingsSwitchItem(
-                        shape = shape,
-                        title = strings.stickerPanelPosition,
-                        description = if (ui.stickerPanelAbove) strings.stickerPanelAbove else strings.stickerPanelBelow,
-                        checked = ui.stickerPanelAbove,
-                        onCheckedChange = { ui.stickerPanelAbove = it },
-                    )
-                }
             }
         }
         // 背景同步只有 Android 有這回事（桌面視窗開著就一直同步）
