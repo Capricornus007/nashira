@@ -50,6 +50,14 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ModalBottomSheet
@@ -121,9 +129,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import de.connect2x.trixnity.clientserverapi.model.user.avatarUrl
 import de.connect2x.trixnity.clientserverapi.model.user.displayName
 import de.connect2x.trixnity.client.room
@@ -2683,6 +2691,144 @@ private fun MessageRow(
     }
 }
 
+
+
+/** 簡易 HTML → AnnotatedString 解析器（支援 Matrix 格式化訊息所需的標籤）。
+ *  Matrix 規範：org.matrix.custom.html 格式，常見標籤：
+ *  <b>, <strong> → 粗體
+ *  <i>, <em> → 斜體
+ *  <code> → 等寬字體（行內）
+ *  <pre><code> → 代碼塊
+ *  <a href="..."> → 可點擊連結
+ *  <br> → 換行
+ *  HTML 實體解碼（< > & " '）
+ *  不支援：巢狀標籤（簡化處理）、CSS、script、iframe 等。
+ */
+@Composable
+fun htmlToAnnotatedString(
+    html: String,
+    baseStyle: TextStyle = MaterialTheme.typography.bodyLarge,
+    linkColor: Color = MaterialTheme.colorScheme.primary,
+): AnnotatedString {
+    // 1) 先解碼 HTML 實體
+    var text = html
+        .replace("<", "<")
+        .replace(">", ">")
+        .replace("&", "&")
+        .replace("\"", "\"")
+        .replace("'", "'")
+        .replace("&nbsp;", " ")
+
+    // 2) 處理 <br> → 換行
+    text = text.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n")
+
+    // 3) 使用 buildAnnotatedString 簡單構建
+    return buildAnnotatedString {
+        // 正則匹配標籤：<tag> 或 </tag> 或 <tag attr="...">
+        val tagRegex = """<(/?)\\w+([^>]*)>""".toRegex()
+        var pos = 0
+        var currentStyle = SpanStyle(
+            color = baseStyle.color,
+            fontSize = baseStyle.fontSize,
+            fontWeight = baseStyle.fontWeight,
+            fontStyle = baseStyle.fontStyle,
+            fontFamily = baseStyle.fontFamily,
+            letterSpacing = baseStyle.letterSpacing,
+            textDecoration = baseStyle.textDecoration,
+            background = baseStyle.background,
+        )
+
+        while (pos < text.length) {
+            val match = tagRegex.find(text.substring(pos))
+            if (match == null) {
+                val remaining: String = text.substring(pos)
+                if (remaining.isNotBlank()) {
+                    withStyle(currentStyle) { append(remaining) }
+                }
+                break
+            }
+
+            val matchStart = pos + match.range.first
+            val matchEnd = pos + match.range.last + 1
+
+            if (matchStart > pos) {
+                val plain: String = text.substring(pos, matchStart)
+                if (plain.isNotBlank()) {
+                    withStyle(currentStyle) { append(plain) }
+                }
+            }
+
+            val isClosing = match.groupValues[1] == "/"
+            val tagName = match.groupValues[2].lowercase()
+            val attrs = match.groupValues[3]
+
+            when {
+                isClosing -> {
+                    currentStyle = SpanStyle(
+                        color = baseStyle.color,
+                        fontSize = baseStyle.fontSize,
+                        fontWeight = baseStyle.fontWeight,
+                        fontStyle = baseStyle.fontStyle,
+                        fontFamily = baseStyle.fontFamily,
+                        letterSpacing = baseStyle.letterSpacing,
+                        textDecoration = baseStyle.textDecoration,
+                        background = baseStyle.background,
+                    )
+                }
+                tagName in setOf("b", "strong") -> {
+                    currentStyle = currentStyle.copy(fontWeight = FontWeight.Bold)
+                }
+                tagName in setOf("i", "em") -> {
+                    currentStyle = currentStyle.copy(fontStyle = FontStyle.Italic)
+                }
+                tagName == "code" -> {
+                    val isCodeBlock = text.substring(0, matchStart).contains("<pre>")
+                    currentStyle = currentStyle.copy(
+                        fontFamily = FontFamily.Monospace,
+                        background = if (isCodeBlock) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.surfaceContainer,
+                        fontSize = if (isCodeBlock) 13.sp else baseStyle.fontSize,
+                    )
+                }
+                tagName == "pre" -> {
+                }
+                tagName == "a" -> {
+                    val hrefMatch = """href\\s*=\\s*["']([^"']+)["']""".toRegex().find(attrs)
+                    hrefMatch?.let { href ->
+                        val url = href.groupValues[1]
+                        currentStyle = currentStyle.copy(
+                            color = linkColor,
+                            textDecoration = TextDecoration.combine(listOf(TextDecoration.Underline)),
+                        )
+                    }
+                }
+                tagName == "br" -> {
+                }
+            }
+
+            pos = matchEnd
+        }
+    }
+}
+
+/** 解析 HTML 連結位置，供 ClickableText 使用 */
+data class HtmlLink(val url: String, val start: Int, val end: Int)
+
+fun parseHtmlLinks(html: String): List<HtmlLink> {
+    val links = mutableListOf<HtmlLink>()
+    val tagRegex = """<a\\s+[^>]*href\\s*=\\s*["']([^"']+)["'][^>]*>(.*?)</a>""".toRegex()
+    var searchStart = 0
+    while (true) {
+        val match = tagRegex.find(html.substring(searchStart))
+        if (match == null) break
+        val url = match.groupValues[1]
+        val linkText = match.groupValues[2]
+        val matchStart = searchStart + match.range.first
+        links.add(HtmlLink(url, matchStart, matchStart + linkText.length))
+        searchStart += match.range.last + 1
+    }
+    return links
+}
+
 /** 一則訊息的內容區：文字、圖片／貼圖、附件名，或解密失敗的說明。 */
 @Composable
 private fun MessageBodyContent(
@@ -2694,12 +2840,27 @@ private fun MessageBodyContent(
 ) {
     val ui = LocalUiState.current
     when (body) {
-        is MessageBody.Text -> Text(
-            body.text,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = modifier,
-        )
+        is MessageBody.Text -> {
+            // P4-4：優先渲染 formattedBody (HTML)，回退到純文字
+            val formatted = body.formattedBody?.takeIf { it.isNotBlank() }
+            if (formatted != null) {
+                val annotated = htmlToAnnotatedString(
+                    html = formatted,
+                    baseStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                )
+                Text(
+                    text = annotated,
+                    modifier = modifier,
+                )
+            } else {
+                Text(
+                    body.text,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = modifier,
+                )
+            }
+        }
         is MessageBody.Image -> {
             val mxc: String? = when (val s = body.source) {
                 is MediaSource.Plain -> s.mxcUrl
