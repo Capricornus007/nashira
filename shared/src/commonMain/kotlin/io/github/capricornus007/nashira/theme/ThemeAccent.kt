@@ -31,7 +31,8 @@ enum class ThemeAccent(
     GREY(Color(0xFF9E9E9E), "灰色", "Grey");
 
     fun label(language: AppLanguage): String = when (language) {
-        AppLanguage.ZH_TW -> labelZh
+        // 繁簡同源：zh-HK/zh-CN 跟 zh-TW 共用（簡體差異之後按需覆寫）
+        AppLanguage.ZH_TW, AppLanguage.ZH_HK, AppLanguage.ZH_CN -> labelZh
         AppLanguage.EN -> labelEn
         AppLanguage.JA -> JapaneseLabels[name] ?: labelEn
         AppLanguage.KO -> KoreanLabels[name] ?: labelEn

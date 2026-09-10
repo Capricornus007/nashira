@@ -4,7 +4,9 @@ package io.github.capricornus007.nashira.i18n
 // 規則：全語言都要翻、專有名詞不翻、文案要短。
 
 enum class AppLanguage(val displayName: String, val tag: String) {
-    ZH_TW("繁體中文", "zh-TW"),
+    ZH_TW("繁體中文（台灣）", "zh-TW"),
+    ZH_HK("繁體中文（香港）", "zh-HK"),
+    ZH_CN("简体中文", "zh-CN"),
     EN("English", "en"),
     JA("日本語", "ja"),
     KO("한국어", "ko"),
@@ -245,6 +247,8 @@ interface Strings {
 
 val StringsMap: Map<AppLanguage, Strings> = mapOf(
     AppLanguage.ZH_TW to ZhTwStrings,
+    AppLanguage.ZH_HK to ZhHkStrings,
+    AppLanguage.ZH_CN to ZhCnStrings,
     AppLanguage.EN to EnStrings,
     AppLanguage.JA to JaStrings,
     AppLanguage.KO to KoStrings,
@@ -485,6 +489,22 @@ object ZhTwStrings : Strings {
 }
 
 /** 日文介面；Matrix／Nashira／Material 3 等專有名詞保留原名。 */
+/**
+ * 簡體中文：委派 zh-TW，只覆寫兩岸用語差異。
+ * zh-TW 是全量維護的基底——新字串先進 zh-TW/en，zh-CN 這裡只管收窄差異，
+ * 沒覆寫的鍵顯示繁體（比顯示英文好）。
+ */
+object ZhCnStrings : Strings by ZhTwStrings {
+    override val homeserver = "家服务器"
+    override val loginSsoHint = "将在浏览器打开家服务器的官方登录页面"
+}
+
+/**
+ * 繁體中文（香港）：委派 zh-TW，目前無已知用語差異；先佔位，
+ * 之後按香港慣用語（「軟件」「資料夾」等）逐鍵覆寫。
+ */
+object ZhHkStrings : Strings by ZhTwStrings
+
 object JaStrings : Strings by EnStrings {
     override val settings = "設定"
     override val back = "戻る"

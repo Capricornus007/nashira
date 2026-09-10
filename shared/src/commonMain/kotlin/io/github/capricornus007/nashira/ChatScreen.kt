@@ -892,8 +892,15 @@ private fun ChannelPane(
                 // 還沒落地時列表也是空的——只認 INITIAL_SYNC/STARTED 會閃過
                 // 「目前沒有可顯示的房間」再跳回骨架（真機 SSO 後實測）。
                 // 所以：清單空且同步循環還活著（未 STOPPED）一律畫骨架。
-                query.isBlank() && syncState != SyncState.STOPPED ->
+                query.isBlank() && syncState != SyncState.STOPPED -> Column(Modifier.weight(1f)) {
+                    Text(
+                        strings.syncingRooms,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.fillMaxWidth().padding(start = 20.dp, top = 6.dp, bottom = 2.dp),
+                    )
                     RoomListSkeleton(Modifier.fillMaxWidth().weight(1f))
+                }
                 else -> Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                     Text(
                         if (query.isNotBlank()) strings.noSearchResults else strings.noRooms,

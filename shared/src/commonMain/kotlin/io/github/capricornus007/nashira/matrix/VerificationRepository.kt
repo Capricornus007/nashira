@@ -144,8 +144,21 @@ class VerificationRepository(private val session: MatrixSession) {
         bootstrap.recoveryKey
     }
 
-    /** 本帳戶的工作階段清單，附各自的信任狀態。 */
+    /**
+     * 本帳戶的工作階段清單，附各自的信任狀態。
+     *
+     * 信任判定前先 POST /keys/query 拉全部自帳裝置金鑰：新 client（剛登入／
+     * 剛恢復）的 keyStore 還沒有其他裝置的 DeviceKeys，getTrustLevel 只能回
+     * Unknown/NotCrossSigned——Element/SchildiChat 開頁就顯示正確狀態，是因為
+     * 它們持續訂閱 liveUserCryptoDevices（金鑰下載完自動重發射）。我們是一次
+     * 性 snapshot，所以必須自己先補齊金鑰再算 trust（真機：SSO 重登後 Element
+     * 顯示已驗證、Nashira 全部未驗證）。
+     */
     suspend fun sessions(): Result<List<DeviceSession>> = runCatching {
+        // 補齊金鑰：device keys + cross-signing keys（MSK/SSK/USK 一併回來）
+        runCatching {
+            session.client.api.key.getKeys(mapOf(session.client.userId to setOf()), null).getOrThrow()
+        }
         val devices = session.client.api.device.getDevices().getOrThrow()
         devices.map { device ->
             DeviceSession(
@@ -159,14 +172,16 @@ class VerificationRepository(private val session: MatrixSession) {
         }.sortedWith(compareByDescending<DeviceSession> { it.isCurrent }.thenByDescending { it.lastSeenTimestamp ?: 0L })
     }
 
-    private suspend fun trustOf(deviceId: String): SessionTrust =
-        when (val level = keys.getTrustLevel(session.client.userId, deviceId).first()) {
+    private suspend fun trustOf(deviceId: String): SessionTrust {
+        val level = keys.getTrustLevel(session.client.userId, deviceId).first()
+        return when (level) {
             is DeviceTrustLevel.CrossSigned -> if (level.verified) SessionTrust.VERIFIED else SessionTrust.UNVERIFIED
             is DeviceTrustLevel.NotCrossSigned -> SessionTrust.UNVERIFIED
             is DeviceTrustLevel.Blocked -> SessionTrust.BLOCKED
             is DeviceTrustLevel.Invalid -> SessionTrust.BLOCKED
             else -> SessionTrust.UNKNOWN
         }
+    }
 
     /**
      * 登出指定工作階段。
