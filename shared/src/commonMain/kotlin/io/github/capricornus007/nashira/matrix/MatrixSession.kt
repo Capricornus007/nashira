@@ -227,40 +227,26 @@ object MatrixEngine {
     }
 
     /**
-     * SSO callback token exchange. The callback token is exchanged with the
-     * homeserver through Matrix's m.login.token flow before creating a client.
+     * SSO callback token exchange. `classicLoginWithToken` 走與密碼登入相同的
+     * provider 路徑（直接 POST /login 帶 m.login.token），不需要先建一個
+     * unauthenticated 的 MatrixClient——舊做法經過 MatrixApiClient 的 auth
+     * 管線，token 進不了請求體，伺服器回 401 MissingToken（真機 logcat 實證）。
      */
     suspend fun loginWithToken(baseUrl: String, loginToken: String): Result<Unit> {
         if (_session.value != null) return Result.failure(IllegalStateException("already logged in"))
-        val unauthenticatedClient = MatrixClient.create(
-            repositoriesModule = persistentRepositories(databaseKey(baseUrl, "sso")),
-            mediaStoreModule = persistentMediaStore(databaseKey(baseUrl, "sso")),
-            cryptoDriverModule = CryptoDriverModule.vodozemac(),
-            authProviderData = MatrixClientAuthProviderData.unauthenticated(Url(baseUrl)),
-            configuration = {
-                this.httpClientEngine = platformHttpEngine()
-            },
-        ).getOrElse { return Result.failure(it) }
-        val response = try {
-            unauthenticatedClient.api.authentication.login(
-                identifier = null,
-                password = null,
-                token = loginToken,
-                type = de.connect2x.trixnity.clientserverapi.model.authentication.LoginType.Token(),
-                deviceId = null,
-                initialDeviceDisplayName = "Nashira",
-                refreshToken = null,
-            ).getOrElse { return Result.failure(it) }
-        } finally {
-            unauthenticatedClient.close()
-        }
-        val authData = MatrixClientAuthProviderData.classic(
+        val authData = MatrixClientAuthProviderData.classicLoginWithToken(
             baseUrl = Url(baseUrl),
-            accessToken = response.accessToken,
-            refreshToken = response.refreshToken,
-        )
-        val key = databaseKey(baseUrl, response.userId.full)
-        val client = MatrixClient.create(
+            identifier = null,
+            token = loginToken,
+            deviceId = null,
+            initialDeviceDisplayName = "Nashira",
+            refreshToken = true,
+            httpClientEngine = platformHttpEngine(),
+        ).getOrElse { return Result.failure(it) }
+        // 交換拿到的 authData 只有 token；userId/deviceId 在 client 起來後才知道。
+        // 交換階段先用臨時鍵（誰都不衝突）；client 建立後讀真身分再定真庫。
+        val tempKey = databaseKey(baseUrl, "sso")
+        suspend fun create(key: String) = MatrixClient.create(
             repositoriesModule = persistentRepositories(key),
             mediaStoreModule = persistentMediaStore(key),
             cryptoDriverModule = CryptoDriverModule.vodozemac(),
@@ -270,13 +256,27 @@ object MatrixEngine {
                 this.modulesFactories = trixnityModuleFactoriesWithPonies()
                 this.httpClientEngine = platformHttpEngine()
             },
-        ).getOrElse { return Result.failure(it) }
+        )
+
+        // 臨時鍵先起一次 client 只為了拿 userId；再以真身分鍵重建（舊庫清理重試見 login()）。
+        val probe = create(tempKey).getOrElse { return Result.failure(it) }
+        val realKey = databaseKey(baseUrl, probe.userId.full)
+        val client = if (realKey == tempKey) {
+            probe
+        } else {
+            probe.close()
+            create(realKey).getOrElse { first ->
+                if (!isStaleStoreError(first)) return Result.failure(first)
+                clearPersistentStore(realKey)
+                create(realKey).getOrElse { return Result.failure(it) }
+            }
+        }
         storage.save(
             baseUrl = baseUrl,
-            userId = response.userId.full,
-            deviceId = response.deviceId,
-            accessToken = response.accessToken,
-            refreshToken = response.refreshToken,
+            userId = client.userId.full,
+            deviceId = client.deviceId,
+            accessToken = authData.accessToken,
+            refreshToken = authData.refreshToken,
         )
         val session = MatrixSession(client, onAuthFailure = { handleAuthFailure() })
         session.start()
