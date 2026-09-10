@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
@@ -27,6 +28,15 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Android 15 強制 edge-to-edge 下必須顯式開啟，WindowInsets（含 IME）
+        // 才會分發進 Compose——否則 Modifier.imePadding() 恆為 0，鍵盤開時
+        // 輸入列與鍵盤之間出現大縫隙（系統 adjustResize 壓視窗 + imePadding
+        // 疊加殘留，真機像素分析實證 843px）。
+        // edge-to-edge + adjustResize：IME insets 才能正確分發進 Compose
+        // 的 imePadding（LibreMobileOS/Android 16 真機實證）。
+        enableEdgeToEdge()
+        window.setDecorFitsSystemWindows(false)
         appContext = applicationContext
         TokenStorage.context = applicationContext
         if (AppNotifications.platform !is AndroidNotifications) {

@@ -28,13 +28,17 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.animation.AnimatedContent
@@ -376,6 +380,7 @@ private fun PublicRoomDirectory(
     }
     LaunchedEffect(Unit) { reload() }
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text(strings.findOrStartConversation) },
@@ -1557,7 +1562,17 @@ private fun TimelinePane(
             }
         },
         bottomBar = {
-            Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).navigationBarsPadding().imePadding()) {
+            // 只用 imePadding：鍵盤開時 navBars 已被鍵盤視窗覆蓋（不需要再加）；
+                // 鍵盤收時 navBars padding 由貼圖面板容器與訊息列表的
+                // navigationBarsPadding 各自處理。之前 navigationBarsPadding()
+                // 與 imePadding() 串接會疊加兩個 inset——輸入列與鍵盤之間
+                // 出現額外縫隙（真機像素分析實證）。
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surface)
+                        .imePadding()
+                                        ) {
                 // 正在輸入…（Discord 式）：1 人點名、2 人雙名、3+ 概括。掛在輸入列
                 // 最上方（回覆預覽之上），不佔輸入列本身的高度。
                 if (typingNames.isNotEmpty()) {
@@ -1683,7 +1698,7 @@ private fun TimelinePane(
                     IconButton(
                         onClick = {
                             stickerPanel = !stickerPanel
-                            if (stickerPanel) {
+                if (stickerPanel) {
                                 keyboardController?.hide()
                                 focusManager.clearFocus()
                             }
@@ -1807,12 +1822,6 @@ private fun TimelinePane(
                             }
                         }
                     }
-                }
-                // Telegram/微信式：貼圖面板固定在輸入列底下（佔鍵盤的位置）。
-                // 面板與鍵盤等高互斥——開面板收鍵盤、點輸入框收面板彈鍵盤，
-                // 輸入列位置不動，時間線永遠可見（用戶錄屏各家 app 對照定案）。
-                if (stickerPanel) {
-                    stickerPanelContent(Modifier.padding(horizontal = 8.dp).padding(bottom = 8.dp))
                 }
             }
         },
@@ -1999,6 +2008,22 @@ private fun TimelinePane(
                 }
             }
         }
+
+            if (stickerPanel) {
+                // Telegram/微信式：貼圖面板疊層蓋在時間線底部、貼齊 bottomBar 上緣。
+                // 之前放 bottomBar 內會撐高它：Scaffold 在「面板收起+鍵盤彈出」的
+                // 量測競態下把舊高度（含面板 300dp）鎖進 content padding，輸入列
+                // 與鍵盤之間出現等於面板高度的縫隙（真機像素分析 843px 實證）。
+                // 疊層不參與 Scaffold 量測——bottomBar 高度只由輸入列決定。
+                stickerPanelContent(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .zIndex(2f)
+                        .navigationBarsPadding()
+                        .padding(horizontal = 8.dp)
+                        .padding(bottom = 8.dp)
+                )
+            }
         }
     }
 
