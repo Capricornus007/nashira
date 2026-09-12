@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.union
@@ -121,6 +122,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -1411,6 +1413,12 @@ private fun TimelinePane(
     // 浮在訊息區上方（Telegram／Discord／Element 的做法，不推動輸入列），
     // 或釘在輸入列下方。由設定 stickerPanelAbove 決定。
     var stickerPanel by remember(room.roomId) { mutableStateOf(false) }
+    // P5-5 等高鍵盤面板：緩存最後一次鍵盤 insets 高度（面板與鍵盤互斥，
+    // 開面板時鍵盤已收起，只能用緩存值），面板高度跟鍵盤等高，Telegram 式。
+    val density = LocalDensity.current
+    var lastImeBottomPx by remember(room.roomId) { mutableStateOf(0) }
+    val imeBottom = WindowInsets.ime.getBottom(density)
+    SideEffect { if (imeBottom > 0) lastImeBottomPx = imeBottom }
     // 「＋」的附件選單（桌面是小彈窗、手機是底部面板）
     var attachMenu by remember(room.roomId) { mutableStateOf(false) }
     val sendShortcut = LocalUiState.current.sendShortcut
@@ -2034,10 +2042,12 @@ private fun TimelinePane(
                 // 量測競態下把舊高度（含面板 300dp）鎖進 content padding，輸入列
                 // 與鍵盤之間出現等於面板高度的縫隙（真機像素分析 843px 實證）。
                 // 疊層不參與 Scaffold 量測——bottomBar 高度只由輸入列決定。
+                val panelHeight = with(density) { lastImeBottomPx.toDp() }.coerceAtLeast(300.dp)
                 stickerPanelContent(
                     Modifier
                         .align(Alignment.BottomCenter)
                         .zIndex(2f)
+                        .height(panelHeight)
                         .navigationBarsPadding()
                         .padding(horizontal = 8.dp)
                         .padding(bottom = 8.dp)
