@@ -30,7 +30,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import de.connect2x.trixnity.client.MatrixClient
@@ -48,11 +48,11 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.size
-import androidx.compose.ui.graphics.Color
-
 /**
- * Discord 式貼圖面板：頂部一排貼圖包籤，下面是當前包的貼圖網格。
- * 包清單來自 MSC2545（個人包 + emote 房間包），點貼圖直接送出。
+ * Discord 式貼圖面板：頂部「貼圖／表情」分頁，貼圖頁是一排貼圖包籤＋當前包的
+ * 貼圖網格（點擊直接送出），表情頁是所有包裡 usage=emoticon 的條目
+ * （點擊插進輸入列，隨文字一起以 formatted_body 發送，P5-2）。
+ * 包清單來自 MSC2545（個人包 + emote 房間包）。
  */
 @Composable
 fun StickerPicker(
@@ -60,6 +60,7 @@ fun StickerPicker(
     roomId: RoomId,
     strings: Strings,
     onSend: (StickerItem) -> Unit,
+    onPickEmoticon: (StickerItem) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val client = roomRepository.client
@@ -76,28 +77,53 @@ fun StickerPicker(
         shape = RoundedCornerShape(16.dp),
         shadowElevation = 8.dp,
     ) {
-        if (packs.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(
-                    strings.stickerEmpty,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        } else {
-            // 包名優先用包自己的 display_name（state_key 兜底）。同一個貼圖倉庫房會掛
-            // 好幾包，用房間名當標籤會變成三個一樣的「貼圖包倉庫」，分不出來。
-            val packNames = packs.map { pack ->
-                when {
-                    pack.roomId == null -> strings.sticker
-                    pack.name.isNotBlank() -> pack.name
-                    else -> names.firstOrNull { it.roomId == pack.roomId }?.name ?: pack.roomId.full
+        // P5-2：頂部分頁——貼圖（發 m.sticker）／表情（插入輸入列當 custom emoji）
+        var emojiTab by remember { mutableStateOf(false) }
+        Column(Modifier.fillMaxSize()) {
+            Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+                listOf(false to strings.sticker, true to strings.emoticons).forEach { (isEmoji, label) ->
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = if (emojiTab == isEmoji) MaterialTheme.colorScheme.secondaryContainer
+                        else Color.Transparent,
+                        modifier = Modifier
+                            .padding(end = 4.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable { emojiTab = isEmoji },
+                    ) {
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = if (emojiTab == isEmoji) MaterialTheme.colorScheme.onSecondaryContainer
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp),
+                        )
+                    }
                 }
             }
-            var selected by remember(packs.size) { mutableStateOf(0) }
-            val index = selected.coerceIn(0, packs.lastIndex)
-            Column(Modifier.fillMaxSize()) {
-                // 包選擇改成封面圖示條（Telegram／Discord／Element 都是這樣）：
+            if (emojiTab) {
+                EmoticonGrid(repository, client, onPickEmoticon)
+            } else if (packs.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        strings.stickerEmpty,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
+                // 包名優先用包自己的 display_name（state_key 兜底）。同一個貼圖倉庫房會掛
+                // 好幾包，用房間名當標籤會變成三個一樣的「貼圖包倉庫」，分不出來。
+                val packNames = packs.map { pack ->
+                    when {
+                        pack.roomId == null -> strings.sticker
+                        pack.name.isNotBlank() -> pack.name
+                        else -> names.firstOrNull { it.roomId == pack.roomId }?.name ?: pack.roomId.full
+                    }
+                }
+                var selected by remember(packs.size) { mutableStateOf(0) }
+                val index = selected.coerceIn(0, packs.lastIndex)
+                // 包選擇是封面圖示條（Telegram／Discord／Element 都是這樣）：
                 // 原本的長文字標籤在包多時會橫向溢出，只能靠拖曳，滑鼠與觸控板都不順手。
                 // LazyRow 本身吃滾輪與拖曳，且只渲染可見項。
                 LazyRow(
@@ -123,6 +149,48 @@ fun StickerPicker(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 2.dp),
                 )
                 StickerGrid(packs[index], client, onSend)
+            }
+        }
+    }
+}
+
+/**
+ * P5-2：表情分頁——所有包的 emoticon 條目攤成一個網格，點擊插進輸入列。
+ */
+@Composable
+private fun EmoticonGrid(
+    repository: StickerRepository,
+    client: MatrixClient,
+    onPick: (StickerItem) -> Unit,
+) {
+    val emoticons by remember(client) { repository.emoticons() }
+        .collectAsState(initial = emptyList())
+    if (emoticons.isEmpty()) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                "—",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    } else {
+        LazyVerticalGrid(
+            columns = GridCells.Adaptive(44.dp),
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            items(emoticons, key = { it.shortcode + (it.mxcUrl ?: it.file?.url ?: "") }) { emote ->
+                Box(
+                    Modifier
+                        .size(44.dp)
+                        .padding(2.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onPick(emote) },
+                ) {
+                    StickerThumb(client, emote)
+                }
             }
         }
     }
@@ -176,18 +244,18 @@ private fun PackTab(
 @Composable
 private fun StickerGrid(pack: StickerPack, client: MatrixClient, onSend: (StickerItem) -> Unit) {
     LazyVerticalGrid(
-        columns = GridCells.Fixed(4),
-        modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        columns = GridCells.Adaptive(96.dp),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        items(pack.stickers, key = { it.shortcode }) { sticker ->
+        items(pack.stickers, key = { it.shortcode + (it.mxcUrl ?: it.file?.url ?: "") }) { sticker ->
             Box(
                 Modifier
                     .aspectRatio(1f)
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(RoundedCornerShape(10.dp))
                     .clickable { onSend(sticker) },
-                contentAlignment = Alignment.Center,
             ) {
                 StickerThumb(client, sticker)
             }

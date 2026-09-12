@@ -38,6 +38,7 @@ interface Strings {
     val add: String
     val send: String
     val sticker: String
+    val emoticons: String
     val stickerEmpty: String
     val notifImage: String
     val notifSticker: String
@@ -289,6 +290,7 @@ object ZhTwStrings : Strings {
     override val send = "傳送"
     override val sticker = "貼圖"
     override val stickerEmpty = "還沒有貼圖包"
+    override val emoticons = "表情"
     override val notifImage = "[圖片]"
     override val notifSticker = "[貼圖]"
     override val notifUndecryptable = "[無法解密]"
@@ -548,6 +550,7 @@ object JaStrings : Strings by EnStrings {
     override val add = "追加"
     override val send = "送信"
     override val sticker = "スタンプ"
+    override val emoticons = "絵文字"
     override val stickerEmpty = "スタンプパックはまだありません"
     override val notifImage = "[画像]"
     override val notifSticker = "[スタンプ]"
@@ -785,6 +788,7 @@ object KoStrings : Strings by EnStrings {
     override val send = "보내기"
     override val sticker = "스티커"
     override val stickerEmpty = "스티커 팩이 아직 없습니다"
+    override val emoticons = "이모티콘"
     override val notifImage = "[이미지]"
     override val notifSticker = "[스티커]"
     override val notifUndecryptable = "[복호화할 수 없음]"
@@ -1023,6 +1027,7 @@ object EnStrings : Strings {
     override val send = "Send"
     override val sticker = "Stickers"
     override val stickerEmpty = "No sticker packs yet"
+    override val emoticons = "Emojis"
     override val notifImage = "[Image]"
     override val notifSticker = "[Sticker]"
     override val notifUndecryptable = "[Undecryptable]"

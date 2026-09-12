@@ -31,7 +31,7 @@ jobs:
 
       - name: Build release APK and Linux packages
         run: |
-          ./gradlew :androidApp:assembleRelease :desktopApp:packageDistributionForCurrentOS --no-daemon
+          ./gradlew :androidApp:assembleRelease :desktopApp:packageDistributionForCurrentOS :desktopApp:createDistributable --no-daemon
           echo "APK built:"
           ls -la androidApp/build/outputs/apk/release/*.apk
           echo "Packages:"

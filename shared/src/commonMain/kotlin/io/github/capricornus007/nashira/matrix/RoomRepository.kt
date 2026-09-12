@@ -603,11 +603,11 @@ class RoomRepository(val client: MatrixClient) {
             }
         }.distinctUntilChanged().flowOn(Dispatchers.Default)
 
-    /** 發送文字訊息 */
-    suspend fun sendText(roomId: RoomId, body: String): Result<String> =
+    /** 發送文字訊息。帶 formattedBody（HTML）時以 org.matrix.custom.html 發送（P5-2 custom emoji 用）。 */
+    suspend fun sendText(roomId: RoomId, body: String, formattedBody: String? = null): Result<String> =
         runCatching {
             client.room.sendMessage(roomId) {
-                text(body)
+                text(body, formattedBody?.let { "org.matrix.custom.html" }, formattedBody)
             }
         }
 
@@ -667,7 +667,7 @@ class RoomRepository(val client: MatrixClient) {
         StickerRepository(client).sendSticker(roomId, sticker)
 
     /** 回覆某則訊息（m.in_reply_to）。 */
-    suspend fun sendReply(roomId: RoomId, replyTo: EventId, body: String): Result<String> =
+    suspend fun sendReply(roomId: RoomId, replyTo: EventId, body: String, formattedBody: String? = null): Result<String> =
         runCatching {
             client.room.sendMessage(roomId) {
                 reply(replyTo, null)

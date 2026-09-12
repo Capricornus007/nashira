@@ -34,6 +34,8 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
+import io.github.capricornus007.nashira.matrix.StickerItem
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
@@ -55,6 +57,13 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.foundation.text.InlineTextContent
+import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.PlaceholderVerticalAlign
+import androidx.compose.ui.unit.em
+import androidx.compose.foundation.text.appendInlineContent
+import androidx.compose.foundation.Image
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -1385,12 +1394,34 @@ private fun TimelinePane(
         if (messages?.isNotEmpty() == true) roomRepository.markRead(room.roomId)
     }
 
+    // P5-2：待發送的 custom emoji（隨文字以 formatted_body 送出）
+    var pendingEmoticons by remember(room.roomId) { mutableStateOf<List<StickerItem>>(emptyList()) }
+
     // 送出動作由按鈕與 Enter 鍵共用，兩邊行為必須一致
     val sendDraft: () -> Unit = {
-        val body = draft.text.toString().trim()
-        if (body.isNotEmpty() && !sending) {
+        val text = draft.text.toString().trim()
+        val emotes = pendingEmoticons
+        if ((text.isNotEmpty() || emotes.isNotEmpty()) && !sending) {
             draft.clearText()
             sending = true
+            // P5-2：帶 custom emoji 時組 org.matrix.custom.html——文字跳脫＋img 標籤；
+            // body 側放 :shortcode:（Element 相容的回退形式）
+            val formatted = if (emotes.isEmpty()) null else {
+                val escaped = text
+                    .replace("&", "&amp;")
+                    .replace("<", "&lt;")
+                    .replace(">", "&gt;")
+                    .replace("\n", "<br>")
+                val imgs = emotes.joinToString("") { emote ->
+                    val src = emote.mxcUrl
+                    if (src.isNullOrBlank()) "" else "<img data-mx-emoticon src=\"$src\" alt=\":${emote.shortcode}:\">"
+                }
+                escaped + imgs
+            }
+            val body = buildString {
+                append(text)
+                emotes.forEach { append(" :").append(it.shortcode).append(':') }
+            }.trim()
             val target = replyTo?.eventId
             val edit = editTarget?.eventId
             val editState = editTarget
@@ -1400,11 +1431,14 @@ private fun TimelinePane(
                 val result = if (edit != null) {
                     roomRepository.editText(room.roomId, edit, body)
                 } else if (target != null) {
-                    roomRepository.sendReply(room.roomId, target, body)
+                    roomRepository.sendReply(room.roomId, target, body, formatted)
                 } else {
-                    roomRepository.sendText(room.roomId, body)
+                    roomRepository.sendText(room.roomId, body, formatted)
                 }
-                result.onSuccess { editTarget = null }
+                result.onSuccess {
+                    editTarget = null
+                    pendingEmoticons = emptyList()
+                }
                 result.onFailure {
                     draft.setTextAndPlaceCursorAtEnd(body)
                     editTarget = editState
@@ -1536,6 +1570,9 @@ private fun TimelinePane(
                         .onSuccess { sendError = null }
                         .onFailure { sendError = io.github.capricornus007.nashira.i18n.friendlyError(it) }
                 }
+            },
+            onPickEmoticon = { emote ->
+                pendingEmoticons = pendingEmoticons + emote
             },
             modifier = panelModifier,
         )
@@ -1743,6 +1780,49 @@ private fun TimelinePane(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
                     )
+                }
+                // P5-2：待發送 custom emoji 的 chip 列（點一下移除）
+                if (pendingEmoticons.isNotEmpty() && voiceRecorder == null && recordedPreview == null) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(start = 8.dp, end = 8.dp, top = 6.dp)
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        pendingEmoticons.forEach { emote ->
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                modifier = Modifier.clip(RoundedCornerShape(14.dp)).clickable {
+                                    pendingEmoticons = pendingEmoticons - emote
+                                },
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(start = 4.dp, end = 6.dp, top = 3.dp, bottom = 3.dp),
+                                ) {
+                                    Box(Modifier.size(26.dp)) {
+                                        EmoticonInline(
+                                            client = roomRepository.client,
+                                            emote = InlineEmoticon(
+                                                id = "chip-${emote.shortcode}",
+                                                mxc = emote.mxcUrl ?: "",
+                                                alt = ":${emote.shortcode}:",
+                                            ),
+                                        )
+                                    }
+                                    Icon(
+                                        Icons.Filled.Close,
+                                        contentDescription = strings.cancel,
+                                        modifier = Modifier.size(14.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
                 // P5-1 錄音列：錄音中／待確認時整條替換輸入列（Telegram 式）。
                 if (voiceRecorder != null || recordedPreview != null) {
@@ -2931,7 +3011,7 @@ fun htmlToAnnotatedString(
     html: String,
     baseStyle: TextStyle = MaterialTheme.typography.bodyLarge,
     linkColor: Color = MaterialTheme.colorScheme.primary,
-): AnnotatedString {
+): FormattedRichText {
     // 1) 先解碼 HTML 實體
     var text = html
         .replace("<", "<")
@@ -2945,7 +3025,8 @@ fun htmlToAnnotatedString(
     text = text.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n")
 
     // 3) 使用 buildAnnotatedString 簡單構建
-    return buildAnnotatedString {
+    val emoticons = mutableListOf<InlineEmoticon>()
+    val annotated = buildAnnotatedString {
         // 正則匹配標籤：<tag> 或 </tag> 或 <tag attr="...">
         val tagRegex = """<(/?)\\w+([^>]*)>""".toRegex()
         var pos = 0
@@ -3025,12 +3106,32 @@ fun htmlToAnnotatedString(
                 }
                 tagName == "br" -> {
                 }
+                // P5-2：custom emoji——<img data-mx-emoticon src="mxc://...">。
+                // 插入 inline content 佔位（真正的圖由 Text(inlineContent=) 渲染）；
+                // 沒有 data-mx-emoticon 的 <img>（罕見）維持原本的略過。
+                tagName == "img" && attrs.contains("data-mx-emoticon") -> {
+                    val srcMatch = """src\s*=\s*["']([^"']+)["']""".toRegex().find(attrs)
+                    val mxc = srcMatch?.groupValues?.get(1).orEmpty()
+                    if (mxc.startsWith("mxc://")) {
+                        val altMatch = """alt\s*=\s*["']([^"']*)["']""".toRegex().find(attrs)
+                        val alt = altMatch?.groupValues?.get(1).orEmpty()
+                        val id = "emote-${emoticons.size}"
+                        emoticons += InlineEmoticon(id, mxc, alt)
+                        withStyle(currentStyle) { appendInlineContent(id, alt.ifBlank { "▫" }) }
+                    }
+                }
             }
 
             pos = matchEnd
         }
     }
+    return FormattedRichText(annotated, emoticons)
 }
+
+/** P5-2：渲染結果帶出 inline 表情清單，Text(inlineContent=) 用它們建佔位映射。 */
+data class InlineEmoticon(val id: String, val mxc: String, val alt: String)
+
+data class FormattedRichText(val annotated: AnnotatedString, val emoticons: List<InlineEmoticon>)
 
 /** 解析 HTML 連結位置，供 ClickableText 使用 */
 data class HtmlLink(val url: String, val start: Int, val end: Int)
@@ -3067,14 +3168,21 @@ private fun MessageBodyContent(
             // P4-4：優先渲染 formattedBody (HTML)，回退到純文字
             val formatted = body.formattedBody?.takeIf { it.isNotBlank() }
             if (formatted != null) {
-                val annotated = htmlToAnnotatedString(
+                val rich = htmlToAnnotatedString(
                     html = formatted,
                     baseStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
                 )
-                Text(
-                    text = annotated,
-                    modifier = modifier,
-                )
+                if (rich.emoticons.isEmpty()) {
+                    Text(text = rich.annotated, modifier = modifier)
+                } else {
+                    // P5-2：custom emoji 以 inline content 排進文字行
+                    val inlineContent = rich.emoticons.associate { emote ->
+                        emote.id to InlineTextContent(
+                            Placeholder(1.4.em, 1.4.em, PlaceholderVerticalAlign.TextCenter),
+                        ) { EmoticonInline(client, emote) }
+                    }
+                    Text(text = rich.annotated, modifier = modifier, inlineContent = inlineContent)
+                }
             } else {
                 Text(
                     body.text,
@@ -3139,6 +3247,39 @@ private fun MessageBodyContent(
 }
 
 /** 聊天室清單只有一行位置，圖片／貼圖／附件都收斂成一句話。 */
+/** P5-2：行內 custom emoji。載入走 MediaBitmapCache（與貼圖面板共用），失敗顯示 alt。 */
+@Composable
+private fun EmoticonInline(
+    client: de.connect2x.trixnity.client.MatrixClient,
+    emote: InlineEmoticon,
+) {
+    var bitmap by remember(emote.mxc) { mutableStateOf(MediaBitmapCache.get(emote.mxc)) }
+    LaunchedEffect(client, emote.mxc) {
+        if (bitmap == null) {
+            val bytes = fetchMediaBytes(client, MediaSource.Plain(emote.mxc))
+            if (bytes != null) {
+                val decoded = decodeImageBitmap(bytes, maxDimension = 96)
+                if (decoded != null) {
+                    MediaBitmapCache.put(emote.mxc, decoded)
+                    bitmap = decoded
+                }
+            }
+        }
+    }
+    val loaded = bitmap
+    if (loaded != null) {
+        Image(
+            bitmap = loaded,
+            contentDescription = emote.alt,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Fit,
+        )
+    } else {
+        // 載入中／失敗：alt 文字（Element 也這樣退場）
+        Text(emote.alt.ifBlank { "▫" }, style = MaterialTheme.typography.labelSmall)
+    }
+}
+
 private fun MessageBody.previewText(strings: io.github.capricornus007.nashira.i18n.Strings): String =
     when (this) {
         is MessageBody.Text -> text

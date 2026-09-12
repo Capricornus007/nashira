@@ -62,6 +62,43 @@ class StickerRepository(private val client: MatrixClient) {
         }
     }
 
+    /**
+     * P5-2：所有包裡可當 custom emoji 的條目（usage 含 "emoticon"），攤平成一個清單
+     * 給表情分頁的網格。個人包與房間包都收。
+     */
+    fun emoticons(): Flow<List<StickerItem>> {
+        val userService = client.user
+        val personal = userService.getAccountData<EmoteImagesContent>()
+            .map { content ->
+                content?.images.orEmpty().mapNotNull { (shortcode, image) ->
+                    image.toSticker(shortcode, usableAs("emoticon", packUsage = null, imageUsage = image.usage))
+                }
+            }
+        val roomPacks = userService.getAccountData<EmoteRoomsContent>()
+            .map { stored -> stored ?: fetchEmoteRoomsFromServer() }
+            .flatMapLatest { emoteRooms ->
+                val references = emoteRooms?.rooms.orEmpty()
+                    .flatMap { (roomId, stateKeys) -> stateKeys.keys.map { it to roomId } }
+                    .distinct()
+                if (references.isEmpty()) flowOf(emptyList())
+                else combine(references.map { (stateKey, roomIdStr) ->
+                    val roomId = RoomId(roomIdStr)
+                    client.room.getState<RoomEmotesContent>(roomId, stateKey)
+                        .map { event -> event?.content }
+                        .map { stored -> stored ?: fetchPackFromServer(roomId, stateKey) }
+                        .map { content ->
+                            content?.images.orEmpty().mapNotNull { (shortcode, image) ->
+                                image.toSticker(
+                                    shortcode,
+                                    usableAs("emoticon", packUsage = content?.pack?.usage, imageUsage = image.usage),
+                                )
+                            }
+                        }
+                }) { lists -> lists.toList().flatten() }
+            }
+        return combine(personal, roomPacks) { mine, rooms -> mine + rooms }
+    }
+
     /** 直接向伺服器要 `im.ponies.emote_rooms`；沒設過或讀不到回 null。 */
     private suspend fun fetchEmoteRoomsFromServer(): EmoteRoomsContent? =
         runCatching {
@@ -75,7 +112,7 @@ class StickerRepository(private val client: MatrixClient) {
             name = StickerRepository.PersonalPackName,
             roomId = null,
             stickers = images.mapNotNull { (shortcode, image) ->
-                image.toSticker(shortcode, usableAsSticker(packUsage = null, imageUsage = image.usage))
+                image.toSticker(shortcode, usableAs("sticker", packUsage = null, imageUsage = image.usage))
             },
         )
     }
@@ -118,7 +155,7 @@ class StickerRepository(private val client: MatrixClient) {
 
     private fun toPack(roomId: RoomId, stateKey: String, content: RoomEmotesContent): StickerPack? {
         val images = content.images.orEmpty().filter { (_, image) ->
-            usableAsSticker(packUsage = content.pack?.usage, imageUsage = image.usage)
+            usableAs("sticker", packUsage = content.pack?.usage, imageUsage = image.usage)
         }
         if (images.isEmpty()) return null
         return StickerPack(
@@ -163,9 +200,9 @@ private fun EmoteImage.toSticker(shortcode: String, usable: Boolean): StickerIte
 
 /**
  * MSC2545 的 usage 過濾：包級缺省＝sticker+emoticon 都行；圖片級 usage 覆蓋包級。
- * 只標 emoticon 的條目（純表情符號）不進 Discord 式貼圖面板。
+ * "sticker" 進 Discord 式貼圖面板；"emoticon"（純表情符號條目）進表情分頁。
  */
-private fun usableAsSticker(packUsage: List<String>?, imageUsage: List<String>?): Boolean {
+private fun usableAs(kind: String, packUsage: List<String>?, imageUsage: List<String>?): Boolean {
     val usage = imageUsage ?: packUsage ?: return true
-    return "sticker" in usage
+    return kind in usage
 }
