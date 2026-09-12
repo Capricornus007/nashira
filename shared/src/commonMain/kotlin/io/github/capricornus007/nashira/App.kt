@@ -1,4 +1,15 @@
 package io.github.capricornus007.nashira
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -152,6 +163,7 @@ fun App(defaultDark: Boolean? = null) {
     // 配色補間（照 InstallerX：每槽 animateColorAsState(spring()) 物理彈簧曲線）
     val session by MatrixEngine.session.collectAsState()
     val restoring by MatrixEngine.restoring.collectAsState()
+    val restoreFailed by MatrixEngine.restoreFailed.collectAsState()
     val loggingIn by MatrixEngine.loggingIn.collectAsState()
     val strings = stringsFor(LocalUiState.current.language)
     androidx.compose.runtime.LaunchedEffect(Unit) { MatrixEngine.restoreFromDisk() }
@@ -173,7 +185,39 @@ fun App(defaultDark: Boolean? = null) {
             // 停在帳密頁會讓人以為失敗（真機用戶實測回報）。
             restoring -> StartupScreen()
             loggingIn -> StartupScreen(message = strings.loggingIn)
+            restoreFailed -> ConnectionRetryScreen()
             else -> LoginScreen(onLoginSuccess = { })
+        }
+    }
+}
+
+/**
+ * 憑證還在但連不上伺服器（網路斷／代理切換／TLS 被攔）：
+ * 給「重試」而不是登入表單——後者會讓人誤以為被登出。
+ */
+@Composable
+private fun ConnectionRetryScreen() {
+    val strings = stringsFor(LocalUiState.current.language)
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    androidx.compose.foundation.layout.Box(
+        Modifier.fillMaxSize(),
+        contentAlignment = androidx.compose.ui.Alignment.Center,
+    ) {
+        androidx.compose.foundation.layout.Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+            Text(
+                strings.connectionFailed,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                strings.connectionFailedHint,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 6.dp, bottom = 18.dp),
+            )
+            androidx.compose.material3.Button(onClick = { scope.launch { MatrixEngine.restoreFromDisk() } }) {
+                Text(strings.retry)
+            }
         }
     }
 }

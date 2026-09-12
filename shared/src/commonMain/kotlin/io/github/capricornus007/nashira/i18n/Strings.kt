@@ -219,6 +219,9 @@ interface Strings {
     fun formatDate(year: Int, month: Int, day: Int): String
     val homeserver: String
     val loggingIn: String
+    val connectionFailed: String
+    val connectionFailedHint: String
+    val retry: String
     val actionIgnoreUser: String
     val editDisplayName: String
     val changeAvatar: String

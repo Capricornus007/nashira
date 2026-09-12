@@ -2179,6 +2179,11 @@ private fun TimelinePane(
                     // Discord 的分組規則：同一人連續發言且未跨日、間隔小於 7 分鐘 → 只顯示訊息本體
                     val grouped = !newDay && earlier != null && earlier.sender == msg.sender &&
                         msg.timestamp - earlier.timestamp < GroupingWindowMillis
+                    // 日期分隔線畫在「當天最早一則」的上方。item 內部的組合順序就是
+                    // 視覺的上下順序（reverseLayout 只翻 item 間的排列，不翻 item 內容），
+                    // 所以要在 MessageRow 之前發出——舊版放在之後，結果每條分隔線
+                    // 都落到當天訊息的下面、貼著後一天更晚的訊息，看起來像日期錯位。
+                    if (newDay) DateDivider(formatDateDivider(msg.timestamp, today, strings))
                     MessageRow(
                         client = roomRepository.client,
                         msg = msg,
@@ -2303,8 +2308,6 @@ private fun TimelinePane(
                             )
                         }
                     }
-                    // 分隔線畫在這則訊息「上方」，reverseLayout 下要在 MessageRow 之後發出
-                    if (newDay) DateDivider(formatDateDivider(msg.timestamp, today, strings))
                 }
             }
             // reverseLayout 下最後發出的項目在視覺最上方：正在補歷史時擺一顆轉圈。

@@ -22,6 +22,16 @@ package() {
     local dist="${NASHIRA_DIST:?NASHIRA_DIST must point to the main/app/nashira app image}"
     local lib
 
+    install -dm755 "${pkgdir}/opt/nashira"
+    cp -a "${dist}/." "${pkgdir}/opt/nashira/"
+
+    lib="${pkgdir}/opt/nashira/lib"
+    if [[ -f "${lib}/nashira.desktop" ]]; then
+        install -Dm644 "${lib}/nashira.desktop" "${pkgdir}/usr/share/applications/nashira.desktop"
+        sed -i 's|^Exec=.*|Exec=/opt/nashira/bin/nashira|' \
+            "${pkgdir}/usr/share/applications/nashira.desktop"
+    fi
+
     local icon="${NASHIRA_ICONS:-}"
     if [[ -d "${icon}" ]]; then
         # hicolor 全尺寸（16–512＋scalable SVG）：桌面環境按 DPI 挑最佳尺寸，

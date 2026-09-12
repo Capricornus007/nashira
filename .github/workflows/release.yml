@@ -113,6 +113,9 @@ jobs:
             NASHIRA_ICONS='$PWD/desktopApp/packaging/hicolor/hicolor' \
             makepkg -f --noconfirm
           "
+          # 防呆：包裡必須真的有應用本體（曾因 PKGBUILD 編輯失誤上傳過 139KB 空包）
+          bsdtar -tf packaging/*.pkg.tar.zst | grep -q "^opt/nashira/bin/nashira" \
+            || { echo "::error::Arch 包內缺 opt/nashira/bin/nashira（裝載失敗）"; exit 1; }
           ls -la packaging/*.pkg.tar.zst
 
       - name: Upload package artifact

@@ -86,6 +86,14 @@ object MatrixEngine {
     val restoring: StateFlow<Boolean> = _restoring.asStateFlow()
 
     /**
+     * 磁碟有憑證但恢復失敗（網路斷、代理切換、TLS 被攔——真機實證：
+     * SSLPeerUnverifiedException 也走這條）。token 保留，UI 顯示「重試」
+     * 而不是誤導性的登入表單；恢復成功或 handleAuthFailure 時清除。
+     */
+    private val _restoreFailed = MutableStateFlow(false)
+    val restoreFailed: StateFlow<Boolean> = _restoreFailed.asStateFlow()
+
+    /**
      * 登入交換中（密碼或 SSO token）：UI 顯示「正在登入」而不是閃回登入表單。
      * SSO 從瀏覽器跳回 app 時特別重要——token 交換要好幾秒，停在帳密頁
      * 會讓人以為登入失敗又再按一次（真機用戶實測回報）。
@@ -147,6 +155,7 @@ object MatrixEngine {
     private val restoreLock = Mutex()
 
     suspend fun restoreFromDisk() = restoreLock.withLock {
+        _restoreFailed.value = false
         if (_session.value != null) return@withLock
         val stored = storage.load() ?: run {
             _restoring.value = false
@@ -174,8 +183,8 @@ object MatrixEngine {
             // 建庫失敗不等於 token 失效：清除 Android 快取後，媒體目錄／鎖檔可能
             // 正在重建。絕不能在這條暫時性錯誤路徑清掉登入憑證，否則使用者會被
             // 無故登出；保留 token，下一次啟動或手動重試再恢復即可。
-            println("NASHIRA_RESTORE: client create failed: ${it.stackTraceToString()}")
         }.getOrNull() ?: run {
+            _restoreFailed.value = true
             _restoring.value = false
             return@withLock
         }
