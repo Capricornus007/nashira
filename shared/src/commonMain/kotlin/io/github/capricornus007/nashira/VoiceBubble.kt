@@ -63,6 +63,7 @@ fun VoiceBubble(
     var playing by remember(source) { mutableStateOf(false) }
     var position by remember(source) { mutableStateOf(0L) }
     var prepared by remember(source) { mutableStateOf(false) }
+    var loading by remember(source) { mutableStateOf(false) }
 
     LaunchedEffect(source) {
         if (bytes == null && !failed) {
@@ -134,27 +135,44 @@ fun VoiceBubble(
                                 playing = false
                             } else {
                                 val current = bytes ?: return@clickable
-                                // 暫停後續播用同一個 player；播完（prepared=false）才重備
+                                // 暫停後續播用同一個 player；播完（prepared=false）才重備。
+                                // prepare 非同步（同步版會凍主執行緒）——備好前鈕上轉圈
                                 if (!prepared) {
-                                    prepared = player.prepare(current, mimeType)
-                                    if (!prepared) {
-                                        failed = true
-                                        return@clickable
+                                    loading = true
+                                    player.prepare(current, mimeType) { ok ->
+                                        loading = false
+                                        prepared = ok
+                                        if (ok) {
+                                            player.play()
+                                            playing = player.isPlaying()
+                                        } else {
+                                            failed = true
+                                        }
                                     }
+                                } else {
+                                    player.play()
+                                    playing = player.isPlaying()
                                 }
-                                player.play()
-                                playing = player.isPlaying()
                             }
                         },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(
-                        if (playing) VoiceIcons.Pause else Icons.Filled.PlayArrow,
-                        contentDescription = null,
-                        tint = if (isOwn) MaterialTheme.colorScheme.onPrimary
-                        else MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier.size(22.dp),
-                    )
+                    if (loading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = if (isOwn) MaterialTheme.colorScheme.onPrimary
+                            else MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                    } else {
+                        Icon(
+                            if (playing) VoiceIcons.Pause else Icons.Filled.PlayArrow,
+                            contentDescription = null,
+                            tint = if (isOwn) MaterialTheme.colorScheme.onPrimary
+                            else MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
                 }
                 Column(Modifier.padding(start = 6.dp).width(96.dp)) {
                     Text(

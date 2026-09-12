@@ -1469,6 +1469,7 @@ private fun TimelinePane(
     var recordedPreview by remember(room.roomId) { mutableStateOf<RecordedVoice?>(null) }
     val previewPlayer = remember(room.roomId) { AudioPlayer() }
     var previewPlaying by remember(room.roomId) { mutableStateOf(false) }
+    var previewPrepared by remember(room.roomId) { mutableStateOf(false) }
     var recordingMark by remember(room.roomId) { mutableStateOf<kotlin.time.TimeSource.Monotonic.ValueTimeMark?>(null) }
     DisposableEffect(room.roomId) {
         onDispose {
@@ -1863,10 +1864,24 @@ private fun TimelinePane(
                                     .clip(CircleShape)
                                     .background(MaterialTheme.colorScheme.secondaryContainer)
                                     .clickable {
-                                        if (preview != null) {
-                                            if (previewPlayer.prepare(preview.bytes, preview.mimeType)) {
+                                        val p = preview ?: return@clickable
+                                        when {
+                                            // 暫停：Clip/MediaPlayer 都從暫停點續播
+                                            previewPlaying -> {
+                                                previewPlayer.pause()
+                                                previewPlaying = false
+                                            }
+                                            // 已備好：直接續播（prepare 非同步，備好才會是 true）
+                                            previewPrepared -> {
                                                 previewPlayer.play()
                                                 previewPlaying = previewPlayer.isPlaying()
+                                            }
+                                            else -> previewPlayer.prepare(p.bytes, p.mimeType) { ok ->
+                                                previewPrepared = ok
+                                                if (ok) {
+                                                    previewPlayer.play()
+                                                    previewPlaying = previewPlayer.isPlaying()
+                                                }
                                             }
                                         }
                                     },
@@ -2179,11 +2194,9 @@ private fun TimelinePane(
                     // Discord 的分組規則：同一人連續發言且未跨日、間隔小於 7 分鐘 → 只顯示訊息本體
                     val grouped = !newDay && earlier != null && earlier.sender == msg.sender &&
                         msg.timestamp - earlier.timestamp < GroupingWindowMillis
-                    // 日期分隔線畫在「當天最早一則」的上方。item 內部的組合順序就是
-                    // 視覺的上下順序（reverseLayout 只翻 item 間的排列，不翻 item 內容），
-                    // 所以要在 MessageRow 之前發出——舊版放在之後，結果每條分隔線
-                    // 都落到當天訊息的下面、貼著後一天更晚的訊息，看起來像日期錯位。
-                    if (newDay) DateDivider(formatDateDivider(msg.timestamp, today, strings))
+                    // 日期分隔線掛在「當天最早一則」上。**reverseLayout 連 item 內容
+                    // 順序也一起翻轉**：在 MessageRow 之後發出，畫出來才是在訊息
+                    // 「上方」（真機座標實證：放前面反而落到訊息下方、日期錯位一塊）。
                     MessageRow(
                         client = roomRepository.client,
                         msg = msg,
@@ -2308,6 +2321,7 @@ private fun TimelinePane(
                             )
                         }
                     }
+                    if (newDay) DateDivider(formatDateDivider(msg.timestamp, today, strings))
                 }
             }
             // reverseLayout 下最後發出的項目在視覺最上方：正在補歷史時擺一顆轉圈。

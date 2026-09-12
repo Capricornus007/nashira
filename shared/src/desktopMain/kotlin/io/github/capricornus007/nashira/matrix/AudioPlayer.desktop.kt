@@ -6,8 +6,9 @@ import javax.sound.sampled.AudioSystem
 import javax.sound.sampled.Clip
 
 /**
- * 桌面播放：先試 javax.sound Clip（WAV 直解、有進度）；不是 WAV 就找 ffplay
- * （有 ffmpeg 的機器全格式能播，但拿不到進度，UI 只顯示播放中）。
+ * 桌面播放：先試 javax.sound Clip（WAV 直解）；不是 WAV 就找 ffplay
+ * （有 ffmpeg 的機器全格式能播，但拿不到進度）。
+ * Clip 開檔在小檔上很快，同步完成後直接回呼。
  */
 actual class AudioPlayer actual constructor() {
     private var clip: Clip? = null
@@ -15,7 +16,7 @@ actual class AudioPlayer actual constructor() {
     private var ffplayFile: File? = null
     private var ffplayCommand: String? = null
 
-    actual fun prepare(bytes: ByteArray, mimeType: String?): Boolean {
+    actual fun prepare(bytes: ByteArray, mimeType: String?, onReady: (Boolean) -> Unit) {
         release()
         // 1) javax.sound：RIFF/WAV 可以直接開
         try {
@@ -23,22 +24,23 @@ actual class AudioPlayer actual constructor() {
             val c = AudioSystem.getClip()
             c.open(input)
             clip = c
-            return true
+            onReady(true)
+            return
         } catch (_: Throwable) {
             // 不是 WAV（或音訊系統不可用）→ 走 ffplay
         }
         // 2) ffplay：ffmpeg 自帶的極簡播放器，全格式
         val ffplayPath = sequenceOf("ffplay", "/usr/bin/ffplay")
             .firstOrNull { File(it).canExecute() || which(it) }
-            ?: return false
-        return try {
+            ?: return onReady(false)
+        try {
             val f = File.createTempFile("nashira-voice-", ".bin")
             f.writeBytes(bytes)
             ffplayFile = f
             ffplayCommand = ffplayPath
-            true // 真正的啟動在 play()（-autoexit 一次到底）
+            onReady(true)
         } catch (_: Throwable) {
-            false
+            onReady(false)
         }
     }
 
