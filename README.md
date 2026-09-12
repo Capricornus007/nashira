@@ -48,6 +48,14 @@ On distros without a package-manager format you use (Alpine, NixOS, static
 musl, …): use `createDistributable` above, unpack `main/app/nashira`, and run
 `bin/nashira`.
 
+## Provenance
+
+This project was built almost entirely through human-directed LLM
+collaboration: the maintainer specified the goals, reviewed every change, and
+tested on real devices; the implementation itself was AI-generated. Expect
+unusual patterns here and there — verify before depending on it, and treat it
+as as-is in terms of maintenance expectations.
+
 ## License
 
 AGPL-3.0 (see [LICENSE](LICENSE)). The Matrix protocol implementation is

@@ -46,6 +46,12 @@ cd nashira
 不想用包管理器格式的發行版（Alpine、NixOS、獨立 musl 等）：用上面的
 `createDistributable`，解壓 `main/app/nashira` 後執行 `bin/nashira` 即可。
 
+## 出處
+
+本專案幾乎全程以「人類指揮、LLM 實作」的協作方式完成：維護者制定目標、
+審查每個變更並在真機上驗證，實作本身由 AI 生成。代碼中可能存在不尋常的
+模式——依賴前請自行驗證，維護預期請以現狀（as-is）視之。
+
 ## 授權
 
 AGPL-3.0（見 [LICENSE](LICENSE)）。矩陣協議實作基於 [Trixnity](https://gitlab.com/connect2x/trixnity)。
