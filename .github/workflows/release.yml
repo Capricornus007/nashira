@@ -13,9 +13,6 @@ on:
 permissions:
   contents: write
 
-# Arch 用戶端不從這裡拿包：Capricornus007/repo 的 nashira-bin 消費本倉庫
-# release 的 .deb（element-desktop-nightly-bin 同款），進 junlin03-aur
-# pacman 倉庫（含 repo.db 同步）。
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -34,7 +31,7 @@ jobs:
 
       - name: Build release APK and Linux packages
         run: |
-          ./gradlew :androidApp:assembleRelease :desktopApp:packageDistributionForCurrentOS --no-daemon
+          ./gradlew :androidApp:assembleRelease :desktopApp:packageDistributionForCurrentOS :desktopApp:createDistributable --no-daemon
           echo "APK built:"
           ls -la androidApp/build/outputs/apk/release/*.apk
           echo "Packages:"
@@ -46,6 +43,13 @@ jobs:
           REF="${GITHUB_REF#refs/tags/}"
           if [ "$REF" = "$GITHUB_REF" ]; then REF="v${{ github.event.inputs.version }}"; fi
           echo "TAG=$REF" >> "$GITHUB_ENV"
+
+      - name: Upload distributable artifact (for the Arch package job)
+        uses: actions/upload-artifact@v4
+        with:
+          name: main-dist
+          path: desktopApp/build/compose/binaries/main/app/nashira
+          if-no-files-found: error
 
       - name: Publish GitHub Release
         env:
@@ -62,5 +66,76 @@ jobs:
             gh release create "$TAG" "${ASSETS[@]}" \
               --target "$GITHUB_SHA" \
               --title "Nashira $TAG" \
-              --notes "自用分發版（debug 簽章）。Android APK + Linux .deb/.rpm。Arch 用戶請用 [junlin03-aur](https://github.com/Capricornus007/repo) 的 nashira-bin。"
+              --notes "自用分發版（debug 簽章）。Android APK + Linux .deb/.rpm/.pkg.tar.zst（.pkg.tar.zst 由 arch job 稍後補傳）。"
           fi
+
+  arch:
+    name: Arch package (.pkg.tar.zst)
+    needs: release
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Checkout (PKGBUILD)
+        uses: actions/checkout@v5
+
+      - name: Download distributable
+        uses: actions/download-artifact@v4
+        with:
+          name: main-dist
+          path: dist
+
+      - name: Build package
+        run: |
+          # 容器裡的 pacman 資料庫是空的——不同步連 depends 都解析不了
+          # （2026-09-12 實測：java-runtime 缺依賴直接 fail）
+          pacman -Syu --noconfirm
+          VERSION=$(grep -oP 'packageVersion\s*=\s*"\K[^"]+' desktopApp/build.gradle.kts)
+          echo "version: ${VERSION}"
+          # upload-artifact v4 的根目錄＝所有上傳路徑的最小共同祖先——
+          # 下載後可能是 dist/nashira/（單一目錄保留自身）也可能是 dist/，兩種都相容
+          DIST_DIR="$PWD/dist/nashira"
+          [ -d "$DIST_DIR" ] || DIST_DIR="$PWD/dist"
+          echo "dist: $DIST_DIR"; ls "$DIST_DIR"
+          # makepkg 拒絕以 root 執行
+          useradd -m builder
+          chown -R builder:builder "$PWD"
+          su builder -c "
+            cd '$PWD/packaging' && \
+            NASHIRA_VERSION='${VERSION}' \
+            NASHIRA_DIST='${DIST_DIR}' \
+            NASHIRA_ICON='$PWD/desktopApp/packaging/nashira-512.png' \
+            makepkg -f --noconfirm
+          "
+          ls -la packaging/*.pkg.tar.zst
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: arch-package
+          path: packaging/*.pkg.tar.zst
+          if-no-files-found: error
+
+  attach-arch:
+    name: Attach Arch package to release
+    needs: arch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Arch package
+        uses: actions/download-artifact@v4
+        with:
+          name: arch-package
+          path: assets
+
+      - name: Determine release tag
+        run: |
+          REF="${GITHUB_REF#refs/tags/}"
+          if [ "$REF" = "$GITHUB_REF" ]; then REF="v${{ github.event.inputs.version }}"; fi
+          echo "TAG=$REF" >> "$GITHUB_ENV"
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd "$(dirname "$(find assets -name '*.pkg.tar.zst' | head -1)")"
+          gh release upload "$TAG" ./*.pkg.tar.zst --clobber
+          echo "Arch package attached to $TAG"
