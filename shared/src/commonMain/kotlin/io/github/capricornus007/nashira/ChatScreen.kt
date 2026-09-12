@@ -2873,6 +2873,11 @@ private fun MessageBodyContent(
                     modifier = modifier,
                 )
             }
+            // P5-3：訊息含連結時附上 og 預覽卡
+            val previewUrl = firstUrlInText(formatted ?: body.text)
+            if (previewUrl != null) {
+                UrlPreviewInline(url = previewUrl, modifier = Modifier.padding(top = 6.dp))
+            }
         }
         is MessageBody.Image -> {
             val mxc: String? = when (val s = body.source) {
@@ -2921,3 +2926,51 @@ private fun MessageBody.previewText(strings: io.github.capricornus007.nashira.i1
         is MessageBody.Attachment -> name
         MessageBody.Undecryptable -> strings.undecryptable
     }
+
+/** P5-3：訊息內連結的 og 預覽卡（抓不到就不顯示，不佔位）。 */
+@Composable
+fun UrlPreviewInline(url: String, modifier: Modifier = Modifier) {
+    // 進程級快取：同連結只抓一次，失敗連結也記住不再打
+    val cached = remember(url) { UrlPreviewCache[url] }
+    var preview by remember(url) { mutableStateOf(cached) }
+    var attempted by remember(url) { mutableStateOf(cached != null || UrlPreviewCache.hasFailed(url)) }
+    if (!attempted) {
+        LaunchedEffect(url) {
+            val fetched = fetchUrlPreview(url)
+            UrlPreviewCache.put(url, fetched)
+            preview = fetched
+            attempted = true
+        }
+    }
+    val data = preview ?: return
+    Surface(
+        modifier = modifier,
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        tonalElevation = 1.dp,
+    ) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)) {
+            data.siteName?.let {
+                Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+            }
+            data.title?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            data.description?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
