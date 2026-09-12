@@ -1,0 +1,45 @@
+# Nashira 的 Arch Linux 打包（.pkg.tar.zst）。
+#
+# 消費預先構建的 Compose app image——本 PKGBUILD 不跑 gradle（CI 已建好）：
+#   ./gradlew desktopApp:createDistributable
+#   NASHIRA_VERSION=0.1.0 NASHIRA_DIST="$PWD/desktopApp/build/compose/binaries/main-dist/nashira" \
+#     NASHIRA_ICON="$PWD/desktopApp/packaging/nashira-512.png" makepkg -f
+#
+# 佈局鏡像 jpackage 的 deb/rpm：/opt/nashira + desktop entry + hicolor 圖標，
+# 另加 /usr/bin/nashira 便利連結。
+pkgname=nashira
+pkgver=${NASHIRA_VERSION:-0.1.0}
+pkgrel=1
+pkgdesc="Nashira — Matrix messenger for Android and Linux (Kotlin/Compose Multiplatform)"
+arch=('x86_64')
+url="https://github.com/Capricornus007/nashira"
+license=('AGPL-3.0-only')
+depends=('java-runtime')
+source=()
+sha256sums=()
+
+package() {
+    local dist="${NASHIRA_DIST:?NASHIRA_DIST must point to the main-dist/nashira app image}"
+    local lib
+
+    install -dm755 "${pkgdir}/opt/nashira"
+    cp -a "${dist}/." "${pkgdir}/opt/nashira/"
+
+    lib="${pkgdir}/opt/nashira/lib"
+    if [[ -f "${lib}/nashira.desktop" ]]; then
+        install -Dm644 "${lib}/nashira.desktop" "${pkgdir}/usr/share/applications/nashira.desktop"
+        sed -i 's|^Exec=.*|Exec=/opt/nashira/bin/nashira|' \
+            "${pkgdir}/usr/share/applications/nashira.desktop"
+    fi
+
+    local icon="${NASHIRA_ICON:-}"
+    if [[ ! -f "${icon}" && -f "${lib}/nashira.png" ]]; then
+        icon="${lib}/nashira.png"
+    fi
+    if [[ -f "${icon}" ]]; then
+        install -Dm644 "${icon}" "${pkgdir}/usr/share/icons/hicolor/512x512/apps/nashira.png"
+    fi
+
+    install -dm755 "${pkgdir}/usr/bin"
+    ln -s /opt/nashira/bin/nashira "${pkgdir}/usr/bin/nashira"
+}
