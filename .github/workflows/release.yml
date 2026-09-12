@@ -86,9 +86,9 @@ jobs:
 
       - name: Build package
         run: |
-          # 容器裡的 pacman 資料庫是空的——不同步連 depends 都解析不了
-          # （2026-09-12 實測：java-runtime 缺依賴直接 fail）
-          pacman -Syu --noconfirm
+          # 容器裡的 pacman 資料庫是空的——不同步連 depends 都解析不了；
+          # makepkg 不帶 -s（builder 無 sudo），依賴由 root 這裡預裝
+          pacman -Syu --noconfirm --needed xdg-utils
           VERSION=$(grep -oP 'packageVersion\s*=\s*"\K[^"]+' desktopApp/build.gradle.kts)
           echo "version: ${VERSION}"
           # upload-artifact v4 的根目錄＝所有上傳路徑的最小共同祖先——
