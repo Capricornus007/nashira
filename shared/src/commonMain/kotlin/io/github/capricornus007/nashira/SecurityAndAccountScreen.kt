@@ -53,6 +53,7 @@ import io.github.capricornus007.nashira.matrix.SelfVerificationStatus
 import io.github.capricornus007.nashira.matrix.SessionTrust
 import io.github.capricornus007.nashira.matrix.SessionLogout
 import de.connect2x.trixnity.clientserverapi.model.user.displayName
+import de.connect2x.trixnity.clientserverapi.model.user.avatarUrl
 import io.github.capricornus007.nashira.matrix.RoomRepository
 import io.github.capricornus007.nashira.matrix.VerificationRepository
 import io.github.capricornus007.nashira.settings.SettingsGroup
@@ -166,6 +167,23 @@ fun SecurityAndAccountScreen(
                         onClick = { name = currentName; editing = true },
                     )
                 }
+            }
+            item { shape ->
+                // P4-3 尾巴：頭像上傳（setAvatar 已有 API，這裡接圖片選擇器）
+                val avatarPicker = io.github.capricornus007.nashira.rememberImagePickerLauncher { picked ->
+                    scope.launch {
+                        roomRepository.setAvatar(picked.bytes, picked.mimeType)
+                            .onFailure { actionError = it.message }
+                    }
+                }
+                val profileState by session.client.profile.collectAsState()
+                SettingsItem(
+                    shape = shape,
+                    icon = Icons.Filled.Person,
+                    title = strings.changeAvatar,
+                    description = profileState?.avatarUrl?.takeIf { it.isNotBlank() },
+                    onClick = avatarPicker ?: {},
+                )
             }
             item { shape ->
                 SettingsItem(

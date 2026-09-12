@@ -217,6 +217,7 @@ interface Strings {
     val loggingIn: String
     val actionIgnoreUser: String
     val editDisplayName: String
+    val changeAvatar: String
     val loginPassword: String
     val loginSubmit: String
     val logout: String
@@ -453,6 +454,7 @@ object ZhTwStrings : Strings {
     override val loggingIn = "正在登入…"
     override val actionIgnoreUser = "屏蔽用戶"
     override val editDisplayName = "編輯顯示名稱"
+    override val changeAvatar = "變更頭像"
     override val loginPassword = "密碼"
     override val loginSubmit = "登入"
     override val today = "今天"
@@ -499,6 +501,7 @@ object ZhTwStrings : Strings {
  * 沒覆寫的鍵顯示繁體（比顯示英文好）。
  */
 object ZhCnStrings : Strings by ZhTwStrings {
+    override val changeAvatar = "更改头像"
     override val homeserver = "家服务器"
     override val actionIgnoreUser = "屏蔽用户"
     override val editDisplayName = "编辑显示名称"
@@ -714,6 +717,7 @@ object JaStrings : Strings by EnStrings {
     override val loggingIn = "ログイン中…"
     override val actionIgnoreUser = "ユーザーをブロック"
     override val editDisplayName = "表示名を編集"
+    override val changeAvatar = "アイコンを変更"
     override val loginPassword = "パスワード"
     override val loginSubmit = "ログイン"
     override val logout = "ログアウト"
@@ -948,6 +952,7 @@ object KoStrings : Strings by EnStrings {
     override val loggingIn = "로그인 중…"
     override val actionIgnoreUser = "사용자 차단"
     override val editDisplayName = "표시 이름 편집"
+    override val changeAvatar = "프로필 사진 변경"
     override val loginPassword = "비밀번호"
     override val loginSubmit = "로그인"
     override val logout = "로그아웃"
@@ -1173,6 +1178,7 @@ object EnStrings : Strings {
     override val loggingIn = "Signing in…"
     override val actionIgnoreUser = "Ignore user"
     override val editDisplayName = "Edit display name"
+    override val changeAvatar = "Change profile picture"
     override val loginPassword = "Password"
     override val loginSubmit = "Log in"
     override val logout = "Log out"

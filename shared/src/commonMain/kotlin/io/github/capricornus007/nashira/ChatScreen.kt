@@ -1266,7 +1266,10 @@ private fun TimelinePane(
     }
     val pageFlow = remember(timeline) { timeline.pageFlow() }
     val page by pageFlow.collectAsState(initial = null)
-    val messages = page?.messages
+    // P4-1 尾巴：把被屏蔽者的訊息從時間線濾掉（blocked senders never render）
+    val ignoredUsers by remember(roomRepository) { roomRepository.ignoredUsers() }
+        .collectAsState(initial = emptySet())
+    val messages = page?.messages?.filter { it.sender !in ignoredUsers }
     val loadingMore = page?.loadingBefore == true
     // 標題副行與輸入框都用房間真正的別名，沒有別名就用房間名，不再假造 "#一般"
     val aliasFlow = remember(roomRepository, room.roomId) { roomRepository.canonicalAlias(room.roomId) }
