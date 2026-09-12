@@ -151,6 +151,9 @@ interface Strings {
     val membersCount: String
     val imageMessage: String
     val stickerMessage: String
+    val voiceMessage: String
+    val recording: String
+    val voiceUnsupported: String
     val undecryptable: String
     val clearSearch: String
     val noSearchResults: String
@@ -398,6 +401,9 @@ object ZhTwStrings : Strings {
     override val membersCount = "成員 · %d"
     override val imageMessage = "圖片"
     override val stickerMessage = "貼圖"
+    override val voiceMessage = "語音訊息"
+    override val recording = "錄音中"
+    override val voiceUnsupported = "此平台無法播放此格式"
     override val undecryptable = "⚠ 這則訊息無法解密"
     override val clearSearch = "清除搜尋"
     override val noSearchResults = "找不到符合的聊天室"
@@ -506,6 +512,9 @@ object ZhCnStrings : Strings by ZhTwStrings {
     override val actionIgnoreUser = "屏蔽用户"
     override val editDisplayName = "编辑显示名称"
     override val loginSsoHint = "将在浏览器打开家服务器的官方登录页面"
+    override val voiceMessage = "语音消息"
+    override val recording = "录音中"
+    override val voiceUnsupported = "此平台无法播放此格式"
 }
 
 /**
@@ -625,7 +634,6 @@ object JaStrings : Strings by EnStrings {
     override val forwardTo = "転送先…"
     override val forwardUnsupported = "この種類のメッセージはまだ転送できません"
     override val viewSourceFailed = "イベントを読み込めませんでした"
-    override val actionDownload = "ダウンロード"
     override val actionHideImage = "画像を非表示"
     override val hiddenImage = "画像を非表示中（タップで表示）"
     override val downloadFailed = "ダウンロードに失敗しました"
@@ -655,7 +663,9 @@ object JaStrings : Strings by EnStrings {
     override val undecryptable = "⚠ このメッセージを復号できません"
     override val clearSearch = "検索をクリア"
     override val noSearchResults = "一致する部屋はありません"
-    override val showSecret = "表示"
+    override val voiceMessage = "ボイスメッセージ"
+    override val recording = "録音中"
+    override val voiceUnsupported = "このプラットフォームでは再生できません"
     override val hideSecret = "非表示"
     override val acceptInvite = "承諾"
     override val declineInvite = "拒否"
@@ -887,6 +897,9 @@ object KoStrings : Strings by EnStrings {
     override val membersCount = "멤버 · %d"
     override val imageMessage = "이미지"
     override val stickerMessage = "스티커"
+    override val voiceMessage = "음성 메시지"
+    override val recording = "녹음 중"
+    override val voiceUnsupported = "이 플랫폼에서는 재생할 수 없습니다"
     override val undecryptable = "⚠ 이 메시지를 복호화할 수 없습니다"
     override val clearSearch = "검색 지우기"
     override val noSearchResults = "일치하는 대화방이 없습니다"
@@ -1053,6 +1066,9 @@ object EnStrings : Strings {
     override val membersCount = "Members · %d"
     override val imageMessage = "Image"
     override val stickerMessage = "Sticker"
+    override val voiceMessage = "Voice message"
+    override val recording = "Recording"
+    override val voiceUnsupported = "Cannot play this format on this platform"
     override val undecryptable = "⚠ Unable to decrypt this message"
     override val clearSearch = "Clear search"
     override val noSearchResults = "No matching rooms"

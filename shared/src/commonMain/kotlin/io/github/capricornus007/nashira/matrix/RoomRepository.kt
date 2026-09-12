@@ -24,6 +24,8 @@ import de.connect2x.trixnity.core.model.events.m.ReceiptType
 import de.connect2x.trixnity.core.model.RoomId
 import de.connect2x.trixnity.core.model.events.m.room.EncryptionEventContent
 import de.connect2x.trixnity.core.model.events.m.room.ImageInfo
+import de.connect2x.trixnity.core.model.events.m.room.AudioInfo
+import de.connect2x.trixnity.core.model.events.m.room.FileBasedInfo
 import de.connect2x.trixnity.utils.toByteArrayFlow
 import io.github.capricornus007.nashira.PickedImage
 import de.connect2x.trixnity.core.model.UserId
@@ -145,6 +147,13 @@ sealed interface MessageBody {
 
     /** 檔案／音訊／影片：先用檔名標示，還沒做內建播放 */
     data class Attachment(val name: String) : MessageBody
+
+    /** 語音訊息（m.audio）：可播放，帶時長。Telegram 橋的語音也是這個型別進來。 */
+    data class Voice(
+        val source: MediaSource,
+        val durationMs: Long?,
+        val mimeType: String?,
+    ) : MessageBody
 
     /** 這台裝置拿不到金鑰 */
     data object Undecryptable : MessageBody
@@ -950,6 +959,41 @@ class RoomRepository(val client: MatrixClient) {
         }
     }
 
+    /**
+     * 發送語音訊息（P5-1，m.audio + AudioInfo.duration）。上傳路徑與 sendImage 相同：
+     * 加密房先 prepareUploadEncryptedMedia 拿 EncryptedFile，明文房上傳拿 mxc url。
+     * MSC3245 的 m.voice 標記 Trixnity 5.8.1 的內容模型沒有欄位（msgtype 分發寫死
+     * 在 RoomMessageEventContent.Serializer），帶不上——Element 端照樣顯示成可播放
+     * 的音訊氣泡，只差沒有語音專屬樣式。
+     */
+    suspend fun sendVoice(roomId: RoomId, voice: RecordedVoice): Result<String> = runCatching {
+        val mediaService = client.di.get<de.connect2x.trixnity.client.media.MediaService>()
+        val contentType = io.ktor.http.ContentType.parse(voice.mimeType)
+        val info = AudioInfo(
+            duration = voice.durationMs,
+            mimeType = voice.mimeType,
+            size = voice.bytes.size.toLong(),
+        )
+        val encrypted = client.room.getState<EncryptionEventContent>(roomId).firstOrNull() != null
+        val content = if (encrypted) {
+            RoomMessageEventContent.FileBased.Audio(
+                body = "voice message",
+                fileName = null,
+                file = mediaService.prepareUploadEncryptedMedia(voice.bytes.toByteArrayFlow()),
+                info = info,
+            )
+        } else {
+            val cacheUri = mediaService.prepareUploadMedia(voice.bytes.toByteArrayFlow(), contentType)
+            RoomMessageEventContent.FileBased.Audio(
+                body = "voice message",
+                fileName = null,
+                url = mediaService.uploadMedia(cacheUri).getOrThrow(),
+                info = info,
+            )
+        }
+        client.room.sendMessage(roomId) { content(content) }
+    }
+
     /** 公開聊天室目錄：只查公開房間，不改動本地同步資料。 */
     suspend fun publicRooms(search: String = ""): Result<List<PublicRoom>> = runCatching {
         val response = client.api.room.getPublicRooms(limit = 50, since = null, server = null).getOrThrow()
@@ -1002,6 +1046,7 @@ internal fun de.connect2x.trixnity.core.model.events.EventContent.messageBodyOrN
             MessageBody.Text(body, this.formattedBody?.takeIf { format == "org.matrix.custom.html" && it.isNotBlank() })
         is RoomMessageEventContent.FileBased.Image ->
             imageBody(body, url, file, info as? ImageInfo, isSticker = false)
+        is RoomMessageEventContent.FileBased.Audio -> voiceBody(url, file, info)
         is RoomMessageEventContent.FileBased -> MessageBody.Attachment(fileName ?: body)
         // 自己送出的貼圖是註冊過的 StickerEventContent
         is StickerEventContent -> imageBody(body, url, file, info, isSticker = true)
@@ -1026,6 +1071,19 @@ private fun imageBody(
     return MessageBody.Image(caption, source, info?.width, info?.height, isSticker, info?.mimeType)
 }
 
+
+/** 語音（m.audio）：本體檔就是來源（沒有縮圖概念），時長在 AudioInfo。 */
+private fun voiceBody(
+    url: String?,
+    file: EncryptedFile?,
+    info: FileBasedInfo?,
+): MessageBody {
+    val source = file?.let(MediaSource::Encrypted)
+        ?: url?.let(MediaSource::Plain)
+        ?: return MessageBody.Attachment("audio")
+    val audio = info as? de.connect2x.trixnity.core.model.events.m.room.AudioInfo
+    return MessageBody.Voice(source, audio?.duration, audio?.mimeType)
+}
 /** 貼圖事件的形狀跟 m.image 相同（body/url/file/info），只是型別沒被 Trixnity 註冊。 */
 private fun stickerBody(raw: JsonObject): MessageBody? {
     val info = raw["info"]?.let { it as? JsonObject }

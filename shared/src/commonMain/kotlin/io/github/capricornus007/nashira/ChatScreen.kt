@@ -149,6 +149,12 @@ import io.github.capricornus007.nashira.matrix.SpaceSummary
 import io.github.capricornus007.nashira.matrix.SpacesSnapshot
 import io.github.capricornus007.nashira.matrix.TimelineMessage
 import io.github.capricornus007.nashira.matrix.MessageBody
+import io.github.capricornus007.nashira.matrix.AudioPlayer
+import io.github.capricornus007.nashira.matrix.RecordedVoice
+import io.github.capricornus007.nashira.matrix.VoiceRecorder
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.runtime.DisposableEffect
 import de.connect2x.trixnity.clientserverapi.client.SyncState
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
@@ -1421,6 +1427,34 @@ private fun TimelinePane(
     SideEffect { if (imeBottom > 0) lastImeBottomPx = imeBottom }
     // 「＋」的附件選單（桌面是小彈窗、手機是底部面板）
     var attachMenu by remember(room.roomId) { mutableStateOf(false) }
+    // P5-1 語音錄音：recorder 非 null = 錄音中；錄完停在 recordedPreview 等確認
+    var voiceRecorder by remember(room.roomId) { mutableStateOf<VoiceRecorder?>(null) }
+    var recordingElapsed by remember(room.roomId) { mutableStateOf(0L) }
+    var recordingAmp by remember(room.roomId) { mutableStateOf(0f) }
+    var recordedPreview by remember(room.roomId) { mutableStateOf<RecordedVoice?>(null) }
+    val previewPlayer = remember(room.roomId) { AudioPlayer() }
+    var previewPlaying by remember(room.roomId) { mutableStateOf(false) }
+    var recordingMark by remember(room.roomId) { mutableStateOf<kotlin.time.TimeSource.Monotonic.ValueTimeMark?>(null) }
+    DisposableEffect(room.roomId) {
+        onDispose {
+            voiceRecorder?.cancel()
+            previewPlayer.release()
+        }
+    }
+    // 錄音計時＋音量脈衝；預覽播放狀態輪詢
+    LaunchedEffect(voiceRecorder, recordedPreview) {
+        while (voiceRecorder != null || previewPlaying) {
+            val activeRecorder = voiceRecorder
+            if (activeRecorder != null) {
+                recordingElapsed = recordingMark?.elapsedNow()?.inWholeMilliseconds ?: 0
+                recordingAmp = activeRecorder.amplitude()
+            }
+            if (previewPlaying && !previewPlayer.isPlaying()) {
+                previewPlaying = false
+            }
+            delay(150)
+        }
+    }
     val sendShortcut = LocalUiState.current.sendShortcut
     // 輸入法與貼圖面板互斥（Telegram／Discord mobile 行為）：輸入框拿到焦點
     // （＝鍵盤要彈出）就收面板；反過來開面板要主動把鍵盤收掉——否則 Android 15
@@ -1635,6 +1669,7 @@ private fun TimelinePane(
                                     is MessageBody.Text -> body.text
                                     is MessageBody.Image ->
                                         if (body.isSticker) strings.notifSticker else strings.notifImage
+                                    is MessageBody.Voice -> strings.voiceMessage
                                     is MessageBody.Attachment -> body.name
                                     MessageBody.Undecryptable -> strings.notifUndecryptable
                                 },
@@ -1709,6 +1744,149 @@ private fun TimelinePane(
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
                     )
                 }
+                // P5-1 錄音列：錄音中／待確認時整條替換輸入列（Telegram 式）。
+                if (voiceRecorder != null || recordedPreview != null) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        if (voiceRecorder != null) {
+                            // 紅點＋計時：紅點隨音量縮放
+                            val scale by animateFloatAsState(
+                                targetValue = 1f + (recordingElapsed % 1000L) / 1000f * 0f + recordingAmp * 0.35f,
+                                animationSpec = tween(120),
+                                label = "rec_dot",
+                            )
+                            Box(
+                                Modifier
+                                    .size((14 * scale).dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.error),
+                            )
+                            Text(
+                                formatVoiceDuration(recordingElapsed),
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                            Text(
+                                strings.recording,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        } else {
+                            val preview = recordedPreview
+                            Box(
+                                Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.secondaryContainer)
+                                    .clickable {
+                                        if (preview != null) {
+                                            if (previewPlayer.prepare(preview.bytes, preview.mimeType)) {
+                                                previewPlayer.play()
+                                                previewPlaying = previewPlayer.isPlaying()
+                                            }
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    if (previewPlaying) VoiceIcons.Pause else Icons.Filled.PlayArrow,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.size(22.dp),
+                                )
+                            }
+                            Text(
+                                formatVoiceDuration(preview?.durationMs ?: 0),
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                        Spacer(Modifier.weight(1f))
+                        if (voiceRecorder != null) {
+                            // 取消：整段丟棄
+                            IconButton(
+                                onClick = {
+                                    voiceRecorder?.cancel()
+                                    voiceRecorder = null
+                                    recordingMark = null
+                                },
+                                modifier = Modifier.size(44.dp),
+                            ) {
+                                Icon(
+                                    Icons.Filled.Close,
+                                    contentDescription = strings.cancel,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            // 停止：進入待確認（可試聽）
+                            Box(
+                                Modifier
+                                    .size(44.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.error)
+                                    .clickable {
+                                        val taken = voiceRecorder?.stop()
+                                        voiceRecorder = null
+                                        recordingMark = null
+                                        recordedPreview = taken
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    VoiceIcons.Stop,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onError,
+                                    modifier = Modifier.size(22.dp),
+                                )
+                            }
+                        } else {
+                            // 待確認：丟棄／送出
+                            IconButton(
+                                onClick = {
+                                    previewPlayer.release()
+                                    previewPlaying = false
+                                    recordedPreview = null
+                                },
+                                modifier = Modifier.size(44.dp),
+                            ) {
+                                Icon(
+                                    Icons.Filled.Delete,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Box(
+                                Modifier
+                                    .size(44.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primary)
+                                    .clickable {
+                                        val toSend = recordedPreview
+                                        previewPlayer.release()
+                                        previewPlaying = false
+                                        recordedPreview = null
+                                        if (toSend != null) {
+                                            scope.launch {
+                                                roomRepository.sendVoice(room.roomId, toSend)
+                                                    .onFailure { sendError = it.message }
+                                            }
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    Icons.Filled.Send,
+                                    contentDescription = strings.send,
+                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                        }
+                    }
+                } else {
                 // Discord/SchildiChat 的輸入列：整條膠囊，左「+」右送出。
                 // 有草稿時送出鍵變成 primary 實心圓，空著時只是灰色圖示。
                 Row(
@@ -1820,29 +1998,54 @@ private fun TimelinePane(
                         } else {
                             // 「＋」不再直接開相簿：Telegram／Element／Discord 桌面都是先彈一張
                             // 小選單，手機端 SchildiChat 是從下往上的底部面板。
-                            Box {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box {
+                                    IconButton(
+                                        onClick = { attachMenu = true },
+                                        modifier = Modifier.size(44.dp),
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.Add,
+                                            contentDescription = strings.attach,
+                                            tint = if (attachMenu) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    if (!compact) {
+                                        AttachMenu(
+                                            expanded = attachMenu,
+                                            strings = strings,
+                                            onDismiss = { attachMenu = false },
+                                            onPhoto = imageLauncher?.let { launch -> { attachMenu = false; launch() } },
+                                            onFile = fileLauncher?.let { launch -> { attachMenu = false; launch() } },
+                                        )
+                                    }
+                                }
+                                // P5-1：草稿空著時的麥克風（Telegram 排法——附件在中、麥克風在最右）
                                 IconButton(
-                                    onClick = { attachMenu = true },
+                                    onClick = {
+                                        stickerPanel = false
+                                        keyboardController?.hide()
+                                        focusManager.clearFocus()
+                                        runCatching {
+                                            val r = VoiceRecorder()
+                                            r.start()
+                                            recordingMark = kotlin.time.TimeSource.Monotonic.markNow()
+                                            recordingElapsed = 0
+                                            voiceRecorder = r
+                                        }
+                                    },
                                     modifier = Modifier.size(44.dp),
                                 ) {
                                     Icon(
-                                        Icons.Filled.Add,
-                                        contentDescription = strings.attach,
-                                        tint = if (attachMenu) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                                if (!compact) {
-                                    AttachMenu(
-                                        expanded = attachMenu,
-                                        strings = strings,
-                                        onDismiss = { attachMenu = false },
-                                        onPhoto = imageLauncher?.let { launch -> { attachMenu = false; launch() } },
-                                        onFile = fileLauncher?.let { launch -> { attachMenu = false; launch() } },
+                                        VoiceIcons.Mic,
+                                        contentDescription = strings.recording,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
                             }
                         }
                     }
+                }
                 }
             }
         },
@@ -2511,8 +2714,12 @@ private fun MessageRow(
             Modifier.fillMaxWidth()
                 .contextMenuGestures(
                     onClick = { if (selectionMode) onToggleSelection() },
-                    onContextMenu = {
-                        if (msg.eventId != null) onEnterSelection() else { menuAnchor = Offset.Unspecified; menuOpen = true }
+                    // 長按／右鍵一律開彈出菜單。5aaee75 曾把已同步訊息的長按直通
+                    // 多選模式，結果整個動作菜單（回覆/複製/反應/轉發…）只剩桌面
+                    // hover 浮條進得去（用戶回報）；多選改由菜單裡的「多選」進入。
+                    onContextMenu = { offset ->
+                        menuAnchor = offset
+                        menuOpen = true
                     },
                 )
                 .hoverable(hoverSource)
@@ -2562,6 +2769,7 @@ private fun MessageRow(
                     client = client,
                     body = msg.body,
                     strings = strings,
+                    isOwn = isOwn,
                     modifier = Modifier
                         .padding(top = if (grouped) 0.dp else 2.dp)
                         .alpha(if (msg.pending && msg.sendError == null) 0.55f else 1f),
@@ -2685,6 +2893,7 @@ private fun MessageRow(
                 }
                 ContextMenuItem(strings.actionViewSource) { menuOpen = false; onViewSource() }
                 ContextMenuItem(strings.actionForward) { menuOpen = false; onForward() }
+                ContextMenuItem(strings.actionSelectMessages) { menuOpen = false; onEnterSelection() }
                 (msg.body as? MessageBody.Image)?.let { img ->
                     ContextMenuItem(strings.actionDownload) { menuOpen = false; onDownloadImage(img) }
                     // 貼圖沒有「隱藏」——它本來就是內容本體，不是敏感縮圖
@@ -2849,6 +3058,7 @@ private fun MessageBodyContent(
     body: MessageBody,
     strings: io.github.capricornus007.nashira.i18n.Strings,
     modifier: Modifier = Modifier,
+    isOwn: Boolean = false,
     onOpenImage: ((MessageBody.Image) -> Unit)? = null,
 ) {
     val ui = LocalUiState.current
@@ -2903,6 +3113,16 @@ private fun MessageBodyContent(
                 hiddenLabel = if (hidden) strings.hiddenImage else null,
             )
         }
+        is MessageBody.Voice -> VoiceBubble(
+            client = client,
+            source = body.source,
+            durationMs = body.durationMs,
+            mimeType = body.mimeType,
+            isOwn = isOwn,
+            modifier = modifier,
+            fetchFailedLabel = strings.downloadFailed,
+            unsupportedLabel = strings.voiceUnsupported,
+        )
         is MessageBody.Attachment -> Text(
             "📎 ${body.name}",
             style = MaterialTheme.typography.bodyMedium,
@@ -2923,6 +3143,7 @@ private fun MessageBody.previewText(strings: io.github.capricornus007.nashira.i1
     when (this) {
         is MessageBody.Text -> text
         is MessageBody.Image -> if (isSticker) strings.stickerMessage else strings.imageMessage
+        is MessageBody.Voice -> strings.voiceMessage
         is MessageBody.Attachment -> name
         MessageBody.Undecryptable -> strings.undecryptable
     }

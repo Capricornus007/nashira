@@ -78,6 +78,7 @@ internal suspend fun watchNotifications(client: MatrixClient, myUserId: UserId) 
             val text = when (body) {
                 is MessageBody.Text -> body.text
                 is MessageBody.Image -> if (body.isSticker) strings.notifSticker else strings.notifImage
+                is MessageBody.Voice -> strings.voiceMessage
                 is MessageBody.Attachment -> body.name
                 MessageBody.Undecryptable -> strings.notifUndecryptable
             }
