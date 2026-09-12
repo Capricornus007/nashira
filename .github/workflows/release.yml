@@ -113,8 +113,16 @@ jobs:
             NASHIRA_ICONS='$PWD/desktopApp/packaging/hicolor/hicolor' \
             makepkg -f --noconfirm
           "
-          # 防呆：包裡必須真的有應用本體（曾因 PKGBUILD 編輯失誤上傳過 139KB 空包）
-          bsdtar -tf packaging/*.pkg.tar.zst | grep -q "^opt/nashira/bin/nashira" \
+          # 防呆：包裡必須真的有應用本體（曾因 PKGBUILD 編輯失誤上傳過 139KB 空包）。
+          # 注意 makepkg 可能附帶産生 -debug 拆分包——只驗主包，且 glob 展開成
+          # 多個檔案時 bsdtar 會把後面的檔名當成「要列出的成員」而報錯。
+          MAIN_PKG=""
+          for p in packaging/*.pkg.tar.zst; do
+            [[ "$p" != *-debug-* ]] && MAIN_PKG="$p"
+          done
+          [ -n "$MAIN_PKG" ] || { echo "::error::找不到主包 .pkg.tar.zst"; exit 1; }
+          echo "main package: $MAIN_PKG"
+          bsdtar -tf "$MAIN_PKG" | grep -q "^opt/nashira/bin/nashira" \
             || { echo "::error::Arch 包內缺 opt/nashira/bin/nashira（裝載失敗）"; exit 1; }
           ls -la packaging/*.pkg.tar.zst
 
