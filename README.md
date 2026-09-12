@@ -1,49 +1,54 @@
 # Nashira
 
-Kotlin / Compose Multiplatform 的 Matrix 客戶端（Android + Linux 桌面），
-介面採用 **Material 3 Expressive**（MD3E），Discord 式版面。
+[English](README.md) · [繁體中文](README.zh-TW.md)
 
-- 訊息：文字（HTML formatted_body）、圖片、貼圖（MSC2545 貼圖包）、
-  custom emoji、語音訊息、反應、回覆、編輯、撤回、轉寄、圖釘、全文搜尋
-- 連結預覽卡（og meta）
-- 端對端加密（vodozemac）、交叉簽署與 SAS 裝置驗證
-- 六語介面（zh-TW / zh-HK / zh-CN / en / ja / ko）
-- MD3E 主題系統：動態取色、Arcaea 品牌色板、深色／純黑
+A Matrix client for Android and Linux desktop, built with Kotlin / Compose
+Multiplatform and a **Material 3 Expressive (MD3E)**, Discord-style interface.
 
-## 下載
+- Messages: text (HTML formatted_body), images, stickers (MSC2545 packs),
+  custom emoji, voice messages, reactions, replies, edits, redactions,
+  forwarding, pinning, full-text search
+- Inline link preview cards (og meta)
+- End-to-end encryption (vodozemac), cross-signing and SAS device verification
+- Six languages (zh-TW / zh-HK / zh-CN / en / ja / ko)
+- MD3E theming: dynamic color, Arcaea brand palettes, dark / pure black
 
-[Releases](https://github.com/Capricornus007/nashira/releases) 提供：
+## Downloads
 
-| 平台 | 格式 |
+[Releases](https://github.com/Capricornus007/nashira/releases) provide:
+
+| Platform | Format |
 |---|---|
-| Android | `.apk`（debug 簽章，可直接側載） |
-| Debian / Ubuntu 系 | `.deb` |
-| Fedora / RHEL / SUSE 系 | `.rpm` |
-| Arch 系 | `.pkg.tar.zst` |
+| Android | `.apk` (debug-signed, sideload-ready) |
+| Debian / Ubuntu | `.deb` |
+| Fedora / RHEL / SUSE | `.rpm` |
+| Arch | `.pkg.tar.zst` |
 
-## 其他發行版：自行構建
+## Other distros: build it yourself
 
-需要 **JDK 21+**（Android 另需 Android SDK；桌面端不需要）。
+You need **JDK 21+** (Android additionally needs the Android SDK; desktop does not).
 
 ```bash
 git clone https://github.com/Capricornus007/nashira
 cd nashira
 
-# 桌面端直接跑
+# Run the desktop app directly
 ./gradlew desktopApp:run
 
-# 桌面端出可分發目錄（自帶 JRE 映像，解壓即用）
+# Produce a distributable directory (bundles its own JRE)
 ./gradlew desktopApp:createDistributable
-# 產物在 desktopApp/build/compose/binaries/main/app/nashira/
+# Output: desktopApp/build/compose/binaries/main/app/nashira/
 
 # Android debug APK
 ./gradlew androidApp:assembleDebug
-# 產物在 androidApp/build/outputs/apk/debug/
+# Output: androidApp/build/outputs/apk/debug/
 ```
 
-不想用包管理器格式的發行版（Alpine、NixOS、獨立 musl 等）：用上面的
-`createDistributable`，解壓 `main/app/nashira` 後執行 `bin/nashira` 即可。
+On distros without a package-manager format you use (Alpine, NixOS, static
+musl, …): use `createDistributable` above, unpack `main/app/nashira`, and run
+`bin/nashira`.
 
-## 授權
+## License
 
-AGPL-3.0（見 [LICENSE](LICENSE)）。矩陣協議實作基於 [Trixnity](https://gitlab.com/connect2x/trixnity)。
+AGPL-3.0 (see [LICENSE](LICENSE)). The Matrix protocol implementation is
+based on [Trixnity](https://gitlab.com/connect2x/trixnity).
