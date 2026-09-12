@@ -2,6 +2,7 @@ name: release
 
 on:
   push:
+    branches: [master]
     tags: ["v*"]
   workflow_dispatch:
     inputs:
@@ -41,7 +42,13 @@ jobs:
         id: tag
         run: |
           REF="${GITHUB_REF#refs/tags/}"
-          if [ "$REF" = "$GITHUB_REF" ]; then REF="v${{ github.event.inputs.version }}"; fi
+          if [ "$REF" = "$GITHUB_REF" ]; then
+            # push（master）或 dispatch：版本取自建置配置；dispatch 帶 input 時優先
+            INPUT="${{ github.event.inputs.version }}"
+            if [ -n "$INPUT" ]; then REF="v$INPUT"
+            else REF="v$(grep -oP 'packageVersion\s*=\s*\"\K[^\"]+' desktopApp/build.gradle.kts)"
+            fi
+          fi
           echo "TAG=$REF" >> "$GITHUB_ENV"
 
       - name: Upload distributable artifact (for the Arch package job)
@@ -120,6 +127,9 @@ jobs:
     needs: arch
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout (for version detection)
+        uses: actions/checkout@v5
+
       - name: Download Arch package
         uses: actions/download-artifact@v4
         with:
@@ -129,7 +139,12 @@ jobs:
       - name: Determine release tag
         run: |
           REF="${GITHUB_REF#refs/tags/}"
-          if [ "$REF" = "$GITHUB_REF" ]; then REF="v${{ github.event.inputs.version }}"; fi
+          if [ "$REF" = "$GITHUB_REF" ]; then
+            INPUT="${{ github.event.inputs.version }}"
+            if [ -n "$INPUT" ]; then REF="v$INPUT"
+            else REF="v$(grep -oP 'packageVersion\s*=\s*\"\K[^\"]+' desktopApp/build.gradle.kts)"
+            fi
+          fi
           echo "TAG=$REF" >> "$GITHUB_ENV"
 
       - name: Upload to release

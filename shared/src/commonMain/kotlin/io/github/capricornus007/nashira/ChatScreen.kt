@@ -161,6 +161,7 @@ import io.github.capricornus007.nashira.matrix.MessageBody
 import io.github.capricornus007.nashira.matrix.AudioPlayer
 import io.github.capricornus007.nashira.matrix.RecordedVoice
 import io.github.capricornus007.nashira.matrix.VoiceRecorder
+import io.github.capricornus007.nashira.matrix.rememberRecordingPermission
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.runtime.DisposableEffect
@@ -1394,7 +1395,7 @@ private fun TimelinePane(
         if (messages?.isNotEmpty() == true) roomRepository.markRead(room.roomId)
     }
 
-    // P5-2：待發送的 custom emoji（隨文字以 formatted_body 送出）
+    val recordingPermission = rememberRecordingPermission()
     var pendingEmoticons by remember(room.roomId) { mutableStateOf<List<StickerItem>>(emptyList()) }
 
     // 送出動作由按鈕與 Enter 鍵共用，兩邊行為必須一致
@@ -2103,6 +2104,11 @@ private fun TimelinePane(
                                 // P5-1：草稿空著時的麥克風（Telegram 排法——附件在中、麥克風在最右）
                                 IconButton(
                                     onClick = {
+                                        // 沒錄音權限先請求（Android）；授予後再點一次開始錄
+                                        if (!recordingPermission.isGranted()) {
+                                            recordingPermission.request()
+                                            return@IconButton
+                                        }
                                         stickerPanel = false
                                         keyboardController?.hide()
                                         focusManager.clearFocus()
