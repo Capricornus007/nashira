@@ -48,7 +48,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: main-dist
-          path: desktopApp/build/compose/binaries/main-dist/nashira
+          path: desktopApp/build/compose/binaries/main/app/nashira
           if-no-files-found: error
 
       - name: Publish GitHub Release
