@@ -103,7 +103,7 @@ jobs:
             cd '$PWD/packaging' && \
             NASHIRA_VERSION='${VERSION}' \
             NASHIRA_DIST='${DIST_DIR}' \
-            NASHIRA_ICON='$PWD/desktopApp/packaging/nashira-512.png' \
+            NASHIRA_ICONS='$PWD/desktopApp/packaging/hicolor/hicolor' \
             makepkg -f --noconfirm
           "
           ls -la packaging/*.pkg.tar.zst

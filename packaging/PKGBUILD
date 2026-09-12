@@ -2,8 +2,8 @@
 #
 # 消費預先構建的 Compose app image——本 PKGBUILD 不跑 gradle（CI 已建好）：
 #   ./gradlew desktopApp:createDistributable
-#   NASHIRA_VERSION=0.1.0 NASHIRA_DIST="$PWD/desktopApp/build/compose/binaries/main/app/nashira" \
-#     NASHIRA_ICON="$PWD/desktopApp/packaging/nashira-512.png" makepkg -f
+#   NASHIRA_DIST="$PWD/desktopApp/build/compose/binaries/main/app/nashira" \
+#     NASHIRA_ICONS="$PWD/desktopApp/packaging/hicolor/hicolor" makepkg -f
 #
 # 佈局鏡像 jpackage 的 deb/rpm：/opt/nashira + desktop entry + hicolor 圖標，
 # 另加 /usr/bin/nashira 便利連結。app image 自帶 JRE，不需要 java-runtime。
@@ -22,22 +22,14 @@ package() {
     local dist="${NASHIRA_DIST:?NASHIRA_DIST must point to the main/app/nashira app image}"
     local lib
 
-    install -dm755 "${pkgdir}/opt/nashira"
-    cp -a "${dist}/." "${pkgdir}/opt/nashira/"
-
-    lib="${pkgdir}/opt/nashira/lib"
-    if [[ -f "${lib}/nashira.desktop" ]]; then
-        install -Dm644 "${lib}/nashira.desktop" "${pkgdir}/usr/share/applications/nashira.desktop"
-        sed -i 's|^Exec=.*|Exec=/opt/nashira/bin/nashira|' \
-            "${pkgdir}/usr/share/applications/nashira.desktop"
-    fi
-
-    local icon="${NASHIRA_ICON:-}"
-    if [[ ! -f "${icon}" && -f "${lib}/nashira.png" ]]; then
-        icon="${lib}/nashira.png"
-    fi
-    if [[ -f "${icon}" ]]; then
-        install -Dm644 "${icon}" "${pkgdir}/usr/share/icons/hicolor/512x512/apps/nashira.png"
+    local icon="${NASHIRA_ICONS:-}"
+    if [[ -d "${icon}" ]]; then
+        # hicolor 全尺寸（16–512＋scalable SVG）：桌面環境按 DPI 挑最佳尺寸，
+        # 不會拿 512 硬縮成 16 的糊圖
+        install -dm755 "${pkgdir}/usr/share/icons/hicolor"
+        cp -a "${icon}/." "${pkgdir}/usr/share/icons/hicolor/"
+    elif [[ -f "${lib}/nashira.png" ]]; then
+        install -Dm644 "${lib}/nashira.png" "${pkgdir}/usr/share/icons/hicolor/512x512/apps/nashira.png"
     fi
 
     install -dm755 "${pkgdir}/usr/bin"
