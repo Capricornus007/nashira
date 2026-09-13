@@ -2009,6 +2009,9 @@ private fun TimelinePane(
                             // 笑臉而不是加號：加號讀起來像「其他附件的集合」（微信／Telegram
                             // 都是把表情貼圖放在笑臉，附件才是迴紋針或加號）
                             Icons.Filled.Face,
+                            // 光學平衡：Face 字形佔滿 24dp 視窗的 83%，Add/Mic 只佔 58%
+                            // ——同尺寸渲染會顯得比鄰居大四成（真機像素實測），縮到 20dp 對齊視覺重量
+                            modifier = Modifier.size(20.dp),
                             contentDescription = strings.sticker,
                             tint = if (stickerPanel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -2723,14 +2726,14 @@ private fun AttachMenu(
         if (onPhoto != null) {
             DropdownMenuItem(
                 text = { Text(strings.attachPhoto) },
-                leadingIcon = { Icon(Icons.Filled.AccountBox, contentDescription = null) },
+                leadingIcon = { Icon(VoiceIcons.Photo, contentDescription = null) },
                 onClick = onPhoto,
             )
         }
         if (onFile != null) {
             DropdownMenuItem(
                 text = { Text(strings.attachFile) },
-                leadingIcon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
+                leadingIcon = { Icon(VoiceIcons.File, contentDescription = null) },
                 onClick = onFile,
             )
         }
