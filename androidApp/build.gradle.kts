@@ -59,6 +59,7 @@ android {
 
 dependencies {
     implementation(project(":shared"))
+    implementation("org.slf4j:slf4j-simple:2.0.16")
     implementation(libs.androidx.activity.compose)
     implementation("androidx.compose.foundation:foundation:1.12.0")
     implementation("androidx.core:core-ktx:1.17.0")

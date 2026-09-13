@@ -19,9 +19,11 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 import de.connect2x.trixnity.core.model.events.m.ReactionEventContent
@@ -87,6 +89,25 @@ class RoomTimeline(
         loadingBefore.value = true
         runCatching { timeline.loadBefore() }
         loadingBefore.value = false
+    }
+
+    /**
+     * 活邊緣（P5 修復）：`Timeline` 的視窗是 init 時的靜態快照（internalInit/loadAfter
+     * 都是 toList() 收斂），sync 進來的新事件**不會**自動出現在開著的時間線——
+     * 真機實證：發送語音後要退出重進房間才看得到，看起來像「一直卡在發送中」。
+     * 這裡訂閱 `Room.lastRelevantEventId`（RoomListHandler 在 sync 時維護的活欄位），
+     * 變了就 loadAfter 把視窗延伸到最新。已是最新時 loadAfter 是 no-op，重複呼叫無害。
+     */
+    fun startLiveEdge(scope: kotlinx.coroutines.CoroutineScope) {
+        scope.launch {
+            client.room.getById(roomId)
+                .map { it?.lastRelevantEventId }
+                .distinctUntilChanged()
+                .collect {
+                    runCatching { timeline.loadAfter { minSize = 1; maxSize = 100 } }
+                        .onFailure { println("NASHIRA_TIMELINE: live edge loadAfter failed: ${it.message}") }
+                }
+        }
     }
 
     /**

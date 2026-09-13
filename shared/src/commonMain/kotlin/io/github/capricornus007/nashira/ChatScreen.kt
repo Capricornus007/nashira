@@ -1282,6 +1282,11 @@ private fun TimelinePane(
             result.onSuccess { println("NASHIRA_TIMELINE: init OK") }
         }
     }
+    // 活邊緣：Timeline 視窗是靜態快照，房間有新事件時 loadAfter 延伸（見 RoomTimeline.startLiveEdge）
+    androidx.compose.runtime.DisposableEffect(timeline) {
+        timeline.startLiveEdge(timelineScope)
+        onDispose { }
+    }
     val pageFlow = remember(timeline) { timeline.pageFlow() }
     val page by pageFlow.collectAsState(initial = null)
     // P4-1 尾巴：把被屏蔽者的訊息從時間線濾掉（blocked senders never render）
