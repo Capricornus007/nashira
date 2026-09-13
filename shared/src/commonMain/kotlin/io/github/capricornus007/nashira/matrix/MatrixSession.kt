@@ -168,11 +168,13 @@ object MatrixEngine {
                 repositoriesModule = persistentRepositories(key),
                 mediaStoreModule = persistentMediaStore(key),
                 cryptoDriverModule = CryptoDriverModule.vodozemac(),
-                authProviderData = MatrixClientAuthProviderData.classic(
-                    baseUrl = Url(stored.baseUrl),
-                    accessToken = stored.accessToken,
-                    refreshToken = stored.refreshToken,
-                ),
+                // **恢復時絕不能傳 prefs 裡的 token**：Trixnity 的 create 在
+                // 「DB 已有 authentication＋顯式 authProviderData」時走 re-authenticate
+                // 分支——用顯式（可能已輪替過期的）token 做 whoAmI，401 之外還會
+                // 把 DB 裡輪替後的新 token 覆蓋掉（真機 401 Invalid refresh token
+                // 的根因）。傳 null 則走 else 分支直接讀 DB 的最新 token。
+                // prefs 的 token 只用來定位資料庫與作為恢復觸發。
+                authProviderData = null,
                 configuration = {
                     this.syncFilter = MatrixEngine.syncFilter
                     this.modulesFactories = trixnityModuleFactoriesWithPonies()
@@ -183,6 +185,7 @@ object MatrixEngine {
             // 建庫失敗不等於 token 失效：清除 Android 快取後，媒體目錄／鎖檔可能
             // 正在重建。絕不能在這條暫時性錯誤路徑清掉登入憑證，否則使用者會被
             // 無故登出；保留 token，下一次啟動或手動重試再恢復即可。
+            println("NASHIRA_RESTORE: client create failed: ${it::class.simpleName}: ${it.message}")
         }.getOrNull() ?: run {
             _restoreFailed.value = true
             _restoring.value = false

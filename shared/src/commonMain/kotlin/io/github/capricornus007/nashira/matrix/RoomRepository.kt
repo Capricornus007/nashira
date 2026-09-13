@@ -967,6 +967,7 @@ class RoomRepository(val client: MatrixClient) {
      * 的音訊氣泡，只差沒有語音專屬樣式。
      */
     suspend fun sendVoice(roomId: RoomId, voice: RecordedVoice): Result<String> = runCatching {
+        println("NASHIRA_VOICE: send start ${voice.bytes.size}B ${voice.mimeType}")
         val mediaService = client.di.get<de.connect2x.trixnity.client.media.MediaService>()
         val contentType = io.ktor.http.ContentType.parse(voice.mimeType)
         val info = AudioInfo(
@@ -975,6 +976,7 @@ class RoomRepository(val client: MatrixClient) {
             size = voice.bytes.size.toLong(),
         )
         val encrypted = client.room.getState<EncryptionEventContent>(roomId).firstOrNull() != null
+        println("NASHIRA_VOICE: encrypted=$encrypted, uploading...")
         val content = if (encrypted) {
             RoomMessageEventContent.FileBased.Audio(
                 body = "voice message",
@@ -991,7 +993,10 @@ class RoomRepository(val client: MatrixClient) {
                 info = info,
             )
         }
-        client.room.sendMessage(roomId) { content(content) }
+        println("NASHIRA_VOICE: upload done, sending event...")
+        val eventId = client.room.sendMessage(roomId) { content(content) }
+        println("NASHIRA_VOICE: event sent $eventId")
+        eventId
     }
 
     /** 公開聊天室目錄：只查公開房間，不改動本地同步資料。 */
