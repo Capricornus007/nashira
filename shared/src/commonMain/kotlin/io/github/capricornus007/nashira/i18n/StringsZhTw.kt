@@ -197,6 +197,7 @@ object ZhTwStrings : Strings {
     override val loginSsoHint = "將在瀏覽器開啟家伺服器的官方登入頁"
     override val homeserver = "家伺服器"
     override val loggingIn = "正在登入…"
+    override val syncConnecting = "連線中…訊息會在恢復後自動補上"
     override val connectionFailed = "無法連線到伺服器"
     override val connectionFailedHint = "登入憑證仍在。多半是網路或代理暫時不通，恢復後重試即可。"
     override val retry = "重試"

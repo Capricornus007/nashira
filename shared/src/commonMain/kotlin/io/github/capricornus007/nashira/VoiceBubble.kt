@@ -12,8 +12,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -36,6 +38,7 @@ import io.github.capricornus007.nashira.matrix.MediaSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * P5-1 時間線裡的語音氣泡：播放／暫停鍵＋時長＋進度條。
@@ -64,10 +67,15 @@ fun VoiceBubble(
     var position by remember(source) { mutableStateOf(0L) }
     var prepared by remember(source) { mutableStateOf(false) }
     var loading by remember(source) { mutableStateOf(false) }
+    var retryToken by remember(source) { mutableStateOf(0) }
 
-    LaunchedEffect(source) {
+    // 下載要限時：VPN 半死時 OkHttp 掛在死連線上永不返回（真機實證：氣泡永遠轉圈）。
+    // 超時歸入 failed 態，點一下重試（retryToken 觸發重新抓取）。
+    LaunchedEffect(source, retryToken) {
         if (bytes == null && !failed) {
-            val fetched = withContext(Dispatchers.Default) { fetchMediaBytes(client, source) }
+            val fetched = withTimeoutOrNull(30_000) {
+                withContext(Dispatchers.Default) { fetchMediaBytes(client, source) }
+            }
             if (fetched == null) failed = true else {
                 VoiceBytesCache.put(source, fetched)
                 bytes = fetched
@@ -102,12 +110,30 @@ fun VoiceBubble(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         when {
-            failed -> Text(
-                (if (bytes == null) fetchFailedLabel else unsupportedLabel) ?: formatVoiceDuration(total),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-            )
+            failed -> Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable {
+                        // 點一下重試（VPN 恢復後手動補抓，不再要求重進房間）
+                        failed = false
+                        retryToken += 1
+                    }
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+            ) {
+                Icon(
+                    Icons.Filled.Refresh,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    (if (bytes == null) fetchFailedLabel else unsupportedLabel) ?: formatVoiceDuration(total),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 6.dp),
+                )
+            }
             bytes == null -> Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),

@@ -219,6 +219,7 @@ interface Strings {
     fun formatDate(year: Int, month: Int, day: Int): String
     val homeserver: String
     val loggingIn: String
+    val syncConnecting: String
     val connectionFailed: String
     val connectionFailedHint: String
     val retry: String

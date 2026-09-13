@@ -197,6 +197,7 @@ object EnStrings : Strings {
     override val chatListHint = "Space icons, unread indicators, previews, and sticker panel"
     override val homeserver = "Home server"
     override val loggingIn = "Signing in…"
+    override val syncConnecting = "Connecting… messages will catch up automatically"
     override val connectionFailed = "Could not reach the server"
     override val connectionFailedHint = "Your session is still saved. This is usually a temporary network or proxy issue — retry once it recovers."
     override val retry = "Retry"

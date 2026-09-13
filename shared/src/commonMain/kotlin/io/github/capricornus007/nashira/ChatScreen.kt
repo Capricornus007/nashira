@@ -882,6 +882,25 @@ private fun ChannelPane(
                 overflow = TextOverflow.Ellipsis,
             )
         }
+        // Telegram 式同步狀態條：連線出錯/逾時時在清單頂部亮一條細帶
+        // （Trixnity 的 sync 自帶退避重試，恢復後自動消失）；正常同步不佔位。
+        // 之前只有「整屏重試頁」——快取的房間全被藏掉，重試鈕按了也只在
+        // 同一個死網路裡再失敗一次（用戶實測回報「根本沒用」）。
+        androidx.compose.animation.AnimatedVisibility(
+            visible = syncState == SyncState.ERROR || syncState == SyncState.TIMEOUT ||
+                syncState == SyncState.STOPPED,
+            enter = androidx.compose.animation.expandVertically(),
+            exit = androidx.compose.animation.shrinkVertically(),
+        ) {
+            Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    strings.syncConnecting,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 5.dp),
+                )
+            }
+        }
         var query by remember { mutableStateOf("") }
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
