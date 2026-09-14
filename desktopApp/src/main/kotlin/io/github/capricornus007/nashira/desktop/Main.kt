@@ -76,14 +76,45 @@ fun main(args: Array<String>) {
         }
 
         if (trayAvailable) {
-            Tray(
-                icon = painterResource("nashira-icon.png"),
-                tooltip = "Nashira",
-                onAction = { showMainWindow() },
-            ) {
-                Item(strings.trayOpen) { showMainWindow() }
-                Item(strings.trayQuit) { exitApplication() }
+            // 直接 AWT TrayIcon：Compose 的 Tray 用預設 AWT 字體（醜）且圖標
+            // 只能傳 Painter（純色）；這裡用 BufferedImage 圖標＋自訂字體。
+            // 2026-09-14 用戶回報：右鍵菜單字體醜＋圖標太純色。
+            val trayIcon = java.awt.image.BufferedImage(16, 16, java.awt.image.BufferedImage.TYPE_INT_ARGB).apply {
+                val g = createGraphics()
+                g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON)
+                // Arcaea 金星：五角星路徑
+                val gold = java.awt.Color(0xF2, 0xB6, 0x3C)
+                val navy = java.awt.Color(0x1F, 0x1E, 0x33)
+                g.color = navy
+                g.fillRoundRect(0, 0, 16, 16, 4, 4)
+                g.color = gold
+                val cx = 8f; val cy = 8f; val r1 = 6f; val r2 = 2.5f
+                val star = java.awt.geom.Path2D.Float()
+                for (i in 0 until 10) {
+                    val angle = Math.PI / 2 + i * Math.PI / 5
+                    val r = if (i % 2 == 0) r1 else r2
+                    val x = cx + r * kotlin.math.cos(angle).toFloat()
+                    val y = cy - r * kotlin.math.sin(angle).toFloat()
+                    if (i == 0) star.moveTo(x, y) else star.lineTo(x, y)
+                }
+                star.closePath()
+                g.fill(star)
+                g.dispose()
             }
+            val trayIconAwt = java.awt.TrayIcon(trayIcon, "Nashira")
+            trayIconAwt.isImageAutoSize = true
+            val popup = java.awt.PopupMenu().apply {
+                font = java.awt.Font("霞鶩文楷 TC", java.awt.Font.PLAIN, 14)
+                add(java.awt.MenuItem(strings.trayOpen).apply {
+                    addActionListener { showMainWindow() }
+                })
+                add(java.awt.MenuItem(strings.trayQuit).apply {
+                    addActionListener { exitApplication() }
+                })
+            }
+            trayIconAwt.popupMenu = popup
+            trayIconAwt.addActionListener { showMainWindow() } // 左鍵
+            java.awt.SystemTray.getSystemTray().add(trayIconAwt)
         }
 
         Window(
