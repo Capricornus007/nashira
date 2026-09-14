@@ -247,6 +247,7 @@ object ZhTwStrings : Strings {
     override val audioDeviceDefault = "系統預設"
     override val trayOpen = "開啟 Nashira"
     override val trayQuit = "結束程式"
+    override val jumpToLatest = "跳到最新"
 }
 
 /** 日文介面；Matrix／Nashira／Material 3 等專有名詞保留原名。 */

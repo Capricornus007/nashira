@@ -92,6 +92,16 @@ class RoomTimeline(
     }
 
     /**
+     * 跳回活邊緣（最新一則）。深滾歷史後 UI 的「跳到最新」按鈕用——
+     * Trixnity 視窗會隨 loadBefore 往舊端滑，滾回來拿不到新端內容
+     * （2026-09-14 深滾後回不到底部的實測），直接以最新事件重建視窗。
+     */
+    suspend fun jumpToLiveEdge() {
+        val lastEventId = client.room.getById(roomId).firstOrNull()?.lastRelevantEventId ?: return
+        jumpTo(lastEventId)
+    }
+
+    /**
      * 活邊緣（P5 修復）：`Timeline` 的視窗是 init 時的靜態快照（internalInit/loadAfter
      * 都是 toList() 收斂），sync 進來的新事件**不會**自動出現在開著的時間線——
      * 真機實證：發送語音後要退出重進房間才看得到，看起來像「一直卡在發送中」。

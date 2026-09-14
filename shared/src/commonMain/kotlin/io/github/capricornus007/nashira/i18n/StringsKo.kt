@@ -242,4 +242,5 @@ object KoStrings : Strings by EnStrings {
     override val audioDeviceDefault = "시스템 기본값"
     override val trayOpen = "Nashira 열기"
     override val trayQuit = "종료"
+    override val jumpToLatest = "최신으로 이동"
 }

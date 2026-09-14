@@ -260,6 +260,7 @@ interface Strings {
     val audioDeviceDefault: String
     val trayOpen: String
     val trayQuit: String
+    val jumpToLatest: String
 }
 
 val StringsMap: Map<AppLanguage, Strings> = mapOf(

@@ -240,4 +240,5 @@ object JaStrings : Strings by EnStrings {
     override val audioDeviceDefault = "システム既定"
     override val trayOpen = "Nashira を開く"
     override val trayQuit = "終了"
+    override val jumpToLatest = "最新へ移動"
 }

@@ -111,6 +111,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.Close
@@ -1383,9 +1385,14 @@ private fun TimelinePane(
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
-    // reverseLayout 下 index 0 就是最新訊息（畫在最底部），新訊息到達時跳回底部
+    // reverseLayout 下 index 0 就是最新訊息（畫在最底部）。新訊息到達時只在
+    // 「使用者本來就貼著底部」才跟隨——深讀歷史時被拽走是反 UX（Telegram
+    // 也只在貼底時跟隨）；回底部交給「跳到最新」按鈕。
+    val awayFromLive by remember { derivedStateOf { listState.firstVisibleItemIndex > LiveEdgeItemThreshold } }
     LaunchedEffect(messages?.firstOrNull()?.eventId) {
-        if (messages?.isNotEmpty() == true) listState.scrollToItem(0)
+        if (messages?.isNotEmpty() == true && listState.firstVisibleItemIndex <= LiveEdgeItemThreshold) {
+            listState.scrollToItem(0)
+        }
     }
 
     // 滾到最舊的一端（reverseLayout 下是視覺最上方）就再要一頁歷史。
@@ -2368,11 +2375,43 @@ private fun TimelinePane(
                     ) {
                         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                         Spacer(Modifier.width(8.dp))
+
                         Text(strings.loadingMore, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
         }
+
+            // 「跳到最新」浮動鈕（Telegram/Discord 式）：深滾歷史後出現在
+            // 時間線底部中央。點擊以最新事件重建視窗（見 jumpToLiveEdge 的
+            // 說明——舊端的 loadBefore 視窗滑走後，滾回來拿不到新端內容）。
+            if (awayFromLive && !messages.isNullOrEmpty()) {
+                Surface(
+                    onClick = {
+                        scope.launch {
+                            timeline.jumpToLiveEdge()
+                            listState.scrollToItem(0)
+                        }
+                    },
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    shadowElevation = 4.dp,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .zIndex(1.5f)
+                        .padding(bottom = 12.dp)
+                        .size(40.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Filled.KeyboardArrowDown,
+                            contentDescription = strings.jumpToLatest,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+                }
+            }
 
             if (stickerPanel) {
                 // Telegram/微信式：貼圖面板疊層蓋在時間線底部、貼齊 bottomBar 上緣。
@@ -2798,6 +2837,9 @@ private const val MaxAutoLoads = 5
 
 /** 還剩幾則就開始預抓下一頁，避免滾到底才卡一下。 */
 private const val PrefetchThreshold = 10
+
+/** 距活邊緣超過幾個項目算「離開底部」：新訊息不跟隨＋顯示跳到最新鈕。 */
+private const val LiveEdgeItemThreshold = 4
 
 /** Discord 式日期分隔線：兩側細線、中央日期。 */
 @Composable
