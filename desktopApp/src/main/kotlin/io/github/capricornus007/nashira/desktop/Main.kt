@@ -136,13 +136,20 @@ fun main(args: Array<String>) {
             })
             java.awt.SystemTray.getSystemTray().add(trayIconAwt)
 
-            // Compose 托盤菜單（右鍵彈出）
+            // Compose 托盤菜單（右鍵彈出）：獨立 Window，不掛主窗口——
+            // Popup 在 application{} 裡沒有 LocalHostDefaultProvider 會崩
+            // （2026-09-14 實測：右鍵托盤圖標直接炸）。
             if (trayMenuOpen) {
-                Popup(
-                    alignment = Alignment.BottomEnd,
-                    offset = IntOffset(0, -8),
-                    onDismissRequest = { trayMenuOpen = false },
-                    properties = PopupProperties(focusable = true),
+                Window(
+                    onCloseRequest = { trayMenuOpen = false },
+                    undecorated = true,
+                    transparent = true,
+                    resizable = false,
+                    alwaysOnTop = true,
+                    state = rememberWindowState(
+                        position = WindowPosition.PlatformDefault,
+                        size = DpSize(180.dp, 96.dp),
+                    ),
                 ) {
                     Surface(
                         shape = RoundedCornerShape(8.dp),
