@@ -495,7 +495,9 @@ class RoomRepository(val client: MatrixClient) {
                     // 收藏夾紅刪後、機器人通知房都空預覽）。
                     var current = timelineEvent
                     var attempts = 0
-                    while (current != null && attempts < 5) {
+                    // 往舊走直到找到可預覽的（紅刪/無法解密/未知事件跳過）。
+                    // 上限 20 則：再多就是這房間真的沒東西了。
+                    while (current != null && attempts < 20) {
                         val body = current.messageBodyOrNull()
                         if (body != null) {
                             val roomEvent = current.event
