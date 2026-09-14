@@ -24,6 +24,10 @@ import io.github.capricornus007.nashira.DesktopNotifications
 import io.github.capricornus007.nashira.DesktopSingleInstance
 
 fun main(args: Array<String>) {
+    // AWT 字體渲染優化：LCD 子像素抗鋸齒（預設灰階在深色主題下像「關閉優化的 Windows」）
+    // 必須在 AWT 初始化前設定。
+    System.setProperty("awt.useSystemAAFontSettings", "lcd")
+    System.setProperty("swing.aatext", "true")
     // 單實例＋nashira:// 連結閘門：SSO scheme 回調會以本程式＋URL 參數再次
     // 啟動；有主實例在跑就把 URL 轉發過去後退出（純重複啟動同理），避免兩個
     // 實例共享同一個 Room DB 互相踩踏。
@@ -103,6 +107,8 @@ fun main(args: Array<String>) {
             }
             val trayIconAwt = java.awt.TrayIcon(trayIcon, "Nashira")
             trayIconAwt.isImageAutoSize = true
+            // AWT 字體渲染：系統屬性在 JVM 啟動時設定（main() 最前面），
+            // 這裡只設字體本身。抗鋸齒/LCD 子像素由 awt.useSystemAAFontSettings 控制。
             val popup = java.awt.PopupMenu().apply {
                 font = java.awt.Font("霞鶩文楷 TC", java.awt.Font.PLAIN, 14)
                 add(java.awt.MenuItem(strings.trayOpen).apply {
