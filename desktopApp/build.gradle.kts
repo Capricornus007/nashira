@@ -16,6 +16,10 @@ dependencies {
     implementation(compose.desktop.currentOs)
     // 讓 Trixnity 的 lognity/SLF4J 日誌真正輸出（否則 desktop 端 NOP 看不到任何錯誤）
     runtimeOnly("org.slf4j:slf4j-simple:2.0.16")
+    // 全域快捷鍵（XGrabKey）：JNA 直連 Xlib，不依賴 WM/sxhkd 配置——
+    // app 自己註冊（Firefox ctrl+q 同款哲學，2026-09-14 用戶定調）。
+    implementation("net.java.dev.jna:jna:5.16.0")
+    implementation("net.java.dev.jna:jna-platform:5.16.0")
 }
 
 compose.desktop {

@@ -268,6 +268,7 @@ interface Strings {
     val copyMatrixId: String
     val presenceOnline: String
     val replyOriginal: String
+    val noPreviewAvailable: String
 }
 
 val StringsMap: Map<AppLanguage, Strings> = mapOf(

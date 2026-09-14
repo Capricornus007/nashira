@@ -250,4 +250,5 @@ object KoStrings : Strings by EnStrings {
     override val copyMatrixId = "Matrix ID 복사"
     override val presenceOnline = "온라인"
     override val replyOriginal = "원본 메시지"
+    override val noPreviewAvailable = "표시할 메시지 없음"
 }

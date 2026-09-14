@@ -255,4 +255,5 @@ object EnStrings : Strings {
     override val copyMatrixId = "Copy Matrix ID"
     override val presenceOnline = "Online"
     override val replyOriginal = "Original message"
+    override val noPreviewAvailable = "No message to show"
 }

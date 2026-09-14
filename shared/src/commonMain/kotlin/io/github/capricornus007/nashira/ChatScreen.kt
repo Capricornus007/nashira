@@ -111,6 +111,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.foundation.Canvas
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -989,6 +992,40 @@ private fun ChannelPane(
     }
 }
 
+/**
+ * Discord 式靜音鈕：靜音態＝圖標轉 error 色＋紅色斜線貫穿＋圓角紅底高亮
+ * （只變色不夠直觀，2026-09-14 用戶回報困惑；斜線是 Discord 的標準語彙）。
+ */
+@Composable
+private fun MuteIconButton(muted: Boolean, onClick: () -> Unit, icon: @Composable () -> Unit) {
+    Box(
+        Modifier
+            .size(36.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        CompositionLocalProvider(
+            LocalContentColor provides if (muted) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+        ) {
+            icon()
+        }
+        if (muted) {
+            // 斜線：從左上到右下貫穿圖標（Discord 的「劃掉」語彙）
+            val slashColor = MaterialTheme.colorScheme.error  // DrawScope 不是 @Composable，先取色
+            Canvas(Modifier.fillMaxSize().padding(6.dp)) {
+                drawLine(
+                    color = slashColor,
+                    start = Offset(0f, size.height),
+                    end = Offset(size.width, 0f),
+                    strokeWidth = 2.dp.toPx(),
+                    cap = StrokeCap.Round,
+                )
+            }
+        }
+    }
+}
+
 /** Discord 式浮動帳號列：頭像/名字（→資料卡）＋麥克風（→輸入面板）＋耳機（→輸出面板）＋齒輪（→設定）。 */
 @Composable
 private fun AccountBar(
@@ -1050,16 +1087,8 @@ private fun AccountBar(
             // 麥克風＋^（Discord 的分體按鈕；無語音聊天靜音語義，兩者都開面板）
             Box {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(
-                        onClick = { ui.audioMicMuted = !ui.audioMicMuted },
-                        modifier = Modifier.size(36.dp),
-                    ) {
-                        Icon(
-                            BarIcons.Mic,
-                            contentDescription = null,
-                            tint = if (ui.audioMicMuted) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(21.dp),
-                        )
+                    MuteIconButton(muted = ui.audioMicMuted, onClick = { ui.audioMicMuted = !ui.audioMicMuted }) {
+                        Icon(BarIcons.Mic, contentDescription = null, modifier = Modifier.size(21.dp))
                     }
                     IconButton(
                         onClick = {
@@ -1084,16 +1113,8 @@ private fun AccountBar(
             // 耳機＋^（同上）
             Box {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(
-                        onClick = { ui.audioPlaybackMuted = !ui.audioPlaybackMuted },
-                        modifier = Modifier.size(36.dp),
-                    ) {
-                        Icon(
-                            BarIcons.Headset,
-                            contentDescription = null,
-                            tint = if (ui.audioPlaybackMuted) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(21.dp),
-                        )
+                    MuteIconButton(muted = ui.audioPlaybackMuted, onClick = { ui.audioPlaybackMuted = !ui.audioPlaybackMuted }) {
+                        Icon(BarIcons.Headset, contentDescription = null, modifier = Modifier.size(21.dp))
                     }
                     IconButton(
                         onClick = {
@@ -1213,6 +1234,9 @@ private fun RoomListItem(
                         room.isInvite -> strings.invited
                         preview != null -> "${preview.senderName}: ${preview.body.previewText(strings)}"
                         room.isDirect && showPreview -> strings.privateMessage
+                        // 預覽拿不到（紅刪/無法解密/空房間）也保留一行佔位——空白行
+                        // 會讓房間列「缺一塊」，視覺上像壞了（2026-09-14 截圖回報）
+                        showPreview -> strings.noPreviewAvailable
                         else -> null
                     }
                     Text(

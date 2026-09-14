@@ -255,6 +255,7 @@ object ZhTwStrings : Strings {
     override val copyMatrixId = "複製 Matrix ID"
     override val presenceOnline = "線上"
     override val replyOriginal = "原始訊息"
+    override val noPreviewAvailable = "沒有可顯示的訊息"
 }
 
 /** 日文介面；Matrix／Nashira／Material 3 等專有名詞保留原名。 */

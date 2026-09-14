@@ -62,6 +62,19 @@ fun main(args: Array<String>) {
             activateWindow()
         }
 
+        fun toggleMainWindow() {
+            val w = mainWindow ?: return
+            if (w.isVisible) w.isVisible = false else showMainWindow()
+        }
+
+        // 全域快捷鍵（app 自行註冊，XGrabKey）：Ctrl+Alt+N 切換主視窗。
+        // 桌面限定；X11 不可用（純 Wayland）時靜默跳過。
+        LaunchedEffect(Unit) {
+            // X11 keysym：ASCII 可打印字元＝其字碼（'n' = 0x6E）
+            val ok = GlobalHotkey.register(0x6E) { toggleMainWindow() }
+            if (!ok) println("NASHIRA_HOTKEY: global hotkey unavailable (X11 grab failed)")
+        }
+
         if (trayAvailable) {
             Tray(
                 icon = painterResource("nashira-icon.png"),

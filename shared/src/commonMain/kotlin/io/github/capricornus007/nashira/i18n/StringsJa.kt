@@ -248,4 +248,5 @@ object JaStrings : Strings by EnStrings {
     override val copyMatrixId = "Matrix ID をコピー"
     override val presenceOnline = "オンライン"
     override val replyOriginal = "元のメッセージ"
+    override val noPreviewAvailable = "表示できるメッセージがありません"
 }

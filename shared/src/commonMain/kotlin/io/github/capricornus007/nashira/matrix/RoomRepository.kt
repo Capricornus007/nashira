@@ -17,6 +17,7 @@ import de.connect2x.trixnity.client.store.type
 import de.connect2x.trixnity.client.user
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.flow
 import de.connect2x.trixnity.core.model.events.m.IgnoredUserListEventContent
 import de.connect2x.trixnity.clientserverapi.model.user.ProfileField
 import de.connect2x.trixnity.core.model.EventId
@@ -487,23 +488,38 @@ class RoomRepository(val client: MatrixClient) {
         client.room.getLastTimelineEvent(roomId)
             .flatMapLatest { eventFlow -> eventFlow ?: flowOf(null) }
             .flatMapLatest { timelineEvent ->
-                val roomEvent = timelineEvent?.event
-                val body = timelineEvent?.messageBodyOrNull()
-                if (roomEvent == null || body == null) {
-                    flowOf(null)
-                } else {
-                    client.user.getById(roomId, roomEvent.sender).map { member ->
-                        TimelineMessage(
-                            eventId = roomEvent.id,
-                            roomId = roomId,
-                            sender = roomEvent.sender,
-                            senderName = member?.name.visibleNameOrNull()
-                                ?: roomEvent.sender.full.removePrefix("@").substringBefore(':'),
-                            senderAvatarUrl = member?.event?.content?.avatarUrl,
-                            body = body,
-                            timestamp = roomEvent.originTimestamp,
-                        )
+                flow {
+                    // 最後一則是紅刪／未知事件（messageBodyOrNull 回 null）時沿
+                    // previousEventId 往舊回退（最多 5 則），找最近一則「有預覽
+                    // 內容」的——不然房間清單那行會空白（2026-09-14 用戶截圖：
+                    // 收藏夾紅刪後、機器人通知房都空預覽）。
+                    var current = timelineEvent
+                    var attempts = 0
+                    while (current != null && attempts < 5) {
+                        val body = current.messageBodyOrNull()
+                        if (body != null) {
+                            val roomEvent = current.event
+                            val member = client.user.getById(roomId, roomEvent.sender).firstOrNull()
+                            emit(
+                                TimelineMessage(
+                                    eventId = roomEvent.id,
+                                    roomId = roomId,
+                                    sender = roomEvent.sender,
+                                    senderName = member?.name.visibleNameOrNull()
+                                        ?: roomEvent.sender.full.removePrefix("@").substringBefore(':'),
+                                    senderAvatarUrl = member?.event?.content?.avatarUrl,
+                                    body = body,
+                                    timestamp = roomEvent.originTimestamp,
+                                ),
+                            )
+                            return@flow
+                        }
+                        current = current?.let { c ->
+                            runCatching { client.room.getPreviousTimelineEvent(c)?.firstOrNull() }.getOrNull()
+                        }
+                        attempts++
                     }
+                    emit(null)
                 }
             }
             .distinctUntilChanged()
