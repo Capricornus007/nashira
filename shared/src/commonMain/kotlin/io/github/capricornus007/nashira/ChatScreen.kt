@@ -1011,9 +1011,11 @@ private fun MuteIconButton(muted: Boolean, onClick: () -> Unit, icon: @Composabl
             icon()
         }
         if (muted) {
-            // 斜線：從左上到右下貫穿圖標（Discord 的「劃掉」語彙）
+            // 斜線只穿過圖標本體（21dp＝圖標尺寸），不延伸到按鈕邊緣——
+            // Discord 的斜線兩端大致與圖標邊角對齊；首版 padding(6dp) 讓斜線
+            // 24dp 貼到按鈕邊，被用戶評「超出」（2026-09-14 兩輪截圖對照）。
             val slashColor = MaterialTheme.colorScheme.error  // DrawScope 不是 @Composable，先取色
-            Canvas(Modifier.fillMaxSize().padding(6.dp)) {
+            Canvas(Modifier.size(21.dp)) {
                 drawLine(
                     color = slashColor,
                     start = Offset(0f, size.height),
