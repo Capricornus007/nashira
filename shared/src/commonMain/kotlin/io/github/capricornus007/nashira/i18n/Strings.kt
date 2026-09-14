@@ -261,6 +261,13 @@ interface Strings {
     val trayOpen: String
     val trayQuit: String
     val jumpToLatest: String
+    val inputVolume: String
+    val outputVolume: String
+    val audioSettingsLink: String
+    val editProfile: String
+    val copyMatrixId: String
+    val presenceOnline: String
+    val replyOriginal: String
 }
 
 val StringsMap: Map<AppLanguage, Strings> = mapOf(

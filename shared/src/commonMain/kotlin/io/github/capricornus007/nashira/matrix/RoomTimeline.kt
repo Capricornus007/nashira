@@ -273,11 +273,8 @@ class RoomTimeline(
             body = edited?.messageBodyOrNull() ?: timelineEvent.messageBodyOrNull() ?: return null,
             timestamp = roomEvent.originTimestamp,
             edited = edited != null,
-            reactions = reactions[roomEvent.id].orEmpty(),
-            externalUrl = (timelineEvent.content?.getOrNull() ?: roomEvent.content).let { content ->
-                (content as? MessageEventContent)?.externalUrl
-            },
             pinned = roomEvent.id in pinnedIds,
+            replyToEventId = (eventContent as? MessageEventContent)?.relatesTo?.let { it as? RelatesTo.Reply }?.replyTo?.eventId,
         )
     }
 }

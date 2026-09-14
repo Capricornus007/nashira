@@ -28,6 +28,18 @@ actual class AudioPlayer actual constructor() {
                 runCatching { AudioSystem.getClip(info) }.getOrNull()
             } ?: AudioSystem.getClip()
             c.open(input)
+            // 輸出音量（AudioSelection.outputVolume 0-100）：Clip 沒有 setVolume，
+            // 走 MASTER_GAIN FloatControl（dB，-80..6）。線性→dB 近似：0% 靜音。
+            runCatching {
+                val v = AudioSelection.outputVolume / 100f
+                val db = when {
+                    v >= 1f -> 0f
+                    v <= 0f -> -80f
+                    else -> (kotlin.math.ln(v) / kotlin.math.ln(2f) * 20f)
+                }
+                val gainControl = c.getControl(javax.sound.sampled.FloatControl.Type.MASTER_GAIN) as javax.sound.sampled.FloatControl
+                gainControl.setValue(db)
+            }
             clip = c
             onReady(true)
             return
@@ -55,7 +67,7 @@ actual class AudioPlayer actual constructor() {
         val cmd = ffplayCommand ?: return
         if (ffplay?.isAlive == true) return
         ffplay = runCatching {
-            ProcessBuilder(cmd, "-nodisp", "-autoexit", "-loglevel", "quiet", f.absolutePath).start()
+            ProcessBuilder(cmd, "-nodisp", "-autoexit", "-loglevel", "quiet", "-volume", AudioSelection.outputVolume.toString(), f.absolutePath).start()
         }.getOrNull()
     }
 

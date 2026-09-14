@@ -111,6 +111,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.material.icons.filled.Delete
@@ -221,6 +222,8 @@ fun ChatScreen(
     var selectedSpace by remember { mutableStateOf<SpaceSummary?>(null) }
     var mobileRoomOpen by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
+    var settingsInitialPage by remember { mutableStateOf(0) } // 0=root 1=帳戶
+    val ACCOUNT_PAGE = 1
     var directoryOpen by remember { mutableStateOf(false) }
     val roomRepository = remember(session) { RoomRepository(session.client) }
     val syncState by session.client.syncState.collectAsState()
@@ -299,7 +302,7 @@ fun ChatScreen(
             if (directoryOpen) {
                 PublicRoomDirectory(roomRepository, strings) { directoryOpen = false }
             } else if (showSettings) {
-                SettingsScreen(session, { settingsOpen = false }, onLogout)
+                SettingsScreen(session, { settingsOpen = false }, onLogout, initialPage = if (settingsInitialPage == ACCOUNT_PAGE) io.github.capricornus007.nashira.SettingsPage.ACCOUNT else io.github.capricornus007.nashira.SettingsPage.ROOT)
             } else if (compact) {
                 MobileChatShell(
                     roomRepository = roomRepository,
@@ -361,6 +364,7 @@ fun ChatScreen(
                             client = session.client,
                             accountId = accountId,
                             onSettings = { settingsOpen = true },
+                            onOpenAccount = { settingsInitialPage = ACCOUNT_PAGE; settingsOpen = true },
                             modifier = Modifier.align(Alignment.BottomCenter),
                         )
                     }
@@ -585,6 +589,7 @@ private fun MobileChatShell(
                 client = roomRepository.client,
                 accountId = accountId,
                 onSettings = onSettings,
+                onOpenAccount = onSettings,
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
             // 上層：訊息頁整頁覆蓋（含 Space 欄），像 Discord／Telegram 那樣推上來
@@ -983,12 +988,13 @@ private fun ChannelPane(
     }
 }
 
-/** Discord 式浮動帳號列：橫跨左側 Space 欄與聊天室欄，點擊才進設定。 */
+/** Discord 式浮動帳號列：頭像/名字（→資料卡）＋麥克風（→輸入面板）＋耳機（→輸出面板）＋齒輪（→設定）。 */
 @Composable
 private fun AccountBar(
     client: de.connect2x.trixnity.client.MatrixClient,
     accountId: String,
     onSettings: () -> Unit,
+    onOpenAccount: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val profile by client.profile.collectAsState()
@@ -996,6 +1002,9 @@ private fun AccountBar(
     val accountName = accountId.substringAfter('@').substringBefore(':').ifBlank { accountId }
     val displayName = profile?.displayName?.takeIf { it.isNotBlank() } ?: accountName
     val accountServer = accountId.substringAfter(':', missingDelimiterValue = "")
+    var profilePopup by remember { mutableStateOf(false) }
+    var inputPanel by remember { mutableStateOf(false) }
+    var outputPanel by remember { mutableStateOf(false) }
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
         shape = RoundedCornerShape(28.dp),
@@ -1008,15 +1017,79 @@ private fun AccountBar(
             .navigationBarsPadding(),
     ) {
         Row(
-            Modifier.fillMaxWidth().clickable(onClick = onSettings).padding(horizontal = 10.dp, vertical = 6.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            AvatarImage(client, avatarUrl, displayName, Modifier.size(42.dp).clip(CircleShape))
-            Column(Modifier.weight(1f).padding(start = 8.dp), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                Text(displayName, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
-                Text("@$accountName${if (accountServer.isNotBlank()) ":$accountServer" else ""}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+            // 頭像＋名字：點 → 個人資料卡（Discord 2026 對照，2026-09-14 用戶截圖）
+            Row(
+                Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable {
+                        profilePopup = !profilePopup
+                        inputPanel = false
+                        outputPanel = false
+                    }
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                AvatarImage(client, avatarUrl, displayName, Modifier.size(40.dp).clip(CircleShape))
+                Column(Modifier.weight(1f).padding(start = 8.dp), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                    Text(displayName, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
+                    Text("@$accountName${if (accountServer.isNotBlank()) ":$accountServer" else ""}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                }
+            }
+            // 麥克風：點 → 輸入裝置快捷面板（錄音裝置＋增益）
+            IconButton(
+                onClick = {
+                    inputPanel = !inputPanel
+                    outputPanel = false
+                    profilePopup = false
+                },
+                modifier = Modifier.size(36.dp),
+            ) {
+                Icon(
+                    BarIcons.Mic,
+                    contentDescription = null,
+                    tint = if (inputPanel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(21.dp),
+                )
+            }
+            // 耳機：點 → 輸出裝置快捷面板（播放裝置＋音量）
+            IconButton(
+                onClick = {
+                    outputPanel = !outputPanel
+                    inputPanel = false
+                    profilePopup = false
+                },
+                modifier = Modifier.size(36.dp),
+            ) {
+                Icon(
+                    BarIcons.Headset,
+                    contentDescription = null,
+                    tint = if (outputPanel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(21.dp),
+                )
+            }
+            // 齒輪：設定
+            IconButton(onClick = onSettings, modifier = Modifier.size(36.dp)) {
+                Icon(
+                    Icons.Filled.Settings,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
+                )
             }
         }
+    }
+    if (profilePopup) {
+        ProfilePopup(client = client, accountId = accountId, onEditProfile = onOpenAccount, onDismiss = { profilePopup = false })
+    }
+    if (inputPanel) {
+        AudioDevicePanel(isInput = true, onOpenAudioSettings = onSettings, onDismiss = { inputPanel = false })
+    }
+    if (outputPanel) {
+        AudioDevicePanel(isInput = false, onOpenAudioSettings = onSettings, onDismiss = { outputPanel = false })
     }
 }
 
@@ -2236,10 +2309,15 @@ private fun TimelinePane(
                     // 日期分隔線掛在「當天最早一則」上。**reverseLayout 連 item 內容
                     // 順序也一起翻轉**：在 MessageRow 之後發出，畫出來才是在訊息
                     // 「上方」（真機座標實證：放前面反而落到訊息下方、日期錯位一塊）。
+                    // Discord 回覆上下文：目標事件在目前視窗內才拿得到名字/預覽；
+                    // 不在視窗（更早的歷史）就只畫「回覆」不帶內容。
+                    val replyTarget = msg.replyToEventId?.let { rid -> loaded.firstOrNull { it.eventId == rid } }
                     MessageRow(
                         client = roomRepository.client,
                         msg = msg,
                         grouped = grouped,
+                        replyToName = replyTarget?.senderName,
+                        replyToPreview = replyTarget?.let { bodyPreview(it.body) },
                         strings = strings,
                         isOwn = msg.sender == roomRepository.client.userId,
                         selected = msg.eventId in selectedEventIds,
@@ -2816,6 +2894,16 @@ private fun AttachRow(icon: androidx.compose.ui.graphics.vector.ImageVector, lab
     }
 }
 /** 選單裡的常用表情。完整選擇器還沒做，這幾個對齊 Discord 的預設快捷。 */
+
+/** 回覆預覽的一段文字：文字取前 60 字（換行摺疊），媒體給類型名。 */
+internal fun bodyPreview(body: MessageBody): String? = when (body) {
+    is MessageBody.Text -> body.text.lineSequence().firstOrNull { it.isNotBlank() }?.take(60)
+    is MessageBody.Image -> if (body.isSticker) "貼圖" else "圖片"
+    is MessageBody.Voice -> "語音訊息"
+    is MessageBody.Attachment -> body.name
+    MessageBody.Undecryptable -> null
+}
+
 private val QuickReactions = listOf(
     "\uD83D\uDC4D", // 👍
     "\u2764\uFE0F", // ❤️
@@ -2887,6 +2975,9 @@ private fun MessageRow(
     onOpenImage: (MessageBody.Image) -> Unit = {},
     onDownloadImage: (MessageBody.Image) -> Unit = {},
     onHideImage: (MessageBody.Image) -> Unit = {},
+    /** 回覆上下文（Discord 式「↩ 名字: 預覽」）：目標在視窗內才有值。 */
+    replyToName: String? = null,
+    replyToPreview: String? = null,
 )
 {
     var menuOpen by remember(msg.eventId) { mutableStateOf(false) }
@@ -2956,6 +3047,36 @@ private fun MessageRow(
                                 modifier = Modifier.padding(start = 6.dp, bottom = 1.dp),
                             )
                         }
+                    }
+                }
+                // Discord 式回覆上下文：↩ 名字（主色）: 預覽（灰），單行截斷。
+                if (msg.replyToEventId != null) {
+                    Row(
+                        Modifier.padding(bottom = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            BarIcons.Reply,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(15.dp),
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            buildAnnotatedString {
+                                withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)) {
+                                    append(replyToName ?: strings.replyOriginal)
+                                }
+                                if (replyToPreview != null) {
+                                    withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurfaceVariant)) {
+                                        append(": $replyToPreview")
+                                    }
+                                }
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
                 }
                 // 送出中／送出失敗：Telegram 與 Element 都在本機先畫出來再標狀態，

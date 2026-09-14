@@ -9,6 +9,12 @@ package io.github.capricornus007.nashira
 object AudioSelection {
     var input: String? = null
     var output: String? = null
+
+    /** 錄音增益 0-100（百分比）：VoiceRecorder 對 PCM 樣本線性縮放。 */
+    var inputGain: Int = 100
+
+    /** 播放音量 0-100（百分比）：Clip.setVolume / ffplay -volume。 */
+    var outputVolume: Int = 100
 }
 
 /**

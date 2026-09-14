@@ -241,4 +241,11 @@ object JaStrings : Strings by EnStrings {
     override val trayOpen = "Nashira を開く"
     override val trayQuit = "終了"
     override val jumpToLatest = "最新へ移動"
+    override val inputVolume = "入力音量"
+    override val outputVolume = "出力音量"
+    override val audioSettingsLink = "オーディオ設定"
+    override val editProfile = "プロフィール編集"
+    override val copyMatrixId = "Matrix ID をコピー"
+    override val presenceOnline = "オンライン"
+    override val replyOriginal = "元のメッセージ"
 }

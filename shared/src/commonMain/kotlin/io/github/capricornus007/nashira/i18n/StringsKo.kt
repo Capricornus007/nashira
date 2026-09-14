@@ -243,4 +243,11 @@ object KoStrings : Strings by EnStrings {
     override val trayOpen = "Nashira 열기"
     override val trayQuit = "종료"
     override val jumpToLatest = "최신으로 이동"
+    override val inputVolume = "입력 음량"
+    override val outputVolume = "출력 음량"
+    override val audioSettingsLink = "오디오 설정"
+    override val editProfile = "프로필 편집"
+    override val copyMatrixId = "Matrix ID 복사"
+    override val presenceOnline = "온라인"
+    override val replyOriginal = "원본 메시지"
 }

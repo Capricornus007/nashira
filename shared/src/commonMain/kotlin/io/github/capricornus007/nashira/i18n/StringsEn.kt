@@ -248,4 +248,11 @@ object EnStrings : Strings {
     override val trayOpen = "Open Nashira"
     override val trayQuit = "Quit"
     override val jumpToLatest = "Jump to latest"
+    override val inputVolume = "Input volume"
+    override val outputVolume = "Output volume"
+    override val audioSettingsLink = "Audio settings"
+    override val editProfile = "Edit profile"
+    override val copyMatrixId = "Copy Matrix ID"
+    override val presenceOnline = "Online"
+    override val replyOriginal = "Original message"
 }

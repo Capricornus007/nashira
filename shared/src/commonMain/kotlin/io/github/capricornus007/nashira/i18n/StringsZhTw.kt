@@ -248,6 +248,13 @@ object ZhTwStrings : Strings {
     override val trayOpen = "開啟 Nashira"
     override val trayQuit = "結束程式"
     override val jumpToLatest = "跳到最新"
+    override val inputVolume = "輸入音量"
+    override val outputVolume = "輸出音量"
+    override val audioSettingsLink = "音訊設定"
+    override val editProfile = "編輯個人資料"
+    override val copyMatrixId = "複製 Matrix ID"
+    override val presenceOnline = "線上"
+    override val replyOriginal = "原始訊息"
 }
 
 /** 日文介面；Matrix／Nashira／Material 3 等專有名詞保留原名。 */

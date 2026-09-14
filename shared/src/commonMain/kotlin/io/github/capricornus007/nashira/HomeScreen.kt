@@ -75,16 +75,17 @@ import io.github.capricornus007.nashira.AudioDevices
 import io.github.capricornus007.nashira.theme.applyBackgroundSync
 
 /** 設定的子頁。用單一 enum 表示，返回鍵逐層退回。 */
-private enum class SettingsPage { ROOT, ACCOUNT, APPEARANCE, CHAT_LIST, ABOUT }
+internal enum class SettingsPage { ROOT, ACCOUNT, APPEARANCE, CHAT_LIST, ABOUT }
 
 /** 完整設定入口：帳戶、外觀、聊天室清單、語言與關於。 */
 @Composable
-fun SettingsScreen(
+internal fun SettingsScreen(
     session: MatrixSession,
     onBack: () -> Unit,
     onLogout: () -> Unit,
+    initialPage: SettingsPage = SettingsPage.ROOT,
 ) {
-    var page by remember { mutableStateOf(SettingsPage.ROOT) }
+    var page by remember(initialPage) { mutableStateOf(initialPage) }
     PlatformBackHandler(enabled = page != SettingsPage.ROOT) { page = SettingsPage.ROOT }
     PlatformBackHandler(enabled = page == SettingsPage.ROOT) { onBack() }
     SettingsNavHost(

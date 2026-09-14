@@ -112,6 +112,25 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
     private var audioInputState by mutableStateOf(stored["audioInput"]?.takeIf { it.isNotBlank() })
     private var audioOutputState by mutableStateOf(stored["audioOutput"]?.takeIf { it.isNotBlank() })
 
+    /** 語音錄音增益（0-100）；錄音器對 PCM 線性縮放。 */
+    var audioInputGain: Int
+        get() = audioInputGainState
+        set(value) {
+            audioInputGainState = value
+            AudioSelection.inputGain = value
+        }
+
+    /** 播放音量（0-100）；Clip.setVolume / ffplay -volume。 */
+    var audioOutputVolume: Int
+        get() = audioOutputVolumeState
+        set(value) {
+            audioOutputVolumeState = value
+            AudioSelection.outputVolume = value
+        }
+
+    private var audioInputGainState by mutableStateOf(stored["audioInputGain"]?.toIntOrNull() ?: 100)
+    private var audioOutputVolumeState by mutableStateOf(stored["audioOutputVolume"]?.toIntOrNull() ?: 100)
+
     /** 被隱藏的媒體（mxc 網址）。「隱藏圖片」後時間線改畫佔位，點佔位恢復。 */
     var hiddenMedia by mutableStateOf(
         stored["hiddenMedia"]?.split('\n')?.filter { it.isNotBlank() }?.toSet() ?: emptySet()
@@ -120,6 +139,8 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
     init {
         AudioSelection.input = audioInput
         AudioSelection.output = audioOutput
+        AudioSelection.inputGain = audioInputGain
+        AudioSelection.outputVolume = audioOutputVolume
         loaded = true
     }
 
@@ -143,6 +164,8 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
         ) + mapOf(
             "audioInput" to (audioInput ?: ""),
             "audioOutput" to (audioOutput ?: ""),
+            "audioInputGain" to audioInputGain.toString(),
+            "audioOutputVolume" to audioOutputVolume.toString(),
         ) + (accent?.let { mapOf("accent" to it.name) } ?: emptyMap())
         if (snapshot == lastPersisted) return
         lastPersisted = snapshot

@@ -187,6 +187,8 @@ data class TimelineMessage(
     val pinned: Boolean = false,
     /** 這則訊息被編輯過（聚合了最新的 m.replace 內容）。 */
     val edited: Boolean = false,
+    /** 這則是回覆（m.in_reply_to）：目標事件 ID。UI 以此畫 Discord 式「↩ 名字: 預覽」。 */
+    val replyToEventId: EventId? = null,
 )
 
 /** 伺服器全文搜尋回傳的訊息；搜尋結果不會改動目前時間線，只供結果清單定位。 */

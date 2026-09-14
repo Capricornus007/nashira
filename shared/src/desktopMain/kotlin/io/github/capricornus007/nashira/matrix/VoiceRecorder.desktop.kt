@@ -51,7 +51,7 @@ actual class VoiceRecorder actual constructor() {
         reader?.join(500)
         reader = null
         if (duration < MinDurationMs || bytes.isEmpty()) return null
-        return RecordedVoice(pcmToWav(bytes), duration, "audio/wav")
+        return RecordedVoice(pcmToWav(applyGain(bytes)), duration, "audio/wav")
     }
 
     actual fun cancel() {
@@ -83,4 +83,25 @@ private fun pcmToWav(pcm: ByteArray): ByteArray {
     out.write("data".toByteArray()); le32(pcm.size)
     out.write(pcm)
     return out.toByteArray()
+}
+
+/**
+ * 輸入增益（AudioSelection.inputGain，0-100）：對 16bit 小端 PCM 樣本線性
+ * 縮放並夾到 Short 範圍。100＝原樣。javax.sound 沒有硬體輸入增益 API，
+ * 軟體縮放是唯一跨裝置一致的方案（Discord 的輸入音量同理）。
+ */
+private fun applyGain(pcm: ByteArray): ByteArray {
+    val gain = AudioSelection.inputGain
+    if (gain >= 100 || pcm.size < 2) return pcm
+    val factor = gain / 100.0
+    val out = pcm.copyOf()
+    var i = 0
+    while (i + 1 < out.size) {
+        val sample = ((out[i].toInt() and 0xFF) or (out[i + 1].toInt() shl 8)).toShort()
+        val scaled = (sample * factor).toInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+        out[i] = (scaled and 0xFF).toByte()
+        out[i + 1] = ((scaled shr 8) and 0xFF).toByte()
+        i += 2
+    }
+    return out
 }
