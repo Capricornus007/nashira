@@ -8,3 +8,5 @@ actual val keyboardLayoutSettingsSupported: Boolean = true
 actual fun applyBackgroundSync(enabled: Boolean) = Unit
 
 actual val platformDeviceDisplayName: String = "Nashira on Linux"
+
+actual val audioDeviceSettingsSupported: Boolean = true

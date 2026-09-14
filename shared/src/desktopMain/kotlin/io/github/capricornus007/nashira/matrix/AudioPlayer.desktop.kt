@@ -1,5 +1,7 @@
 package io.github.capricornus007.nashira.matrix
 
+import io.github.capricornus007.nashira.AudioSelection
+import io.github.capricornus007.nashira.mixerInfoFor
 import java.io.ByteArrayInputStream
 import java.io.File
 import javax.sound.sampled.AudioSystem
@@ -21,7 +23,10 @@ actual class AudioPlayer actual constructor() {
         // 1) javax.sound：RIFF/WAV 可以直接開
         try {
             val input = AudioSystem.getAudioInputStream(ByteArrayInputStream(bytes))
-            val c = AudioSystem.getClip()
+            // 設置頁選了輸出裝置就走那個 mixer；沒選/找不到回系統預設
+            val c = mixerInfoFor(AudioSelection.output)?.let { info ->
+                runCatching { AudioSystem.getClip(info) }.getOrNull()
+            } ?: AudioSystem.getClip()
             c.open(input)
             clip = c
             onReady(true)

@@ -56,6 +56,9 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.ui.text.Placeholder
@@ -64,6 +67,8 @@ import androidx.compose.ui.unit.em
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.Image
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -2772,7 +2777,18 @@ private fun AttachRow(icon: androidx.compose.ui.graphics.vector.ImageVector, lab
     }
 }
 /** 選單裡的常用表情。完整選擇器還沒做，這幾個對齊 Discord 的預設快捷。 */
-private val QuickReactions = listOf("\uD83D\uDC4D", "\u2764\uFE0F", "\uD83D\uDE02", "\uD83C\uDF89", "\uD83D\uDC40")
+private val QuickReactions = listOf(
+    "\uD83D\uDC4D", // 👍
+    "\u2764\uFE0F", // ❤️
+    "\uD83D\uDE02", // 😂
+    "\uD83C\uDF89", // 🎉
+    "\uD83D\uDC40", // 👀
+    "\uD83D\uDD25", // 🔥
+    "\uD83E\uDD14", // 🤔
+    "\uD83E\uDD70", // 🥰
+    "\uD83D\uDE22", // 😢
+    "\uD83D\uDC4F", // 👏
+)
 
 /** 兩則訊息合併顯示的最大間隔，對齊 Discord 的 7 分鐘。 */
 private const val GroupingWindowMillis = 7 * 60 * 1000L
@@ -2835,10 +2851,18 @@ private fun MessageRow(
     var menuAnchor by remember(msg.eventId) { mutableStateOf(Offset.Unspecified) }
     val hoverSource = remember { MutableInteractionSource() }
     val hovered by hoverSource.collectIsHoveredAsState()
+    LaunchedEffect(hovered) { if (hovered) println("NASHIRA_HOVER: row hovered eventId=${msg.eventId}") }
+    var boxOrigin by remember { mutableStateOf(Offset.Zero) }
     Box(
         Modifier
             .fillMaxWidth()
-            .background(if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.42f) else Color.Transparent),
+            .background(if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.42f) else Color.Transparent)
+            // hover 區掛在整個 Box（訊息列＋快捷列）：掛在 Row 上時，快捷列
+            // 是疊在 Row 上的兄弟節點，指針移到列上 Row 收到 hover-exit →
+            // 列卸載 → 指針落回 Row → 列重現——菜單和訊息列無限閃爍
+            //（2026-09-14 bspwm 桌面實測回報）。
+            .hoverable(hoverSource)
+            .onGloballyPositioned { boxOrigin = it.positionInRoot() },
     ) {
         Row(
             Modifier.fillMaxWidth()
@@ -2852,7 +2876,6 @@ private fun MessageRow(
                         menuOpen = true
                     },
                 )
-                .hoverable(hoverSource)
                 .padding(
                     start = 16.dp,
                     end = 16.dp,
@@ -2946,8 +2969,7 @@ private fun MessageRow(
                 }
             }
         }
-        // 滑鼠懸停時的快捷列（Element 桌面的做法）。觸控不會觸發 hover，所以手機不受影響。
-        if (hovered && msg.eventId != null) {
+        if ((hovered || menuOpen) && msg.eventId != null) {
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 shape = RoundedCornerShape(10.dp),
@@ -2966,9 +2988,17 @@ private fun MessageRow(
                             modifier = Modifier.size(16.dp),
                         )
                     }
+                    var threeDotOrigin by remember { mutableStateOf(Offset.Unspecified) }
                     IconButton(
-                        onClick = { menuAnchor = Offset.Unspecified; menuOpen = true },
-                        modifier = Modifier.size(32.dp),
+                        onClick = { menuAnchor = threeDotOrigin; menuOpen = true },
+                        modifier = Modifier
+                            .size(32.dp)
+                            // 記下按鈕左上角相對於訊息列 Box 的位置——選單從按鈕
+                            // 正下方展開，而不是 DropdownMenu 預設的父容器左上
+                            //（那會固定彈在訊息左側，2026-09-14 用戶回報）。
+                            .onGloballyPositioned { c ->
+                                threeDotOrigin = c.positionInRoot() + Offset(0f, c.size.height.toFloat()) - boxOrigin
+                            },
                     ) {
                         Icon(
                             Icons.Filled.MoreVert,
@@ -3045,16 +3075,17 @@ private fun MessageRow(
 
 
 
-/** 簡易 HTML → AnnotatedString 解析器（支援 Matrix 格式化訊息所需的標籤）。
- *  Matrix 規範：org.matrix.custom.html 格式，常見標籤：
- *  <b>, <strong> → 粗體
- *  <i>, <em> → 斜體
- *  <code> → 等寬字體（行內）
- *  <pre><code> → 代碼塊
- *  <a href="..."> → 可點擊連結
- *  <br> → 換行
- *  HTML 實體解碼（< > & " '）
- *  不支援：巢狀標籤（簡化處理）、CSS、script、iframe 等。
+/**
+ * 簡易 HTML → AnnotatedString 解析器（Matrix org.matrix.custom.html 常見標籤）。
+ *
+ * 2026-09-14 重寫：舊版被某次編輯損壞——實體解碼變成同值替換（&lt;→< 的
+ * 字面量被解碼成 <），tagRegex 的 \w 被雙寫成 \\w（raw string 裡等於匹配
+ * 字面反斜線）且少了 tagName 捕獲組——正則永不命中，整段 HTML 原文直出
+ * （用戶回報「網頁代碼沒轉換」，DB 裡事件本身格式正確）。
+ *
+ * 這版：標籤解析在「原始 HTML」上做，實體只對標籤之間的文字段解碼（避免
+ * &lt;div&gt; 被解成真標籤）；<a> 產出可點擊的 LinkAnnotation.Url。
+ * 支援：b/strong、i/em、u、del/s、code、pre、a、br、img(data-mx-emoticon)。
  */
 @Composable
 fun htmlToAnnotatedString(
@@ -3062,53 +3093,50 @@ fun htmlToAnnotatedString(
     baseStyle: TextStyle = MaterialTheme.typography.bodyLarge,
     linkColor: Color = MaterialTheme.colorScheme.primary,
 ): FormattedRichText {
-    // 1) 先解碼 HTML 實體
-    var text = html
-        .replace("<", "<")
-        .replace(">", ">")
-        .replace("&", "&")
-        .replace("\"", "\"")
-        .replace("'", "'")
-        .replace("&nbsp;", " ")
-
-    // 2) 處理 <br> → 換行
-    text = text.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n")
-
-    // 3) 使用 buildAnnotatedString 簡單構建
     val emoticons = mutableListOf<InlineEmoticon>()
     val annotated = buildAnnotatedString {
-        // 正則匹配標籤：<tag> 或 </tag> 或 <tag attr="...">
-        val tagRegex = """<(/?)\\w+([^>]*)>""".toRegex()
-        var pos = 0
-        var currentStyle = SpanStyle(
-            color = baseStyle.color,
-            fontSize = baseStyle.fontSize,
-            fontWeight = baseStyle.fontWeight,
-            fontStyle = baseStyle.fontStyle,
-            fontFamily = baseStyle.fontFamily,
-            letterSpacing = baseStyle.letterSpacing,
-            textDecoration = baseStyle.textDecoration,
-            background = baseStyle.background,
-        )
+        val tagRegex = """<(/?)(\w+)([^>]*)>""".toRegex()
+        val hrefRegex = """href\s*=\s*["']([^"']*)["']""".toRegex()
+        val srcRegex = """src\s*=\s*["']([^"']*)["']""".toRegex()
+        val altRegex = """alt\s*=\s*["']([^"']*)["']""".toRegex()
 
-        while (pos < text.length) {
-            val match = tagRegex.find(text.substring(pos))
+        var pos = 0
+        var currentStyle = baseStyle.toSpanStyle()
+        var linkUrl: String? = null
+        var inPreBlock = false
+
+        fun appendDecoded(raw: String) {
+            if (raw.isEmpty()) return
+            val decoded = decodeHtmlEntities(raw)
+            if (decoded.isEmpty()) return
+            val url = linkUrl
+            if (url != null) {
+                // 連結段：可點擊 + 連結色底線（點擊走系統瀏覽器，與 URL 預覽卡一致）
+                withLink(
+                    LinkAnnotation.Url(
+                        url = url,
+                        styles = TextLinkStyles(
+                            style = currentStyle.copy(
+                                color = linkColor,
+                                textDecoration = TextDecoration.combine(listOf(TextDecoration.Underline)),
+                            ),
+                        ),
+                        linkInteractionListener = { openLink(url) },
+                    ),
+                ) { append(decoded) }
+            } else {
+                withStyle(currentStyle) { append(decoded) }
+            }
+        }
+
+        while (pos < html.length) {
+            val match = tagRegex.find(html, pos)
             if (match == null) {
-                val remaining: String = text.substring(pos)
-                if (remaining.isNotBlank()) {
-                    withStyle(currentStyle) { append(remaining) }
-                }
+                appendDecoded(html.substring(pos))
                 break
             }
-
-            val matchStart = pos + match.range.first
-            val matchEnd = pos + match.range.last + 1
-
-            if (matchStart > pos) {
-                val plain: String = text.substring(pos, matchStart)
-                if (plain.isNotBlank()) {
-                    withStyle(currentStyle) { append(plain) }
-                }
+            if (match.range.first > pos) {
+                appendDecoded(html.substring(pos, match.range.first))
             }
 
             val isClosing = match.groupValues[1] == "/"
@@ -3117,16 +3145,9 @@ fun htmlToAnnotatedString(
 
             when {
                 isClosing -> {
-                    currentStyle = SpanStyle(
-                        color = baseStyle.color,
-                        fontSize = baseStyle.fontSize,
-                        fontWeight = baseStyle.fontWeight,
-                        fontStyle = baseStyle.fontStyle,
-                        fontFamily = baseStyle.fontFamily,
-                        letterSpacing = baseStyle.letterSpacing,
-                        textDecoration = baseStyle.textDecoration,
-                        background = baseStyle.background,
-                    )
+                    if (tagName == "a") linkUrl = null
+                    if (tagName == "pre") inPreBlock = false
+                    currentStyle = baseStyle.toSpanStyle()
                 }
                 tagName in setOf("b", "strong") -> {
                     currentStyle = currentStyle.copy(fontWeight = FontWeight.Bold)
@@ -3134,73 +3155,77 @@ fun htmlToAnnotatedString(
                 tagName in setOf("i", "em") -> {
                     currentStyle = currentStyle.copy(fontStyle = FontStyle.Italic)
                 }
+                tagName == "u" -> {
+                    currentStyle = currentStyle.copy(
+                        textDecoration = TextDecoration.combine(
+                            listOfNotNull(currentStyle.textDecoration, TextDecoration.Underline),
+                        ),
+                    )
+                }
+                tagName in setOf("del", "s") -> {
+                    currentStyle = currentStyle.copy(textDecoration = TextDecoration.LineThrough)
+                }
                 tagName == "code" -> {
-                    val isCodeBlock = text.substring(0, matchStart).contains("<pre>")
                     currentStyle = currentStyle.copy(
                         fontFamily = FontFamily.Monospace,
-                        background = if (isCodeBlock) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.surfaceContainer,
-                        fontSize = if (isCodeBlock) 13.sp else baseStyle.fontSize,
+                        background = if (inPreBlock) {
+                            MaterialTheme.colorScheme.surfaceContainerHighest
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainer
+                        },
+                        fontSize = if (inPreBlock) 13.sp else baseStyle.fontSize,
                     )
                 }
                 tagName == "pre" -> {
+                    inPreBlock = true
                 }
                 tagName == "a" -> {
-                    val hrefMatch = """href\\s*=\\s*["']([^"']+)["']""".toRegex().find(attrs)
-                    hrefMatch?.let { href ->
-                        val url = href.groupValues[1]
-                        currentStyle = currentStyle.copy(
-                            color = linkColor,
-                            textDecoration = TextDecoration.combine(listOf(TextDecoration.Underline)),
-                        )
-                    }
+                    linkUrl = hrefRegex.find(attrs)?.groupValues?.get(1)
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let(::decodeHtmlEntities)
                 }
-                tagName == "br" -> {
-                }
-                // P5-2：custom emoji——<img data-mx-emoticon src="mxc://...">。
-                // 插入 inline content 佔位（真正的圖由 Text(inlineContent=) 渲染）；
-                // 沒有 data-mx-emoticon 的 <img>（罕見）維持原本的略過。
+                tagName == "br" -> append("\n")
+                // P5-2：custom emoji——<img data-mx-emoticon src="mxc://...">
                 tagName == "img" && attrs.contains("data-mx-emoticon") -> {
-                    val srcMatch = """src\s*=\s*["']([^"']+)["']""".toRegex().find(attrs)
-                    val mxc = srcMatch?.groupValues?.get(1).orEmpty()
+                    val mxc = srcRegex.find(attrs)?.groupValues?.get(1).orEmpty()
                     if (mxc.startsWith("mxc://")) {
-                        val altMatch = """alt\s*=\s*["']([^"']*)["']""".toRegex().find(attrs)
-                        val alt = altMatch?.groupValues?.get(1).orEmpty()
+                        val alt = altRegex.find(attrs)?.groupValues?.get(1).orEmpty()
                         val id = "emote-${emoticons.size}"
                         emoticons += InlineEmoticon(id, mxc, alt)
                         withStyle(currentStyle) { appendInlineContent(id, alt.ifBlank { "▫" }) }
                     }
                 }
+                // 其他標籤（含未支援的）一律略過——只吃掉標籤本身，文字照常輸出
             }
-
-            pos = matchEnd
+            pos = match.range.last + 1
         }
     }
     return FormattedRichText(annotated, emoticons)
+}
+
+/**
+ * HTML 實體解碼：全量 HTML5 命名表（[HtmlEntities.kt]，生成自 WHATWG
+ * 清單 2125 條）＋十進制/十六進制數字實體（&#8211; / &#x2713;）。
+ * &amp; 最後解，否則 &lt; 解出的 & 會被二次替換。
+ */
+private val NumericEntityRegex = Regex("&#(?:([0-9]{1,7})|x([0-9a-fA-F]{1,6}));")
+
+private fun decodeHtmlEntities(s: String): String {
+    var out = s
+    HtmlNamedEntities.forEach { (name, char) ->
+        out = out.replace("&$name;", char)
+    }
+    out = NumericEntityRegex.replace(out) { m ->
+        val code = m.groupValues[1].toIntOrNull() ?: m.groupValues[2].toIntOrNull(16)
+        code?.let { Character.toChars(it).concatToString() } ?: m.value
+    }
+    return out
 }
 
 /** P5-2：渲染結果帶出 inline 表情清單，Text(inlineContent=) 用它們建佔位映射。 */
 data class InlineEmoticon(val id: String, val mxc: String, val alt: String)
 
 data class FormattedRichText(val annotated: AnnotatedString, val emoticons: List<InlineEmoticon>)
-
-/** 解析 HTML 連結位置，供 ClickableText 使用 */
-data class HtmlLink(val url: String, val start: Int, val end: Int)
-
-fun parseHtmlLinks(html: String): List<HtmlLink> {
-    val links = mutableListOf<HtmlLink>()
-    val tagRegex = """<a\\s+[^>]*href\\s*=\\s*["']([^"']+)["'][^>]*>(.*?)</a>""".toRegex()
-    var searchStart = 0
-    while (true) {
-        val match = tagRegex.find(html.substring(searchStart))
-        if (match == null) break
-        val url = match.groupValues[1]
-        val linkText = match.groupValues[2]
-        val matchStart = searchStart + match.range.first
-        links.add(HtmlLink(url, matchStart, matchStart + linkText.length))
-        searchStart += match.range.last + 1
-    }
-    return links
-}
 
 /** 一則訊息的內容區：文字、圖片／貼圖、附件名，或解密失敗的說明。 */
 @Composable

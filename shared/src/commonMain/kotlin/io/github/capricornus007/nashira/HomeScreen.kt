@@ -70,6 +70,8 @@ import io.github.capricornus007.nashira.theme.ThemeMode
 import io.github.capricornus007.nashira.theme.dynamicColorSupported
 import io.github.capricornus007.nashira.theme.backgroundSyncSupported
 import io.github.capricornus007.nashira.theme.keyboardLayoutSettingsSupported
+import io.github.capricornus007.nashira.theme.audioDeviceSettingsSupported
+import io.github.capricornus007.nashira.AudioDevices
 import io.github.capricornus007.nashira.theme.applyBackgroundSync
 
 /** 設定的子頁。用單一 enum 表示，返回鍵逐層退回。 */
@@ -247,6 +249,45 @@ private fun SettingsRoot(
                         SettingsMenuOption(candidate.displayName, ui.language == candidate) {
                             ui.language = candidate
                             close()
+                        }
+                    }
+                }
+            }
+        }
+        // 音訊裝置（僅桌面）：javax.sound mixer 枚舉；Android 由系統路由
+        if (audioDeviceSettingsSupported) {
+            SettingsGroup(title = strings.audioSection) {
+                item { shape ->
+                    val inputs = remember { AudioDevices.inputs() }
+                    SettingsDropdownItem(
+                        shape = shape,
+                        title = strings.audioInputDevice,
+                        current = ui.audioInput ?: strings.audioDeviceDefault,
+                    ) { close ->
+                        SettingsMenuOption(strings.audioDeviceDefault, ui.audioInput == null) {
+                            ui.audioInput = null; close()
+                        }
+                        inputs.forEach { device ->
+                            SettingsMenuOption(device, ui.audioInput == device) {
+                                ui.audioInput = device; close()
+                            }
+                        }
+                    }
+                }
+                item { shape ->
+                    val outputs = remember { AudioDevices.outputs() }
+                    SettingsDropdownItem(
+                        shape = shape,
+                        title = strings.audioOutputDevice,
+                        current = ui.audioOutput ?: strings.audioDeviceDefault,
+                    ) { close ->
+                        SettingsMenuOption(strings.audioDeviceDefault, ui.audioOutput == null) {
+                            ui.audioOutput = null; close()
+                        }
+                        outputs.forEach { device ->
+                            SettingsMenuOption(device, ui.audioOutput == device) {
+                                ui.audioOutput = device; close()
+                            }
                         }
                     }
                 }

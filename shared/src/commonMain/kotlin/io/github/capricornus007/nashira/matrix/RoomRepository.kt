@@ -25,6 +25,7 @@ import de.connect2x.trixnity.core.model.RoomId
 import de.connect2x.trixnity.core.model.events.m.room.EncryptionEventContent
 import de.connect2x.trixnity.core.model.events.m.room.ImageInfo
 import de.connect2x.trixnity.core.model.events.m.room.AudioInfo
+import de.connect2x.trixnity.core.model.events.m.room.VideoInfo
 import de.connect2x.trixnity.core.model.events.m.room.FileBasedInfo
 import de.connect2x.trixnity.utils.toByteArrayFlow
 import io.github.capricornus007.nashira.PickedImage
@@ -1051,9 +1052,9 @@ internal fun de.connect2x.trixnity.core.model.events.EventContent.messageBodyOrN
             MessageBody.Text(body, this.formattedBody?.takeIf { format == "org.matrix.custom.html" && it.isNotBlank() })
         is RoomMessageEventContent.FileBased.Image ->
             imageBody(body, url, file, info as? ImageInfo, isSticker = false)
+        is RoomMessageEventContent.FileBased.Video -> videoBody(body, url, file, info as? VideoInfo)
         is RoomMessageEventContent.FileBased.Audio -> voiceBody(url, file, info)
         is RoomMessageEventContent.FileBased -> MessageBody.Attachment(fileName ?: body)
-        // 自己送出的貼圖是註冊過的 StickerEventContent
         is StickerEventContent -> imageBody(body, url, file, info, isSticker = true)
         // Trixnity 5.8.1 沒有 m.sticker 的內容型別，別人送的貼圖以 UnknownEventContent 帶原始 JSON 進來
         is UnknownEventContent -> if (eventType == "m.sticker") stickerBody(raw) else null
@@ -1074,6 +1075,33 @@ private fun imageBody(
         ?: url?.let(MediaSource::Plain)
         ?: return MessageBody.Attachment(caption)
     return MessageBody.Image(caption, source, info?.width, info?.height, isSticker, info?.mimeType)
+}
+
+/**
+ * 視頻訊息（m.video，含 Telegram 橋的 webm）：內聯顯示首幀——來源優先用
+ * 點開進 ImageViewer（它對 video 類 MIME 一樣先出首幀、下載存原檔）。
+ * 沒有這個分支時 m.video 落進 FileBased → 只顯示「📎 檔名」（用戶回報
+ * webm 無法顯示的根因，2026-09-14）。
+ */
+private fun videoBody(
+    caption: String,
+    url: String?,
+    file: EncryptedFile?,
+    info: VideoInfo?,
+): MessageBody {
+    val source = info?.thumbnailFile?.let(MediaSource::Encrypted)
+        ?: info?.thumbnailUrl?.let(MediaSource::Plain)
+        ?: file?.let(MediaSource::Encrypted)
+        ?: url?.let(MediaSource::Plain)
+        ?: return MessageBody.Attachment(caption)
+    return MessageBody.Image(
+        caption = caption,
+        source = source,
+        width = info?.width,
+        height = info?.height,
+        isSticker = false,
+        mimeType = info?.mimeType,
+    )
 }
 
 

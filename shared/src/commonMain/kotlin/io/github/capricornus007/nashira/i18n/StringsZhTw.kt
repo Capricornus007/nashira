@@ -241,6 +241,12 @@ object ZhTwStrings : Strings {
     override val acceptSas = "接受 SAS"
     override val match = "相符"
     override val noMatch = "不相符"
+    override val audioSection = "音訊"
+    override val audioInputDevice = "輸入裝置（麥克風）"
+    override val audioOutputDevice = "輸出裝置（喇叭）"
+    override val audioDeviceDefault = "系統預設"
+    override val trayOpen = "開啟 Nashira"
+    override val trayQuit = "結束程式"
 }
 
 /** 日文介面；Matrix／Nashira／Material 3 等專有名詞保留原名。 */

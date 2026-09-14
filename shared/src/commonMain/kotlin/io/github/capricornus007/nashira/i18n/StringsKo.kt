@@ -236,4 +236,10 @@ object KoStrings : Strings by EnStrings {
     override val acceptSas = "SAS 수락"
     override val match = "일치함"
     override val noMatch = "일치하지 않음"
+    override val audioSection = "오디오"
+    override val audioInputDevice = "입력 장치(마이크)"
+    override val audioOutputDevice = "출력 장치(스피커)"
+    override val audioDeviceDefault = "시스템 기본값"
+    override val trayOpen = "Nashira 열기"
+    override val trayQuit = "종료"
 }

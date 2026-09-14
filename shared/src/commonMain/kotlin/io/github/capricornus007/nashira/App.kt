@@ -1,4 +1,5 @@
 package io.github.capricornus007.nashira
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -91,12 +92,34 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
     /** 純黑（AMOLED）深色變體：背景壓真黑省電；只在深色模式生效。 */
     var pureBlack by mutableStateOf(stored["pureBlack"]?.toBooleanStrictOrNull() ?: false)
 
+    /**
+     * 音訊裝置（僅桌面）：javax.sound Mixer 名，null＝系統預設。
+     * 變更時同步到 [AudioSelection] 供錄音/播放 actual 讀取。
+     */
+    var audioInput: String?
+        get() = audioInputState
+        set(value) {
+            audioInputState = value
+            AudioSelection.input = value
+        }
+    var audioOutput: String?
+        get() = audioOutputState
+        set(value) {
+            audioOutputState = value
+            AudioSelection.output = value
+        }
+
+    private var audioInputState by mutableStateOf(stored["audioInput"]?.takeIf { it.isNotBlank() })
+    private var audioOutputState by mutableStateOf(stored["audioOutput"]?.takeIf { it.isNotBlank() })
+
     /** 被隱藏的媒體（mxc 網址）。「隱藏圖片」後時間線改畫佔位，點佔位恢復。 */
     var hiddenMedia by mutableStateOf(
         stored["hiddenMedia"]?.split('\n')?.filter { it.isNotBlank() }?.toSet() ?: emptySet()
     )
 
     init {
+        AudioSelection.input = audioInput
+        AudioSelection.output = audioOutput
         loaded = true
     }
 
@@ -117,6 +140,9 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
             "sendShortcut" to sendShortcut.name,
             "hiddenMedia" to hiddenMedia.joinToString("\n"),
             "pureBlack" to pureBlack.toString(),
+        ) + mapOf(
+            "audioInput" to (audioInput ?: ""),
+            "audioOutput" to (audioOutput ?: ""),
         ) + (accent?.let { mapOf("accent" to it.name) } ?: emptyMap())
         if (snapshot == lastPersisted) return
         lastPersisted = snapshot
@@ -181,12 +207,28 @@ fun App(defaultDark: Boolean? = null) {
                 DeviceVerificationHost(current)
             }
             // 磁碟有憑證時先顯示啟動頁，不再閃一次登入表單；
-            // SSO/密碼登入交換期間顯示「正在登入」——從瀏覽器跳回來時
-            // 停在帳密頁會讓人以為失敗（真機用戶實測回報）。
+            // SSO/密碼登入交換期間以「不透明疊加層」蓋住表單——絕不能用
+            // when 分支替換 LoginScreen：那會卸載它、取消其
+            // rememberCoroutineScope，正在進行的 token 交換被
+            // CancellationException 腰斬（token 已消耗但登入無結果、
+            // 錯誤也顯示不出來；2026-09-14 桌面 SSO 實測復現，
+            // 0ecdac1 引入、之後無任何全新登入被驗證過）。
             restoring -> StartupScreen()
-            loggingIn -> StartupScreen(message = strings.loggingIn)
             restoreFailed -> ConnectionRetryScreen()
-            else -> LoginScreen(onLoginSuccess = { })
+            else -> {
+                Box {
+                    LoginScreen(onLoginSuccess = { })
+                    if (loggingIn) {
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .background(MaterialTheme.colorScheme.surface),
+                        ) {
+                            StartupScreen(message = strings.loggingIn)
+                        }
+                    }
+                }
+            }
         }
     }
 }

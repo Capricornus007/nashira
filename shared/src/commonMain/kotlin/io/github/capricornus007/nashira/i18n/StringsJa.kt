@@ -234,4 +234,10 @@ object JaStrings : Strings by EnStrings {
     override val acceptSas = "SAS を承認"
     override val match = "一致"
     override val noMatch = "一致しません"
+    override val audioSection = "オーディオ"
+    override val audioInputDevice = "入力デバイス（マイク）"
+    override val audioOutputDevice = "出力デバイス（スピーカー）"
+    override val audioDeviceDefault = "システム既定"
+    override val trayOpen = "Nashira を開く"
+    override val trayQuit = "終了"
 }

@@ -25,3 +25,9 @@ expect fun applyBackgroundSync(enabled: Boolean)
  * 才分得出誰是誰（用戶工作階段清單真機實測需求）。
  */
 expect val platformDeviceDisplayName: String
+
+/**
+ * 是否顯示「音訊裝置」設定（輸入/輸出 mixer 選擇）。桌面用 javax.sound
+ * 枚舉 mixer；Android 由系統路由，顯示這組只會誤導。
+ */
+expect val audioDeviceSettingsSupported: Boolean

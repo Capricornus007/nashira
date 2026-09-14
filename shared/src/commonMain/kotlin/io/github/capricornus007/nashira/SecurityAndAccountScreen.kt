@@ -1,5 +1,13 @@
 package io.github.capricornus007.nashira
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import io.github.capricornus007.nashira.AvatarImage
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -121,13 +129,45 @@ fun SecurityAndAccountScreen(
 
     SettingsScaffold(title = strings.accountAndSecurity, onBack = onBack) {
         SettingsGroup(title = strings.account) {
-            item { shape ->
-                SettingsItem(
-                    shape = shape,
-                    icon = Icons.Filled.Person,
-                    title = strings.accountId,
-                    description = session.client.userId.full,
-                )
+            item {
+                // Discord「我的帳戶」風格資料卡：頭像＋顯示名＋Matrix 地址，點擊複製
+                // 地址。2026-09-14 用戶要求（參考 64gram 資訊卡的 ID 展示）。
+                val clipboard = LocalClipboardManager.current
+                val accountId = session.client.userId.full
+                val accountName = accountId.substringAfter('@').substringBefore(':').ifBlank { accountId }
+                val profile = session.client.profile.collectAsState().value
+                val displayName = profile?.displayName?.takeIf { it.isNotBlank() } ?: accountName
+                var copied by remember { mutableStateOf(false) }
+                LaunchedEffect(copied) {
+                    if (copied) { delay(1500); copied = false }
+                }
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        Modifier
+                            .clickable {
+                                clipboard.setText(AnnotatedString(accountId))
+                                copied = true
+                            }
+                            .padding(horizontal = 18.dp, vertical = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        AvatarImage(session.client, null, displayName, Modifier.size(56.dp).clip(CircleShape))
+                        Column(
+                            Modifier.padding(start = 14.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            Text(displayName, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
+                            Text(accountId, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                            if (copied) {
+                                Text(strings.copiedToClipboard, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    }
+                }
             }
             item { shape ->
                 // P4-3：編輯顯示名稱（Element 對照）

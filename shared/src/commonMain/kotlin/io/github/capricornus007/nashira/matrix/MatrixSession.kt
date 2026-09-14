@@ -16,6 +16,7 @@ import de.connect2x.trixnity.client.create
 import de.connect2x.trixnity.clientserverapi.model.authentication.IdentifierType
 import de.connect2x.trixnity.clientserverapi.model.user.Filters
 import io.ktor.http.Url
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -241,6 +242,10 @@ object MatrixEngine {
         val client = create().getOrElse { first ->
             if (!isStaleStoreError(first)) return Result.failure(first)
             clearPersistentStore(key)
+            // 剛失敗的 client 對已刪檔案的殘留句柄/WAL 寫回可能還在收尾，
+            // 立刻重建同名庫有機率撞上 SQLite disk I/O error（2026-09-14
+            // 桌面實測：舊庫刪除後重試建庫即死於 522）。等一拍再試。
+            delay(300)
             create().getOrElse { return Result.failure(it) }
         }
 
@@ -275,6 +280,7 @@ object MatrixEngine {
 
     private suspend fun loginWithTokenInternal(baseUrl: String, loginToken: String): Result<Unit> {
         if (_session.value != null) return Result.failure(IllegalStateException("already logged in"))
+        println("NASHIRA_LOGIN: SSO token exchange starting (baseUrl=$baseUrl)")
         val authData = MatrixClientAuthProviderData.classicLoginWithToken(
             baseUrl = Url(baseUrl),
             identifier = null,
@@ -283,7 +289,11 @@ object MatrixEngine {
             initialDeviceDisplayName = platformDeviceDisplayName,
             refreshToken = true,
             httpClientEngine = platformHttpEngine(),
-        ).getOrElse { return Result.failure(it) }
+        ).getOrElse {
+            println("NASHIRA_LOGIN: token exchange rejected: ${it::class.simpleName}: ${it.message}")
+            return Result.failure(it)
+        }
+        println("NASHIRA_LOGIN: token exchange OK (authData acquired)")
         // 交換拿到的 authData 只有 token；userId/deviceId 在 client 起來後才知道。
         // 交換階段先用臨時鍵（誰都不衝突）；client 建立後讀真身分再定真庫。
         val tempKey = databaseKey(baseUrl, "sso")
@@ -304,21 +314,41 @@ object MatrixEngine {
         // SSO 留下的 -sso 庫，realKey 撞的可能是同帳號先前登入的庫——
         // 任一段的 deviceId 不一致都會 create 失敗（真機 logcat 實證）。
         val probe = create(tempKey).getOrElse { first ->
+            println("NASHIRA_LOGIN: probe create failed: ${first::class.qualifiedName}: ${first.message}")
+            first.printStackTrace()
             if (!isStaleStoreError(first)) return Result.failure(first)
+            println("NASHIRA_LOGIN: probe store stale, cleared, retrying")
             clearPersistentStore(tempKey)
-            create(tempKey).getOrElse { return Result.failure(it) }
+            // 同 login()：等殘留句柄收尾，防 disk I/O error 競態
+            delay(300)
+            create(tempKey).getOrElse {
+                println("NASHIRA_LOGIN: probe retry failed: ${it::class.qualifiedName}: ${it.message}")
+                it.printStackTrace()
+                return Result.failure(it)
+            }
         }
         val realKey = databaseKey(baseUrl, probe.userId.full)
+        println("NASHIRA_LOGIN: probe OK (userId=${probe.userId.full}), realKey=$realKey")
         val client = if (realKey == tempKey) {
             probe
         } else {
             probe.close()
             create(realKey).getOrElse { first ->
+                println("NASHIRA_LOGIN: real create failed: ${first::class.qualifiedName}: ${first.message}")
+                first.printStackTrace()
                 if (!isStaleStoreError(first)) return Result.failure(first)
+                println("NASHIRA_LOGIN: real store stale, cleared, retrying")
                 clearPersistentStore(realKey)
-                create(realKey).getOrElse { return Result.failure(it) }
+                // 同上：disk I/O error 競態防護（等殘留句柄收尾）
+                delay(300)
+                create(realKey).getOrElse {
+                    println("NASHIRA_LOGIN: real retry failed: ${it::class.qualifiedName}: ${it.message}")
+                    it.printStackTrace()
+                    return Result.failure(it)
+                }
             }
         }
+        println("NASHIRA_LOGIN: client ready (deviceId=${client.deviceId})")
         storage.save(
             baseUrl = baseUrl,
             userId = client.userId.full,

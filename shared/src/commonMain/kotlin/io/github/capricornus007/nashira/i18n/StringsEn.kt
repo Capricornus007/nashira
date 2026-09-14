@@ -241,4 +241,10 @@ object EnStrings : Strings {
     override val acceptSas = "Accept SAS"
     override val match = "Matches"
     override val noMatch = "Does not match"
+    override val audioSection = "Audio"
+    override val audioInputDevice = "Input device (microphone)"
+    override val audioOutputDevice = "Output device (speakers)"
+    override val audioDeviceDefault = "System default"
+    override val trayOpen = "Open Nashira"
+    override val trayQuit = "Quit"
 }

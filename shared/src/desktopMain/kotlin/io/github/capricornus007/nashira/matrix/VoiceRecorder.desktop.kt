@@ -1,5 +1,7 @@
 package io.github.capricornus007.nashira.matrix
 
+import io.github.capricornus007.nashira.AudioSelection
+import io.github.capricornus007.nashira.mixerFor
 import java.io.ByteArrayOutputStream
 import javax.sound.sampled.AudioFormat
 import javax.sound.sampled.AudioSystem
@@ -21,7 +23,10 @@ actual class VoiceRecorder actual constructor() {
     actual fun start() {
         val format = AudioFormat(16_000f, 16, 1, true, false)
         val info = DataLine.Info(TargetDataLine::class.java, format)
-        val l = AudioSystem.getLine(info) as TargetDataLine
+        // 設置頁選了輸入裝置就走那個 mixer（AudioSelection 由 UiState 同步）；
+        // 沒選／找不到回系統預設。
+        val l = runCatching { mixerFor(AudioSelection.input).getLine(info) as TargetDataLine }
+            .getOrElse { AudioSystem.getLine(info) as TargetDataLine }
         l.open(format)
         l.start()
         line = l

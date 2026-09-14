@@ -28,3 +28,5 @@ actual fun applyBackgroundSync(enabled: Boolean) {
 }
 
 actual val platformDeviceDisplayName: String = "Nashira on Android"
+
+actual val audioDeviceSettingsSupported: Boolean = false

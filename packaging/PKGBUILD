@@ -26,8 +26,14 @@ package() {
     lib="${pkgdir}/opt/nashira/lib"
     if [[ -f "${lib}/nashira.desktop" ]]; then
         install -Dm644 "${lib}/nashira.desktop" "${pkgdir}/usr/share/applications/nashira.desktop"
-        sed -i 's|^Exec=.*|Exec=/opt/nashira/bin/nashira|' \
+        sed -i 's|^Exec=.*|Exec=/opt/nashira/bin/nashira %u|' \
             "${pkgdir}/usr/share/applications/nashira.desktop"
+        # SSO 應用內連結：註冊 nashira:// scheme（xdg-open 依此把 callback URL
+        # 交回 app 的單實例 socket）。jpackage 生成的 .desktop 沒有 MimeType。
+        if ! grep -q '^MimeType=' "${pkgdir}/usr/share/applications/nashira.desktop"; then
+            printf 'MimeType=x-scheme-handler/nashira;\n' \
+                >> "${pkgdir}/usr/share/applications/nashira.desktop"
+        fi
     fi
 
     local icon="${NASHIRA_ICONS:-}"

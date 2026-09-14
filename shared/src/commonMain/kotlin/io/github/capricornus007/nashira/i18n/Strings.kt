@@ -254,6 +254,12 @@ interface Strings {
     val acceptSas: String
     val match: String
     val noMatch: String
+    val audioSection: String
+    val audioInputDevice: String
+    val audioOutputDevice: String
+    val audioDeviceDefault: String
+    val trayOpen: String
+    val trayQuit: String
 }
 
 val StringsMap: Map<AppLanguage, Strings> = mapOf(
