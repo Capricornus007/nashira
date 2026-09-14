@@ -131,6 +131,19 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
     private var audioInputGainState by mutableStateOf(stored["audioInputGain"]?.toIntOrNull() ?: 100)
     private var audioOutputVolumeState by mutableStateOf(stored["audioOutputVolume"]?.toIntOrNull() ?: 100)
 
+    /** 麥克風靜音（底欄麥克風鈕，Discord 語義）：錄音取消。 */
+    var audioMicMuted: Boolean
+        get() = audioMicMutedState
+        set(value) { audioMicMutedState = value; AudioSelection.micMuted = value }
+
+    /** 播放靜音（底欄耳機鈕，Discord 拒聽語義）。 */
+    var audioPlaybackMuted: Boolean
+        get() = audioPlaybackMutedState
+        set(value) { audioPlaybackMutedState = value; AudioSelection.playbackMuted = value }
+
+    private var audioMicMutedState by mutableStateOf(stored["audioMicMuted"]?.toBooleanStrictOrNull() ?: false)
+    private var audioPlaybackMutedState by mutableStateOf(stored["audioPlaybackMuted"]?.toBooleanStrictOrNull() ?: false)
+
     /** 被隱藏的媒體（mxc 網址）。「隱藏圖片」後時間線改畫佔位，點佔位恢復。 */
     var hiddenMedia by mutableStateOf(
         stored["hiddenMedia"]?.split('\n')?.filter { it.isNotBlank() }?.toSet() ?: emptySet()
@@ -141,6 +154,8 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
         AudioSelection.output = audioOutput
         AudioSelection.inputGain = audioInputGain
         AudioSelection.outputVolume = audioOutputVolume
+        AudioSelection.micMuted = audioMicMuted
+        AudioSelection.playbackMuted = audioPlaybackMuted
         loaded = true
     }
 
@@ -166,6 +181,8 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
             "audioOutput" to (audioOutput ?: ""),
             "audioInputGain" to audioInputGain.toString(),
             "audioOutputVolume" to audioOutputVolume.toString(),
+            "audioMicMuted" to audioMicMuted.toString(),
+            "audioPlaybackMuted" to audioPlaybackMuted.toString(),
         ) + (accent?.let { mapOf("accent" to it.name) } ?: emptyMap())
         if (snapshot == lastPersisted) return
         lastPersisted = snapshot

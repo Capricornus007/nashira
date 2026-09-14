@@ -185,7 +185,7 @@ fun AudioDevicePanel(
     val volume = if (isInput) ui.audioInputGain else ui.audioOutputVolume
 
     Popup(
-        alignment = Alignment.BottomStart,
+        alignment = Alignment.BottomEnd,
         offset = IntOffset(0, -8),
         onDismissRequest = onDismiss,
         properties = PopupProperties(focusable = true),

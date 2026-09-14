@@ -15,6 +15,12 @@ object AudioSelection {
 
     /** 播放音量 0-100（百分比）：Clip.setVolume / ffplay -volume。 */
     var outputVolume: Int = 100
+
+    /** 麥克風靜音（Discord 底欄麥克風鈕語義）：true 時錄音直接取消。 */
+    var micMuted: Boolean = false
+
+    /** 播放靜音（Discord 拒聽語義）：true 時語音訊息不出聲。 */
+    var playbackMuted: Boolean = false
 }
 
 /**

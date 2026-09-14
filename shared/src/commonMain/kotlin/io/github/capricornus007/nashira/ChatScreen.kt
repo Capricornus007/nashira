@@ -111,6 +111,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.runtime.derivedStateOf
@@ -997,6 +998,7 @@ private fun AccountBar(
     onOpenAccount: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val ui = LocalUiState.current
     val profile by client.profile.collectAsState()
     val avatarUrl = profile?.avatarUrl
     val accountName = accountId.substringAfter('@').substringBefore(':').ifBlank { accountId }
@@ -1020,56 +1022,98 @@ private fun AccountBar(
             Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // 頭像＋名字：點 → 個人資料卡（Discord 2026 對照，2026-09-14 用戶截圖）
-            Row(
-                Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(12.dp))
-                    .clickable {
-                        profilePopup = !profilePopup
-                        inputPanel = false
-                        outputPanel = false
+            // 頭像＋名字：點 → 個人資料卡（Discord 2026 對照，2026-09-14 用戶截圖）。
+            // Box 包住：ProfilePopup 錨在這一塊的上方，而不是整個 bar 的左端。
+            Box(Modifier.weight(1f)) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable {
+                            profilePopup = !profilePopup
+                            inputPanel = false
+                            outputPanel = false
+                        }
+                        .padding(horizontal = 6.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    AvatarImage(client, avatarUrl, displayName, Modifier.size(40.dp).clip(CircleShape))
+                    Column(Modifier.weight(1f).padding(start = 8.dp), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                        Text(displayName, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
+                        Text("@$accountName${if (accountServer.isNotBlank()) ":$accountServer" else ""}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                     }
-                    .padding(horizontal = 6.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                AvatarImage(client, avatarUrl, displayName, Modifier.size(40.dp).clip(CircleShape))
-                Column(Modifier.weight(1f).padding(start = 8.dp), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                    Text(displayName, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
-                    Text("@$accountName${if (accountServer.isNotBlank()) ":$accountServer" else ""}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                }
+                if (profilePopup) {
+                    ProfilePopup(client = client, accountId = accountId, onEditProfile = onOpenAccount, onDismiss = { profilePopup = false })
                 }
             }
-            // 麥克風：點 → 輸入裝置快捷面板（錄音裝置＋增益）
-            IconButton(
-                onClick = {
-                    inputPanel = !inputPanel
-                    outputPanel = false
-                    profilePopup = false
-                },
-                modifier = Modifier.size(36.dp),
-            ) {
-                Icon(
-                    BarIcons.Mic,
-                    contentDescription = null,
-                    tint = if (inputPanel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(21.dp),
-                )
+            // 麥克風＋^（Discord 的分體按鈕；無語音聊天靜音語義，兩者都開面板）
+            Box {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = { ui.audioMicMuted = !ui.audioMicMuted },
+                        modifier = Modifier.size(36.dp),
+                    ) {
+                        Icon(
+                            BarIcons.Mic,
+                            contentDescription = null,
+                            tint = if (ui.audioMicMuted) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(21.dp),
+                        )
+                    }
+                    IconButton(
+                        onClick = {
+                            inputPanel = !inputPanel
+                            outputPanel = false
+                            profilePopup = false
+                        },
+                        modifier = Modifier.size(22.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.KeyboardArrowUp,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                }
+                if (inputPanel) {
+                    AudioDevicePanel(isInput = true, onOpenAudioSettings = onSettings, onDismiss = { inputPanel = false })
+                }
             }
-            // 耳機：點 → 輸出裝置快捷面板（播放裝置＋音量）
-            IconButton(
-                onClick = {
-                    outputPanel = !outputPanel
-                    inputPanel = false
-                    profilePopup = false
-                },
-                modifier = Modifier.size(36.dp),
-            ) {
-                Icon(
-                    BarIcons.Headset,
-                    contentDescription = null,
-                    tint = if (outputPanel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(21.dp),
-                )
+            // 耳機＋^（同上）
+            Box {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = { ui.audioPlaybackMuted = !ui.audioPlaybackMuted },
+                        modifier = Modifier.size(36.dp),
+                    ) {
+                        Icon(
+                            BarIcons.Headset,
+                            contentDescription = null,
+                            tint = if (ui.audioPlaybackMuted) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(21.dp),
+                        )
+                    }
+                    IconButton(
+                        onClick = {
+                            outputPanel = !outputPanel
+                            inputPanel = false
+                            profilePopup = false
+                        },
+                        modifier = Modifier.size(22.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.KeyboardArrowUp,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                }
+                if (outputPanel) {
+                    AudioDevicePanel(isInput = false, onOpenAudioSettings = onSettings, onDismiss = { outputPanel = false })
+                }
             }
             // 齒輪：設定
             IconButton(onClick = onSettings, modifier = Modifier.size(36.dp)) {
@@ -1081,15 +1125,6 @@ private fun AccountBar(
                 )
             }
         }
-    }
-    if (profilePopup) {
-        ProfilePopup(client = client, accountId = accountId, onEditProfile = onOpenAccount, onDismiss = { profilePopup = false })
-    }
-    if (inputPanel) {
-        AudioDevicePanel(isInput = true, onOpenAudioSettings = onSettings, onDismiss = { inputPanel = false })
-    }
-    if (outputPanel) {
-        AudioDevicePanel(isInput = false, onOpenAudioSettings = onSettings, onDismiss = { outputPanel = false })
     }
 }
 

@@ -20,6 +20,7 @@ actual class AudioPlayer actual constructor() {
 
     actual fun prepare(bytes: ByteArray, mimeType: String?, onReady: (Boolean) -> Unit) {
         release()
+        if (AudioSelection.playbackMuted) { onReady(false); return }  // 拒聽（Discord 語義）
         // 1) javax.sound：RIFF/WAV 可以直接開
         try {
             val input = AudioSystem.getAudioInputStream(ByteArrayInputStream(bytes))

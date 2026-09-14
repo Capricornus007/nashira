@@ -21,6 +21,7 @@ actual class VoiceRecorder actual constructor() {
     private var startedAt = 0L
 
     actual fun start() {
+        if (AudioSelection.micMuted) return  // 底欄麥克風靜音（Discord 語義）
         val format = AudioFormat(16_000f, 16, 1, true, false)
         val info = DataLine.Info(TargetDataLine::class.java, format)
         // 設置頁選了輸入裝置就走那個 mixer（AudioSelection 由 UiState 同步）；
