@@ -13,6 +13,18 @@ import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import androidx.compose.ui.window.Tray
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.clickable
 import io.github.capricornus007.nashira.LocalUiState
 import io.github.capricornus007.nashira.i18n.stringsFor
 import io.github.capricornus007.nashira.App
@@ -109,18 +121,55 @@ fun main(args: Array<String>) {
             trayIconAwt.isImageAutoSize = true
             // AWT 字體渲染：系統屬性在 JVM 啟動時設定（main() 最前面），
             // 這裡只設字體本身。抗鋸齒/LCD 子像素由 awt.useSystemAAFontSettings 控制。
-            val popup = java.awt.PopupMenu().apply {
-                font = java.awt.Font("霞鶩文楷 TC", java.awt.Font.PLAIN, 14)
-                add(java.awt.MenuItem(strings.trayOpen).apply {
-                    addActionListener { showMainWindow() }
-                })
-                add(java.awt.MenuItem(strings.trayQuit).apply {
-                    addActionListener { exitApplication() }
-                })
-            }
-            trayIconAwt.popupMenu = popup
-            trayIconAwt.addActionListener { showMainWindow() } // 左鍵
+            // AWT PopupMenu 在 Linux 上不用系統字體渲染管線（FreeType），
+            // 中文缺筆畫、抗鋸齒差（2026-09-14 用戶對比 fcitx5 截圖）。
+            // 改用 Compose Popup：跟 app 主體同渲染管線，字體/抗鋸齒一致。
+            var trayMenuOpen by remember { mutableStateOf(false) }
+            trayIconAwt.addMouseListener(object : java.awt.event.MouseAdapter() {
+                override fun mousePressed(e: java.awt.event.MouseEvent) {
+                    if (e.button == java.awt.event.MouseEvent.BUTTON3) {
+                        trayMenuOpen = true
+                    } else if (e.button == java.awt.event.MouseEvent.BUTTON1) {
+                        showMainWindow()
+                    }
+                }
+            })
             java.awt.SystemTray.getSystemTray().add(trayIconAwt)
+
+            // Compose 托盤菜單（右鍵彈出）
+            if (trayMenuOpen) {
+                Popup(
+                    alignment = Alignment.BottomEnd,
+                    offset = IntOffset(0, -8),
+                    onDismissRequest = { trayMenuOpen = false },
+                    properties = PopupProperties(focusable = true),
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        shadowElevation = 8.dp,
+                    ) {
+                        Column {
+                            Text(
+                                strings.trayOpen,
+                                Modifier
+                                    .clickable { trayMenuOpen = false; showMainWindow() }
+                                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Text(
+                                strings.trayQuit,
+                                Modifier
+                                    .clickable { trayMenuOpen = false; exitApplication() }
+                                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                    }
+                }
+            }
         }
 
         Window(
