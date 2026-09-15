@@ -30,10 +30,13 @@ object GlobalHotkey {
     private interface XLib : Library {
         fun XOpenDisplay(name: String?): Pointer?
         fun XDefaultRootWindow(dpy: Pointer?): Pointer?
+        // X11 的 XGrabKey 回傳 void（錯誤走異步 error handler）；JNA 宣告
+        // Int 會讀到返回暫存器的垃圾值——先前的 `== 0` 檢查因此隨機誤報
+        // 「grab failed」（2026-09-14 重啟後 NASHIRA_HOTKEY 假失敗）。
         fun XGrabKey(
             dpy: Pointer?, ownerEvents: Int, keycode: Int, modifiers: Int,
             grabWindow: Pointer?, pointerMode: Int, keyboardMode: Int,
-        ): Int
+        )
         fun XKeysymToKeycode(dpy: Pointer?, keysym: Long): Int
         fun XSelectInput(dpy: Pointer?, w: Pointer?, eventMask: Long): Int
         fun XPending(dpy: Pointer?): Int
@@ -67,12 +70,10 @@ object GlobalHotkey {
         if (keycode == 0) {
             lib.XCloseDisplay(dpy); return false
         }
-        // 帶/不帶 numlock（Mod2）各註冊一次；XSync 由事件循環的 XPending 處理
-        val grabbed = sequenceOf(modifiers, modifiers or MOD2_MASK).all { mods ->
-            lib.XGrabKey(dpy, 0, keycode, mods, root, GRAB_MODE_ASYNC, GRAB_MODE_ASYNC) == 0
-        }
-        if (!grabbed) {
-            lib.XCloseDisplay(dpy); return false
+        // 帶/不帶 numlock（Mod2）各註冊一次。衝突（BadAccess，如他客戶端已
+        // 搶佔同一組合）由 Xlib 默認 error handler 打到 stderr——不以此判定成敗。
+        sequenceOf(modifiers, modifiers or MOD2_MASK).forEach { mods ->
+            lib.XGrabKey(dpy, 0, keycode, mods, root, GRAB_MODE_ASYNC, GRAB_MODE_ASYNC)
         }
         // KeyPressMask（1<<0）——只訂閱按鍵按下
         lib.XSelectInput(dpy, root, 1L shl 0)

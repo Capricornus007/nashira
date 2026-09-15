@@ -22,7 +22,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.clickable
 import io.github.capricornus007.nashira.LocalUiState
@@ -125,9 +128,13 @@ fun main(args: Array<String>) {
             // 中文缺筆畫、抗鋸齒差（2026-09-14 用戶對比 fcitx5 截圖）。
             // 改用 Compose Popup：跟 app 主體同渲染管線，字體/抗鋸齒一致。
             var trayMenuOpen by remember { mutableStateOf(false) }
+            // 右鍵時記錄鼠標位置：菜單錨在托盤圖示上方（PlatformDefault 在
+            // bspwm 會把窗口丟到屏幕頂部，2026-09-14 用戶截圖回報位置錯）。
+            var trayMenuScreenPos by remember { mutableStateOf(java.awt.Point(0, 0)) }
             trayIconAwt.addMouseListener(object : java.awt.event.MouseAdapter() {
                 override fun mousePressed(e: java.awt.event.MouseEvent) {
                     if (e.button == java.awt.event.MouseEvent.BUTTON3) {
+                        trayMenuScreenPos = java.awt.MouseInfo.getPointerInfo().location
                         trayMenuOpen = true
                     } else if (e.button == java.awt.event.MouseEvent.BUTTON1) {
                         showMainWindow()
@@ -140,6 +147,15 @@ fun main(args: Array<String>) {
             // Popup 在 application{} 裡沒有 LocalHostDefaultProvider 會崩
             // （2026-09-14 實測：右鍵托盤圖標直接炸）。
             if (trayMenuOpen) {
+                val menuW = 200.dp
+                val menuH = 118.dp
+                // 屏幕坐標 → Compose Window 位置：菜單出現在鼠標（托盤圖示）
+                // 左上方，右緣對齊鼠標、底緣留 8dp 不蓋住欄條。
+                val scr = java.awt.Toolkit.getDefaultToolkit().screenSize
+                val scaleX = scr.width / 2240f  // bspwm 單屏；近似換算物理→邏輯
+                val scaleY = scr.height / 1400f
+                val px = (trayMenuScreenPos.x / scaleX).dp - menuW + 12.dp
+                val py = (trayMenuScreenPos.y / scaleY).dp - menuH - 8.dp
                 Window(
                     onCloseRequest = { trayMenuOpen = false },
                     undecorated = true,
@@ -147,32 +163,56 @@ fun main(args: Array<String>) {
                     resizable = false,
                     alwaysOnTop = true,
                     state = rememberWindowState(
-                        position = WindowPosition.PlatformDefault,
-                        size = DpSize(180.dp, 96.dp),
+                        position = WindowPosition(px.coerceAtLeast(0.dp), py.coerceAtLeast(0.dp)),
+                        size = DpSize(menuW, menuH),
                     ),
                 ) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        shadowElevation = 8.dp,
-                    ) {
-                        Column {
-                            Text(
-                                strings.trayOpen,
-                                Modifier
-                                    .clickable { trayMenuOpen = false; showMainWindow() }
-                                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
-                            Text(
-                                strings.trayQuit,
-                                Modifier
-                                    .clickable { trayMenuOpen = false; exitApplication() }
-                                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
+                    // undecorated Window 不會因點擊外部而關閉（onCloseRequest 只
+                    // 響應 WM 關閉）——焦點丟失＝點了別處＝收起菜單。
+                    LaunchedEffect(window) {
+                        window.addWindowFocusListener(object : java.awt.event.WindowAdapter() {
+                            override fun windowLostFocus(e: java.awt.event.WindowEvent?) {
+                                trayMenuOpen = false
+                            }
+                        })
+                    }
+                    // 窗口比 Surface 大一圈：陰影/ripple 不被窗口邊界裁掉
+                    //（2026-09-14 用戶截圖：hover 時文字/高亮不完整）。
+                    Box(Modifier.fillMaxSize().padding(10.dp), contentAlignment = Alignment.Center) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            shadowElevation = 6.dp,
+                        ) {
+                            Column {
+                                Text(
+                                    strings.trayOpen,
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            trayMenuOpen = false
+                                            // 先收菜單再喚主窗：alwaysOnTop 菜單
+                                            // 若還在，會搶走喚起後的焦點
+                                            //（「開啟 Nashira 沒那麼好用」的根因）。
+                                            java.awt.EventQueue.invokeLater { showMainWindow() }
+                                        }
+                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                                Text(
+                                    strings.trayQuit,
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            trayMenuOpen = false
+                                            java.awt.EventQueue.invokeLater { exitApplication() }
+                                        }
+                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
                         }
                     }
                 }
