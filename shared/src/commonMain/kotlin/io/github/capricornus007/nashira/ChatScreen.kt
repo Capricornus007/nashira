@@ -159,6 +159,7 @@ import de.connect2x.trixnity.clientserverapi.model.user.avatarUrl
 import de.connect2x.trixnity.clientserverapi.model.user.displayName
 import de.connect2x.trixnity.client.room
 import io.github.capricornus007.nashira.i18n.stringsFor
+import io.github.capricornus007.nashira.theme.audioDeviceSettingsSupported
 import io.github.capricornus007.nashira.matrix.MatrixSession
 import io.github.capricornus007.nashira.matrix.RoomRepository
 import io.github.capricornus007.nashira.matrix.MediaSource
@@ -1086,56 +1087,62 @@ private fun AccountBar(
                     ProfilePopup(client = client, accountId = accountId, onEditProfile = onOpenAccount, onDismiss = { profilePopup = false })
                 }
             }
-            // 麥克風＋^（Discord 的分體按鈕；無語音聊天靜音語義，兩者都開面板）
-            Box {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    MuteIconButton(muted = ui.audioMicMuted, onClick = { ui.audioMicMuted = !ui.audioMicMuted }) {
-                        Icon(BarIcons.Mic, contentDescription = null, modifier = Modifier.size(21.dp))
+            // 麥克風＋^、耳機＋^：Discord 底欄的輸入/輸出「音訊裝置」列舉與靜音語義，
+            // 只在桌面存在（javax.sound mixer）。Android 由系統自動路由、沒有裝置可選，
+            // 這三顆（麥克風靜音、耳機/拒聽、^ 裝置面板）不該出現——用既有的
+            // audioDeviceSettingsSupported 旗標擋掉（與 HomeScreen 的音訊設定區塊同源）。
+            if (audioDeviceSettingsSupported) {
+                // 麥克風＋^（Discord 的分體按鈕；無語音聊天靜音語義，兩者都開面板）
+                Box {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        MuteIconButton(muted = ui.audioMicMuted, onClick = { ui.audioMicMuted = !ui.audioMicMuted }) {
+                            Icon(BarIcons.Mic, contentDescription = null, modifier = Modifier.size(21.dp))
+                        }
+                        IconButton(
+                            onClick = {
+                                inputPanel = !inputPanel
+                                outputPanel = false
+                                profilePopup = false
+                            },
+                            modifier = Modifier.size(22.dp),
+                        ) {
+                            Icon(
+                                Icons.Filled.KeyboardArrowUp,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
                     }
-                    IconButton(
-                        onClick = {
-                            inputPanel = !inputPanel
-                            outputPanel = false
-                            profilePopup = false
-                        },
-                        modifier = Modifier.size(22.dp),
-                    ) {
-                        Icon(
-                            Icons.Filled.KeyboardArrowUp,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(16.dp),
-                        )
-                    }
-                }
-                if (inputPanel) {
-                    AudioDevicePanel(isInput = true, onOpenAudioSettings = onSettings, onDismiss = { inputPanel = false })
-                }
-            }
-            // 耳機＋^（同上）
-            Box {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    MuteIconButton(muted = ui.audioPlaybackMuted, onClick = { ui.audioPlaybackMuted = !ui.audioPlaybackMuted }) {
-                        Icon(BarIcons.Headset, contentDescription = null, modifier = Modifier.size(21.dp))
-                    }
-                    IconButton(
-                        onClick = {
-                            outputPanel = !outputPanel
-                            inputPanel = false
-                            profilePopup = false
-                        },
-                        modifier = Modifier.size(22.dp),
-                    ) {
-                        Icon(
-                            Icons.Filled.KeyboardArrowUp,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(16.dp),
-                        )
+                    if (inputPanel) {
+                        AudioDevicePanel(isInput = true, onOpenAudioSettings = onSettings, onDismiss = { inputPanel = false })
                     }
                 }
-                if (outputPanel) {
-                    AudioDevicePanel(isInput = false, onOpenAudioSettings = onSettings, onDismiss = { outputPanel = false })
+                // 耳機＋^（同上）
+                Box {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        MuteIconButton(muted = ui.audioPlaybackMuted, onClick = { ui.audioPlaybackMuted = !ui.audioPlaybackMuted }) {
+                            Icon(BarIcons.Headset, contentDescription = null, modifier = Modifier.size(21.dp))
+                        }
+                        IconButton(
+                            onClick = {
+                                outputPanel = !outputPanel
+                                inputPanel = false
+                                profilePopup = false
+                            },
+                            modifier = Modifier.size(22.dp),
+                        ) {
+                            Icon(
+                                Icons.Filled.KeyboardArrowUp,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    }
+                    if (outputPanel) {
+                        AudioDevicePanel(isInput = false, onOpenAudioSettings = onSettings, onDismiss = { outputPanel = false })
+                    }
                 }
             }
             // 齒輪：設定
