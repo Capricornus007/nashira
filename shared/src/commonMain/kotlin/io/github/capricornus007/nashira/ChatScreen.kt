@@ -3388,12 +3388,37 @@ fun htmlToAnnotatedString(
         // 之後就忘了自己還在粗體裡（Matrix 橋接進來的訊息大量是巢狀標籤，
         // Element/Riot 發的 formatted_body 都這樣）。
         val styleStack = ArrayDeque<SpanStyle>()
-        val styleTags = setOf("b", "strong", "i", "em", "u", "del", "s", "code", "pre")
+        val styleTags = setOf("b", "strong", "i", "em", "u", "del", "s", "code", "pre", "span", "h1", "h2", "h3", "h4", "h5", "h6")
+        // 區塊級標籤的狀態。Matrix 的 formatted_body（以及各橋接器）常出現这三種：
+        // · <blockquote>——引用，用「│ 」前綴一條條標出來
+        // · <ul>/<ol>/<li>——清單，巢疊時多縮两格，有序清單自己編號
+        // · <mx-reply>——Element/Schildi 的「引用回覆」區塊。這段的文字**不進內文**：
+        //   回覆來源已經由訊息上方的「↩ 名字: 預覽」列呈現，再印一次就是兩遍重複
+        var quoteDepth = 0
+        val listStack = ArrayList<ListLevel>() // 巢疊的清單層（ul 用點、ol 自己編號）
+        var mxReplyDepth = 0
+        var wroteAny = false
+        val mxColorRegex = """data-mx-color\s*=\s*["']#?([0-9a-fA-F]{3,8})["']""".toRegex()
+
+        fun writeBlockPrefix() {
+            // 換行後把引用前綴補齊；清單縮排由 <li> 自己處理（一項一行）
+            repeat(quoteDepth) { append("│ ") }
+        }
+
+        /** 區塊結束：換行，讓下一段文字落在正確的引用前綴之後。 */
+        fun endBlock() {
+            if (wroteAny) {
+                append("\n")
+                writeBlockPrefix()
+            }
+        }
 
         fun appendDecoded(raw: String) {
             if (raw.isEmpty()) return
+            if (mxReplyDepth > 0) return  // <mx-reply> 的內容不進內文（回覆已有單獨一列呈現）
             val decoded = decodeHtmlEntities(raw)
             if (decoded.isEmpty()) return
+            wroteAny = true
             val url = linkUrl
             if (url != null) {
                 // 連結段：可點擊 + 連結色底線（點擊走系統瀏覽器，與 URL 預覽卡一致）
@@ -3432,8 +3457,63 @@ fun htmlToAnnotatedString(
                 isClosing -> {
                     if (tagName == "a") linkUrl = null
                     if (tagName == "pre") inPreBlock = false
+                    if (tagName == "mx-reply") mxReplyDepth = (mxReplyDepth - 1).coerceAtLeast(0)
+                    if (tagName == "blockquote") {
+                        quoteDepth = (quoteDepth - 1).coerceAtLeast(0)
+                        endBlock()
+                    }
+                    if (tagName == "ul" || tagName == "ol") {
+                        listStack.removeLastOrNull()
+                        endBlock()
+                    }
+                    if (tagName == "p" || tagName == "div") endBlock()
                     if (tagName in styleTags) {
                         currentStyle = styleStack.removeLastOrNull() ?: baseStyle.toSpanStyle()
+                    }
+                }
+                // ---- 區塊級標籤（Matrix formatted_body 與各橋接器的常見寫法）----
+                tagName == "blockquote" -> {
+                    if (wroteAny) append("\n")
+                    quoteDepth++
+                    wroteAny = true
+                    writeBlockPrefix()
+                }
+                tagName == "mx-reply" -> mxReplyDepth++
+                tagName == "ul" -> listStack.add(ListLevel(ordered = false))
+                tagName == "ol" -> listStack.add(ListLevel(ordered = true))
+                tagName == "li" -> {
+                    if (wroteAny) append("\n")
+                    wroteAny = true
+                    writeBlockPrefix()
+                    // 巢疊清單每多一層縮兩格
+                    repeat((listStack.size - 1).coerceAtLeast(0)) { append("  ") }
+                    val level = listStack.lastOrNull()
+                    append(
+                        when {
+                            level == null -> "• "
+                            level.ordered -> { level.index++; "${level.index}. " }
+                            else -> if (listStack.size > 1) "◦ " else "• "
+                        },
+                    )
+                }
+                tagName in setOf("p", "div") -> {
+                    if (wroteAny) { append("\n"); writeBlockPrefix() }
+                    wroteAny = true
+                }
+                tagName in setOf("h1", "h2", "h3", "h4", "h5", "h6") -> {
+                    if (wroteAny) append("\n")
+                    styleStack.addLast(currentStyle)
+                    currentStyle = currentStyle.copy(fontWeight = FontWeight.Bold)
+                    wroteAny = true
+                    writeBlockPrefix()
+                }
+                // <span data-mx-color="#…">：Discord/橋接器會帶顏色過來，
+                // 不支援的話顏色就白白丟掉（沒有背景色 data-mx-bg-color，那個
+                // 在 AnnotatedString 裡只能靠 SpanStyle.background，需要時再加）
+                tagName == "span" -> {
+                    styleStack.addLast(currentStyle)
+                    mxColorRegex.find(attrs)?.groupValues?.get(1)?.let { hex ->
+                        parseHtmlColor(hex)?.let { currentStyle = currentStyle.copy(color = it) }
                     }
                 }
                 tagName in setOf("b", "strong") -> {
@@ -3477,7 +3557,10 @@ fun htmlToAnnotatedString(
                         ?.takeIf { it.isNotBlank() }
                         ?.let(::decodeHtmlEntities)
                 }
-                tagName == "br" -> append("\n")
+                tagName == "br" -> {
+                    append("\n")
+                    writeBlockPrefix()  // 引用區塊內換行，新的一行也要帶前綴
+                }
                 // P5-2：custom emoji——<img data-mx-emoticon src="mxc://...">
                 tagName == "img" && attrs.contains("data-mx-emoticon") -> {
                     val mxc = srcRegex.find(attrs)?.groupValues?.get(1).orEmpty()
@@ -3497,22 +3580,65 @@ fun htmlToAnnotatedString(
 }
 
 /**
- * HTML 實體解碼：全量 HTML5 命名表（[HtmlEntities.kt]，生成自 WHATWG
- * 清單 2125 條）＋十進制/十六進制數字實體（&#8211; / &#x2713;）。
- * &amp; 最後解，否則 &lt; 解出的 & 會被二次替換。
+ * HTML 實體解碼：全量 HTML5 命名表（[HtmlEntities.kt]，2125 條）＋十進制/十六進制
+ * 數字實體（&#8211; / &#x2713;）。
+ *
+ * 單趟掃描。舊寫法是 `HtmlNamedEntities.forEach { out = out.replace("&$it", …) }`
+ * ——渲染一段文字要把整串掃 2125 遍、每遍還配置一個新字串，而這函數在訊息列的
+ * 渲染路徑上（時間線一滾就是一片，且 `<a href>` 解碼時還會再走一次）。現在只在
+ * 真的遇到 `&` 時往後找名稱邊界、查一次表；字串裡沒有 `&` 就直接原樣返回。
  */
 private val NumericEntityRegex = Regex("&#(?:([0-9]{1,7})|x([0-9a-fA-F]{1,6}));")
 
 private fun decodeHtmlEntities(s: String): String {
-    var out = s
-    HtmlNamedEntities.forEach { (name, char) ->
-        out = out.replace("&$name;", char)
+    var amp = s.indexOf('&')
+    if (amp < 0) return s
+    val out = StringBuilder(s.length)
+    var i = 0
+    while (true) {
+        if (amp < 0) {
+            out.append(s, i, s.length)
+            break
+        }
+        out.append(s, i, amp)
+        val numeric = NumericEntityRegex.find(s, amp)
+        if (numeric != null && numeric.range.first == amp) {
+            val code = numeric.groupValues[1].toIntOrNull() ?: numeric.groupValues[2].toIntOrNull(16)
+            out.append(code?.let { Character.toChars(it).concatToString() } ?: numeric.value)
+            i = numeric.range.last + 1
+        } else {
+            // 命名實體 &名稱;：名稱只有英數字，HTML5 最長 31 字元；對不上就原樣留 '&'
+            var j = amp + 1
+            while (j < s.length && j - amp <= 32 && s[j].isLetterOrDigit()) j++
+            val named = if (j < s.length && s[j] == ';') HtmlNamedEntities[s.substring(amp + 1, j)] else null
+            if (named != null) {
+                out.append(named)
+                i = j + 1
+            } else {
+                out.append('&')
+                i = amp + 1
+            }
+        }
+        amp = s.indexOf('&', i)
     }
-    out = NumericEntityRegex.replace(out) { m ->
-        val code = m.groupValues[1].toIntOrNull() ?: m.groupValues[2].toIntOrNull(16)
-        code?.let { Character.toChars(it).concatToString() } ?: m.value
+    return out.toString()
+}
+
+/** 巢疊清單的一層：<ol> 要自己編號，<ul> 用點（巢疊深一層換成 ◦）。 */
+private class ListLevel(val ordered: Boolean) {
+    var index = 0
+}
+
+/** `#rgb` / `#rrggbb` → Compose Color；不合法回 null（呼叫端保留原樣式）。 */
+private fun parseHtmlColor(hex: String): Color? {
+    val v = hex.trim().removePrefix("#")
+    val expanded = when (v.length) {
+        3 -> v.map { "$it$it" }.joinToString("")
+        6 -> v
+        else -> return null
     }
-    return out
+    val rgb = expanded.toLongOrNull(16) ?: return null
+    return Color(0xFF000000L or rgb)
 }
 
 /** P5-2：渲染結果帶出 inline 表情清單，Text(inlineContent=) 用它們建佔位映射。 */
