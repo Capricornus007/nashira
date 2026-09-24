@@ -529,7 +529,8 @@ class RoomRepository(val client: MatrixClient) {
 
     /**
      * 進房時把已讀標記推到最後一則事件：未讀白條與紅圈數字才會消掉，
-     * 也讓其他客戶端看到同一個已讀位置。
+     * 也讓其他客戶端看到同一個已讀位置。read 與 fully_read 兩個 marker 一起推
+     * （P4-2 的 fully_read 就是這裡帶上的；Element 的「標記為已讀」同樣是兩個一起）。
      */
     suspend fun markRead(roomId: RoomId) {
         val lastEventId = client.room.getById(roomId).first()?.lastEventId ?: return
@@ -552,12 +553,6 @@ class RoomRepository(val client: MatrixClient) {
         client.api.user.setAccountData(IgnoredUserListEventContent(next), client.userId).getOrThrow()
     }
 
-    /** P4-2：把房間標記為完全已讀（fully_read marker，消除未讀但不發 read receipt）。 */
-    suspend fun markFullyRead(roomId: RoomId) = runCatching {
-        val lastEventId = client.room.getById(roomId).first()?.lastEventId ?: return@runCatching
-        client.api.room.setReadMarkers(roomId, fullyRead = lastEventId, read = null)
-    }
-
     /** P4-3：更新顯示名稱。 */
     suspend fun setDisplayName(name: String): Result<Unit> = runCatching {
         client.api.user.setProfileField(userId = client.userId, field = ProfileField.DisplayName(name))
@@ -566,10 +561,15 @@ class RoomRepository(val client: MatrixClient) {
     /** P4-3：上傳頭像並設為自己的 avatar。 */
     suspend fun setAvatar(bytes: ByteArray, contentType: String): Result<Unit> = runCatching {
         val mediaService = client.di.get<de.connect2x.trixnity.client.media.MediaService>()
-        val mxcUrl: String = mediaService.prepareUploadMedia(
-            flowOf(bytes),
+        // 與 sendImage/sendFile 同兩步：prepareUploadMedia 只是把資料放進媒體暫存、
+        // 回 **cache URI**；真正的 mxc:// URL 要再走 uploadMedia(cacheUri)。
+        // 少第二步會把 cache URI 當成 avatar_url 設上去（兩者型別都是 String，
+        // 編譯不會紅，頭像只會顯示不出來），所以這裡寧可多寫一行註解。
+        val cacheUri = mediaService.prepareUploadMedia(
+            bytes.toByteArrayFlow(),
             io.ktor.http.ContentType.parse(contentType),
         )
+        val mxcUrl = mediaService.uploadMedia(cacheUri).getOrThrow()
         client.api.user.setProfileField(userId = client.userId, field = ProfileField.AvatarUrl(mxcUrl))
     }
 
@@ -988,7 +988,6 @@ class RoomRepository(val client: MatrixClient) {
      * 的音訊氣泡，只差沒有語音專屬樣式。
      */
     suspend fun sendVoice(roomId: RoomId, voice: RecordedVoice): Result<String> = runCatching {
-        println("NASHIRA_VOICE: send start ${voice.bytes.size}B ${voice.mimeType}")
         val mediaService = client.di.get<de.connect2x.trixnity.client.media.MediaService>()
         val contentType = io.ktor.http.ContentType.parse(voice.mimeType)
         val info = AudioInfo(
@@ -997,7 +996,6 @@ class RoomRepository(val client: MatrixClient) {
             size = voice.bytes.size.toLong(),
         )
         val encrypted = client.room.getState<EncryptionEventContent>(roomId).firstOrNull() != null
-        println("NASHIRA_VOICE: encrypted=$encrypted, uploading...")
         val content = if (encrypted) {
             RoomMessageEventContent.FileBased.Audio(
                 body = "voice message",
@@ -1014,10 +1012,7 @@ class RoomRepository(val client: MatrixClient) {
                 info = info,
             )
         }
-        println("NASHIRA_VOICE: upload done, sending event...")
-        val eventId = client.room.sendMessage(roomId) { content(content) }
-        println("NASHIRA_VOICE: event sent $eventId")
-        eventId
+        client.room.sendMessage(roomId) { content(content) }
     }
 
     /** 公開聊天室目錄：只查公開房間，不改動本地同步資料。 */
