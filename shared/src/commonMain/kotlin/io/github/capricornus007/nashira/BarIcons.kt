@@ -63,33 +63,6 @@ object BarIcons {
         }.build()
     }
 
-    val Speaker: ImageVector by lazy {
-        ImageVector.Builder(name = "Speaker", defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f).apply {
-            path(fill = SolidColor(Color.Black)) {
-                moveTo(3f, 9f)
-                lineTo(3f, 15f)
-                lineTo(7f, 15f)
-                lineTo(12f, 20f)
-                lineTo(12f, 4f)
-                lineTo(7f, 9f)
-                close()
-                moveTo(16.5f, 12f)
-                curveTo(16.5f, 10.23f, 15.48f, 8.71f, 14f, 7.97f)
-                lineTo(14f, 16.02f)
-                curveTo(15.48f, 15.29f, 16.5f, 13.77f, 16.5f, 12f)
-                close()
-                moveTo(14f, 3.23f)
-                lineTo(14f, 5.29f)
-                curveTo(16.89f, 6.15f, 19f, 8.83f, 19f, 12f)
-                curveTo(19f, 15.17f, 16.89f, 17.85f, 14f, 18.71f)
-                lineTo(14f, 20.77f)
-                curveTo(18.01f, 19.86f, 21f, 16.28f, 21f, 12f)
-                curveTo(21f, 7.72f, 18.01f, 4.14f, 14f, 3.23f)
-                close()
-            }
-        }.build()
-    }
-
     val Reply: ImageVector by lazy {
         ImageVector.Builder(name = "Reply", defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f).apply {
             path(fill = SolidColor(Color.Black)) {

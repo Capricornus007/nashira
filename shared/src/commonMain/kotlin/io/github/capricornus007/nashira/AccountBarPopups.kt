@@ -52,20 +52,14 @@ import kotlinx.coroutines.delay
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 
-/**
+/*
  * 底欄彈出層（對齊 Discord 2026 底欄三件套，2026-09-14 用戶截圖對照）：
- * - [ProfilePopup]：點頭像/名字 → 個人資料卡（橫幅＋頭像＋名稱＋按鈕列）
- * - [AudioDevicePanel]：點麥克風/耳機 → 裝置快捷面板（裝置 `>`＋音量滑塊＋音訊設定）
+ * - ProfilePopup：點頭像/名字 → 個人資料卡（橫幅＋頭像＋名稱＋按鈕列）
+ * - AudioDevicePanel：點麥克風/耳機 → 裝置快捷面板（裝置 `>`＋音量滑塊＋音訊設定）
  *
- * 定位：Popup 從帳號列上方彈出、貼齊左緣；focusable 讓點外面關閉。
+ * 兩者都由 ChatScreen 的帳號列包在 Box 裡，從帳號列上方彈出、貼齊左緣；
+ * focusable 讓點外面關閉。
  */
-@Composable
-fun AccountBarPopupContainer(
-    content: @Composable () -> Unit,
-) {
-    // 保留給之後需要共同容器邏輯時使用
-    content()
-}
 
 /**
  * 個人資料卡（Discord 個人檔案彈出）。橫幅用品牌 Arcaea 漸層；
