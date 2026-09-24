@@ -233,6 +233,9 @@ fun ChatScreen(
     val roomRepository = remember(session) { RoomRepository(session.client) }
     val syncState by session.client.syncState.collectAsState()
     val spaceIconMode = LocalUiState.current.spaceIconMode
+    // composition local 只能在 composable 作用域讀；錄音鈕的 onClick 要改
+    // UiState 的欄位，先把物件抓成區域變數。
+    val uiState = LocalUiState.current
 
     LaunchedEffect(roomRepository) {
         roomRepository.spacesSnapshot().collectLatest { next ->
@@ -2307,6 +2310,11 @@ private fun TimelinePane(
                                         stickerPanel = false
                                         keyboardController?.hide()
                                         focusManager.clearFocus()
+                                        // 桌面底欄的麥克風靜音時，VoiceRecorder.start() 會直接
+                                        // 返回（不抓類）——但點錄音钮就是「我現在要說話」的明確
+                                        // 意圖，不先解除就會假錄音、放開後靜默丟檔。與 Discord
+                                        // push-to-talk「按下去自動解除靜音」一致。
+                                        if (uiState.audioMicMuted) uiState.audioMicMuted = false
                                         runCatching {
                                             val r = VoiceRecorder()
                                             r.start()
