@@ -26,6 +26,7 @@
 - **P5-1 語音訊息**：兩端可錄可播。
   Android：`MediaRecorder`→AAC/m4a、`MediaPlayer` 播放、執行期 `RECORD_AUDIO`。
   桌面：`TargetDataLine`→16k 單聲道 WAV、`javax.sound.Clip` 播放（非 WAV 退 `ffplay`）；额外有裝置選擇、輸入增益、輸出音量、底欄麥克風靜音／耳機拒聽（`PlatformCapabilities.audioDeviceSettingsSupported`＝桌面 true／Android false，那三顆鈕與裝置面板在手機完全不顯示，因為 Android 端實作從不讀那些旗標）。
+  **靜音 × 錄音的既定行為**（2026-09-24 用戶拍板，別再改成自動解除）：底欄麥克風靜音時按錄音＝**不錄、也不幫你翻掉靜音**，輸入列那顆麥克風會畫斜線並顯示一行提示；判斷用 `micBlockedByMute = audioDeviceSettingsSupported && uiState.audioMicMuted`，所以手機端恆不觸發（那顆鈕在手機不存在）。
   已知偏差：發出去的是 `m.audio` 不是 MSC3245 的 `m.voice`（Trixnity 5.8.1 `RoomMessageEventContent.Serializer` 把 msgtype 寫死），Element 端顯示成一般音訊氣泡。ffplay 路徑拿不到進度/長度（Clip 路徑有）。
 - **P5-2 檔案/圖片**：附件選擇兩端都有、`sendFile`/`sendImage` 完整；圖片有全螢幕檢視器＋另存（`ImageSaving` expect/actual）。
   **影片≠播放**：`m.video` 只解出第一幀當縮圖（`VideoFrame.android/desktop`），點開還是圖，唯一動作是「存檔」。其他 `m.file`/音訊檔只有檔名列，`Attachment` 的註解就直白寫著還沒做內建播放。

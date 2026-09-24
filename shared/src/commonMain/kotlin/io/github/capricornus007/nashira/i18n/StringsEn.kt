@@ -73,6 +73,7 @@ object EnStrings : Strings {
     override val stickerMessage = "Sticker"
     override val voiceMessage = "Voice message"
     override val recording = "Recording"
+    override val recordingMutedHint = "Microphone is muted — unmute it in the bottom bar first"
     override val voiceUnsupported = "Cannot play this format on this platform"
     override val undecryptable = "⚠ Unable to decrypt this message"
     override val clearSearch = "Clear search"

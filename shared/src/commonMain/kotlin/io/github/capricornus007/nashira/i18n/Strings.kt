@@ -154,6 +154,8 @@ interface Strings {
     val stickerMessage: String
     val voiceMessage: String
     val recording: String
+    /** 底欄麥克風靜音時按錄音的提示（不錄，但要講清楚為什麼）。 */
+    val recordingMutedHint: String
     val voiceUnsupported: String
     val undecryptable: String
     val clearSearch: String

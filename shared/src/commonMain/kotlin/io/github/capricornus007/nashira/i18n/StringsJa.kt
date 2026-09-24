@@ -143,6 +143,7 @@ object JaStrings : Strings by EnStrings {
     override val noSearchResults = "一致する部屋はありません"
     override val voiceMessage = "ボイスメッセージ"
     override val recording = "録音中"
+    override val recordingMutedHint = "マイクがミュートです。下のマイクを解除してから録音してください"
     override val voiceUnsupported = "このプラットフォームでは再生できません"
     override val hideSecret = "非表示"
     override val acceptInvite = "承諾"

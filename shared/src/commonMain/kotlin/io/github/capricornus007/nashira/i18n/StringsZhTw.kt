@@ -142,6 +142,7 @@ object ZhTwStrings : Strings {
     override val stickerMessage = "貼圖"
     override val voiceMessage = "語音訊息"
     override val recording = "錄音中"
+    override val recordingMutedHint = "麥克風已靜音，點底欄的麥克風圖示解除後再錄"
     override val voiceUnsupported = "此平台無法播放此格式"
     override val undecryptable = "⚠ 這則訊息無法解密"
     override val clearSearch = "清除搜尋"
@@ -278,6 +279,7 @@ object ZhCnStrings : Strings by ZhTwStrings {
     override val loginSsoHint = "将在浏览器打开家服务器的官方登录页面"
     override val voiceMessage = "语音消息"
     override val recording = "录音中"
+    override val recordingMutedHint = "麦克风已静音，点击底栏的麦克风图标取消后再录"
     override val voiceUnsupported = "此平台无法播放此格式"
 }
 

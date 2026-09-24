@@ -141,6 +141,7 @@ object KoStrings : Strings by EnStrings {
     override val stickerMessage = "스티커"
     override val voiceMessage = "음성 메시지"
     override val recording = "녹음 중"
+    override val recordingMutedHint = "마이크가 음소거입니다. 아래쪽 마이크를 해제한 뒤 녹음하세요"
     override val voiceUnsupported = "이 플랫폼에서는 재생할 수 없습니다"
     override val undecryptable = "⚠ 이 메시지를 복호화할 수 없습니다"
     override val clearSearch = "검색 지우기"

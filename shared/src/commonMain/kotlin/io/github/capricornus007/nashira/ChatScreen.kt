@@ -154,6 +154,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import de.connect2x.trixnity.clientserverapi.model.user.avatarUrl
 import de.connect2x.trixnity.clientserverapi.model.user.displayName
@@ -1015,20 +1016,29 @@ private fun MuteIconButton(muted: Boolean, onClick: () -> Unit, icon: @Composabl
             icon()
         }
         if (muted) {
-            // 斜線只穿過圖標本體（21dp＝圖標尺寸），不延伸到按鈕邊緣——
-            // Discord 的斜線兩端大致與圖標邊角對齊；首版 padding(6dp) 讓斜線
-            // 24dp 貼到按鈕邊，被用戶評「超出」（2026-09-14 兩輪截圖對照）。
-            val slashColor = MaterialTheme.colorScheme.error  // DrawScope 不是 @Composable，先取色
-            Canvas(Modifier.size(21.dp)) {
-                drawLine(
-                    color = slashColor,
-                    start = Offset(0f, size.height),
-                    end = Offset(size.width, 0f),
-                    strokeWidth = 2.dp.toPx(),
-                    cap = StrokeCap.Round,
-                )
-            }
+            MuteSlash()
         }
+    }
+}
+
+/**
+ * 圖標上的斜線（靜音標記）。斜線只穿過圖標本體（21dp＝圖標尺寸），不延伸到按鈕
+ * 邊緣——Discord 的斜線兩端大致與圖標邊角對齊；首版 padding(6dp) 讓斜線 24dp
+ * 貼到按鈕邊，被用戶評「超出」（2026-09-14 兩輪截圖對照）。
+ * 底欄靜音鈕與輸入列的錄音鈕共用這一個，兩邊的「靜音中」才長得一樣。
+ */
+@Composable
+private fun MuteSlash(slashSize: Dp = 21.dp) {
+    val slashColor = MaterialTheme.colorScheme.error  // DrawScope 不是 @Composable，先取色
+    // 參數別叫 size：會蓋掉 DrawScope 的 size（那裡的 size.height 是畫布尺寸）
+    Canvas(Modifier.size(slashSize)) {
+        drawLine(
+            color = slashColor,
+            start = Offset(0f, size.height),
+            end = Offset(size.width, 0f),
+            strokeWidth = 2.dp.toPx(),
+            cap = StrokeCap.Round,
+        )
     }
 }
 
@@ -1652,6 +1662,14 @@ private fun TimelinePane(
     var recordingElapsed by remember(room.roomId) { mutableStateOf(0L) }
     var recordingAmp by remember(room.roomId) { mutableStateOf(0f) }
     var recordedPreview by remember(room.roomId) { mutableStateOf<RecordedVoice?>(null) }
+    // 底欄麥克風靜音中按錄音：不錄，但要把原因講出來（不講就像壞了）
+    var micMutedHint by remember(room.roomId) { mutableStateOf(false) }
+    LaunchedEffect(micMutedHint) {
+        if (micMutedHint) {
+            delay(3200)
+            micMutedHint = false
+        }
+    }
     val previewPlayer = remember(room.roomId) { AudioPlayer() }
     var previewPlaying by remember(room.roomId) { mutableStateOf(false) }
     var previewPrepared by remember(room.roomId) { mutableStateOf(false) }
@@ -1713,6 +1731,9 @@ private fun TimelinePane(
     var downloadNotice by remember(room.roomId) { mutableStateOf<String?>(null) }
     val imageSaver = rememberImageSaver()
     val uiState = LocalUiState.current
+    // 只有桌面有底欄那顆麥克風靜音鈕（audioDeviceSettingsSupported），Android 上恆
+    // false：手機既沒有開關可擋錄音，也不該提示用戶去點一顆不存在的鈕。
+    val micBlockedByMute = audioDeviceSettingsSupported && uiState.audioMicMuted
 
     // 房內訊息搜尋使用 Matrix `/search`，不會把搜尋詞送成聊天訊息；輸入停止後才查詢，
     // 避免每打一個字都打一次伺服器。點結果會把時間線重新定位到那則事件附近。
@@ -1965,6 +1986,14 @@ private fun TimelinePane(
                         it,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
+                    )
+                }
+                if (micMutedHint) {
+                    Text(
+                        strings.recordingMutedHint,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
                     )
                 }
@@ -2315,11 +2344,15 @@ private fun TimelinePane(
                                         stickerPanel = false
                                         keyboardController?.hide()
                                         focusManager.clearFocus()
-                                        // 桌面底欄的麥克風靜音時，VoiceRecorder.start() 會直接
-                                        // 返回（不抓類）——但點錄音钮就是「我現在要說話」的明確
-                                        // 意圖，不先解除就會假錄音、放開後靜默丟檔。與 Discord
-                                        // push-to-talk「按下去自動解除靜音」一致。
-                                        if (uiState.audioMicMuted) uiState.audioMicMuted = false
+                                        // 底欄麥克風靜音中：不錄，也**不擅自把靜音翻掉**（那是用戶
+                                        // 自己設的狀態，幫他解除之後發完語音也不會自動還原），
+                                        // 改成講清楚為什麼沒開始錄。
+                                        // micBlockedByMute 已用 audioDeviceSettingsSupported 攔掉
+                                        // Android：手機沒有那顆靜音鈕，也不該提示「去點底欄」。
+                                        if (micBlockedByMute) {
+                                            micMutedHint = true
+                                            return@IconButton
+                                        }
                                         runCatching {
                                             val r = VoiceRecorder()
                                             r.start()
@@ -2333,8 +2366,11 @@ private fun TimelinePane(
                                     Icon(
                                         VoiceIcons.Mic,
                                         contentDescription = strings.recording,
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        tint = if (micBlockedByMute) MaterialTheme.colorScheme.error
+                                            else MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
+                                    // 靜音中就把這顆麥克風也画上斜線：不用先按下去才知道不能錄
+                                    if (micBlockedByMute) MuteSlash(24.dp)
                                 }
                             }
                         }
