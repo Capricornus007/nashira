@@ -15,8 +15,7 @@
 ## 功能對照 Element 的完成度
 
 ### 已完成（代碼可查，非宣稱）
-- **P4-1 屏蔽用戶**：`RoomRepository.setIgnored`/`ignoredUsers`，時間線過濾在 `ChatScreen`（`page.messages.filter { sender !in ignoredUsers }`，已 `remember`）。
-  **缺口：沒有「取消屏蔽」的 UI**——`setIgnored(userId, ignored = false)` 零呼叫點，誤屏蔽只能去別的客戶端解。
+- **P4-1 屏蔽用戶**：`RoomRepository.setIgnored`/`ignoredUsers`，時間線過濾在 `ChatScreen`（`page.messages.filter { sender !in ignoredUsers }`，已 `remember`）。帳戶與安全頁有「已屏蔽的用戶」清單，可逐筆取消屏蔽（2026-09-24 補，之前只能屏蔽、解不開）。
 - **P4-2 fully_read**：`markRead()` 一次把 `read` + `fully_read` 兩個 marker 都推到最後一則事件（與 Element「標記為已讀」同義）。獨立的 `markFullyRead()` 已刪除（曾經只被 markRead 前面的多餘呼叫使用）。
 - **P4-3 顯示名稱＋頭像**：`SecurityAndAccountScreen` 有頭像選擇器 → `setAvatar`。
   歷史坑（已修）：`prepareUploadMedia` 回的是**媒體暫存 cache URI**，必須再 `uploadMedia(cacheUri)` 才拿到 `mxc://`；少這步不會編譯報錯，只會設出一個顯示不出來的 avatar_url。新增媒體上傳時一律照 `sendImage`/`sendFile`/`setAvatar` 的兩步寫。
@@ -43,14 +42,6 @@ P6-1 threads、P6-2 位置分享、P6-3 polls、P6-8 語音/視訊通話（無 W
 - **P6-5 Layan/Kvantum 配色跟隨**：`XdgColorScheme.desktop.kt` 只偵測「深/淺」（KDE colorScheme、GTK prefer-dark、主題名含 `-dark`）＋檔案監聽；**色板/emphasis 色尚未抽取**。Android 走 Material You（SDK≥31）。
 - **P6-6 自動發起裝置驗證**：SAS 狀態機、來電式驗證請求、根層 `DeviceVerificationHost`、手動「要求驗證此裝置」都有；缺 TrustedDeviceDetector 那種「掃描可交叉簽章的未驗證裝置並主動發起」。
 - **P6-7 zh-HK**：`ZhHkStrings` 已註冊可選，但**零覆寫**（目前與 zh-TW 全同）。語言檔在 `i18n/Strings{En,Ja,Ko,ZhTw}.kt`（`Strings.kt` 只是介面），zh-CN 有覆寫少數鍵。
-
-## 下一步候選（按 CP 值排，都已對碼確認存在）
-1. 「取消屏蔽」UI（設定→已忽略名單），順帶讓屏蔽可回復。
-2. 完整表情選擇器 ＋ 自訂表情當 reaction（MSC2545 `m.image` reaction）。
-3. `htmlToAnnotatedString` 補 `blockquote`/清單/`mx-reply`（引用壓成一行）與 mention pill；`decodeHtmlEntities` 目前是 2125 次 `String.replace` 的 O(n·表長) 線掃，熱路徑该換成單趟掃描。
-4. `UrlPreview`：把 `java.util.concurrent`（commonMain 裡的 JVM 型別，挡住未來 wasm/native 目標）換掉，快取加上限淘汰。
-5. 通知注入順序：`AppNotifications.platform` 未注入時預設 `foreground=true`＝一律不發，若 `watchNotifications` 先於注入啟動會靜默丟通知（無日誌）。
-6. 影片／一般附件的真播放。
 
 ## 建置與驗證
 - 本地：`./gradlew desktopApp:run`、`:desktopApp:createDistributable`、`:androidApp:assembleDebug`。

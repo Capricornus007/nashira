@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -89,6 +90,10 @@ fun SecurityAndAccountScreen(
     val activeDevice by repository.activeDeviceVerification.collectAsState()
     val activeState = activeDevice?.state?.collectAsState()?.value
     val bootstrapping by repository.bootstrapRunning.collectAsState()
+    // 屏蔽名單（P4-1）：得收在函式本體——SettingsGroup 的內容 lambda 是 DSL，不是
+    // composable 作用域，在裡面呼叫 collectAsState 會編不過。
+    val ignoredUsers by remember { roomRepository.ignoredUsers() }
+        .collectAsState(initial = emptySet())
 
     var sessions by remember(session) { mutableStateOf<List<DeviceSession>>(emptyList()) }
     var sessionsError by remember { mutableStateOf<String?>(null) }
@@ -317,6 +322,53 @@ fun SecurityAndAccountScreen(
         ) {
             Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = null, modifier = Modifier.size(18.dp))
             Text(strings.logoutDevice, modifier = Modifier.padding(start = 8.dp))
+        }
+
+        // P4-1 的尾巴：屏蔽名單要解得開。訊息選單只有「屏蔽用戶」而沒有取消的地方，
+        // 誤屏蔽之後只能去別的客戶端處理，等於回不來。
+        SettingsGroup(title = strings.ignoredUsersTitle) {
+            if (ignoredUsers.isEmpty()) {
+                item {
+                    Text(
+                        strings.ignoredUsersEmpty,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    )
+                }
+            } else {
+                ignoredUsers.sortedBy { it.full }.forEach { user ->
+                    item {
+                        // 解屏蔽是寫 account data（會同步到伺服器），按下去先鎖住避免連點
+                        var pending by remember(user.full) { mutableStateOf(false) }
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                user.full,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(
+                                enabled = !pending,
+                                onClick = {
+                                    pending = true
+                                    scope.launch {
+                                        roomRepository.setIgnored(user, ignored = false)
+                                        pending = false
+                                    }
+                                },
+                            ) {
+                                Text(strings.actionUnignoreUser)
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 

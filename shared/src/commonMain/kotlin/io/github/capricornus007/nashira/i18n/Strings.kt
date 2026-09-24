@@ -224,6 +224,10 @@ interface Strings {
     val connectionFailedHint: String
     val retry: String
     val actionIgnoreUser: String
+    /** 帳戶與安全頁的「已屏蔽名單」區（屏蔽要能解開，否則誤屏蔽只能去別的客戶端）。 */
+    val ignoredUsersTitle: String
+    val ignoredUsersEmpty: String
+    val actionUnignoreUser: String
     val editDisplayName: String
     val changeAvatar: String
     val loginPassword: String
