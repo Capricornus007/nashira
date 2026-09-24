@@ -1298,9 +1298,11 @@ private fun RoomListItem(
                     ContextMenuItem(strings.actionMarkRead) {
                         menuOpen = false
                         scope.launch {
-                            // fully_read marker（Element 行為）：不發 read receipt，
-                            // 只把未讀位置推到最新——其他裝置不會看到「已讀到最後」
-                            roomRepository.markFullyRead(room.roomId)
+                            // markRead 本身就把 read + fully_read 兩個 marker 一起推
+                            // 到最後一則事件（RoomRepository.markRead），原本這裡多
+                            // 跑了一次 markFullyRead（read=null），註解還寫「不發 read
+                            // receipt」——同一事件連發兩次標記，第二次直接蓋掉第一次，
+                            // 白一趟請求而已。
                             roomRepository.markRead(room.roomId)
                             if (unread.markedUnread) roomRepository.setMarkedUnread(room.roomId, false)
                         }
@@ -1443,13 +1445,13 @@ private fun TimelinePane(
     val timelineScope = rememberCoroutineScope()
     // 冷流：進房時用最後一則事件初始化，讓 Trixnity 自己補 gap／解密
     LaunchedEffect(timeline) {
-        val roomData = roomRepository.client.room.getById(room.roomId).first()
-        val last = roomData?.lastEventId
-        println("NASHIRA_TIMELINE: room=${room.roomId} lastEventId=$last roomData=${roomData != null}")
+        val last = roomRepository.client.room.getById(room.roomId).first()?.lastEventId
         if (last != null) {
-            val result = runCatching { timeline.init(last) }
-            result.onFailure { println("NASHIRA_TIMELINE: init failed: ${it.message}") }
-            result.onSuccess { println("NASHIRA_TIMELINE: init OK") }
+            // 只在失敗時留一行：這個專案沒有 logger，解密／補 gap 卡住時
+            // 終端機是最快的診斷管道；成功路徑不印（原本每次進房都吐
+            // room/lastEventId，滑鼠移入訊息列也每列印一行）。
+            runCatching { timeline.init(last) }
+                .onFailure { println("NASHIRA_TIMELINE: init failed: ${it.message}") }
         }
     }
     // 活邊緣：Timeline 視窗是靜態快照，房間有新事件時 loadAfter 延伸（見 RoomTimeline.startLiveEdge）
@@ -1462,7 +1464,10 @@ private fun TimelinePane(
     // P4-1 尾巴：把被屏蔽者的訊息從時間線濾掉（blocked senders never render）
     val ignoredUsers by remember(roomRepository) { roomRepository.ignoredUsers() }
         .collectAsState(initial = emptySet())
-    val messages = page?.messages?.filter { it.sender !in ignoredUsers }
+    // 過濾後的清單穩定下來才不會每次重組都重掃一遍可視窗（滑鼠 hover、insets
+    // 變化都會觸發重組）。page 每次事件變動都是 copy 出来的新物件（見
+    // RoomTimeline 的 pageFlow 註解），拿它當 remember 鑰匙不會卡在舊列表。
+    val messages = remember(page, ignoredUsers) { page?.messages?.filter { it.sender !in ignoredUsers } }
     val loadingMore = page?.loadingBefore == true
     // 標題副行與輸入框都用房間真正的別名，沒有別名就用房間名，不再假造 "#一般"
     val aliasFlow = remember(roomRepository, room.roomId) { roomRepository.canonicalAlias(room.roomId) }
@@ -3060,7 +3065,6 @@ private fun MessageRow(
     var menuAnchor by remember(msg.eventId) { mutableStateOf(Offset.Unspecified) }
     val hoverSource = remember { MutableInteractionSource() }
     val hovered by hoverSource.collectIsHoveredAsState()
-    LaunchedEffect(hovered) { if (hovered) println("NASHIRA_HOVER: row hovered eventId=${msg.eventId}") }
     var boxOrigin by remember { mutableStateOf(Offset.Zero) }
     Box(
         Modifier
@@ -3343,6 +3347,12 @@ fun htmlToAnnotatedString(
         var currentStyle = baseStyle.toSpanStyle()
         var linkUrl: String? = null
         var inPreBlock = false
+        // 樣式堆疊：開始標籤進棧、對應的結束標籤出棧。之前的寫法是「任何結束
+        // 標籤一律把樣式清回 base」，于是 `<b>粗 <i>斜</i> 還粗嗎</b>` 在 </i>
+        // 之後就忘了自己還在粗體裡（Matrix 橋接進來的訊息大量是巢狀標籤，
+        // Element/Riot 發的 formatted_body 都這樣）。
+        val styleStack = ArrayDeque<SpanStyle>()
+        val styleTags = setOf("b", "strong", "i", "em", "u", "del", "s", "code", "pre")
 
         fun appendDecoded(raw: String) {
             if (raw.isEmpty()) return
@@ -3386,15 +3396,20 @@ fun htmlToAnnotatedString(
                 isClosing -> {
                     if (tagName == "a") linkUrl = null
                     if (tagName == "pre") inPreBlock = false
-                    currentStyle = baseStyle.toSpanStyle()
+                    if (tagName in styleTags) {
+                        currentStyle = styleStack.removeLastOrNull() ?: baseStyle.toSpanStyle()
+                    }
                 }
                 tagName in setOf("b", "strong") -> {
+                    styleStack.addLast(currentStyle)
                     currentStyle = currentStyle.copy(fontWeight = FontWeight.Bold)
                 }
                 tagName in setOf("i", "em") -> {
+                    styleStack.addLast(currentStyle)
                     currentStyle = currentStyle.copy(fontStyle = FontStyle.Italic)
                 }
                 tagName == "u" -> {
+                    styleStack.addLast(currentStyle)
                     currentStyle = currentStyle.copy(
                         textDecoration = TextDecoration.combine(
                             listOfNotNull(currentStyle.textDecoration, TextDecoration.Underline),
@@ -3402,9 +3417,11 @@ fun htmlToAnnotatedString(
                     )
                 }
                 tagName in setOf("del", "s") -> {
+                    styleStack.addLast(currentStyle)
                     currentStyle = currentStyle.copy(textDecoration = TextDecoration.LineThrough)
                 }
                 tagName == "code" -> {
+                    styleStack.addLast(currentStyle)
                     currentStyle = currentStyle.copy(
                         fontFamily = FontFamily.Monospace,
                         background = if (inPreBlock) {
@@ -3416,6 +3433,7 @@ fun htmlToAnnotatedString(
                     )
                 }
                 tagName == "pre" -> {
+                    styleStack.addLast(currentStyle)
                     inPreBlock = true
                 }
                 tagName == "a" -> {
