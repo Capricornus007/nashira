@@ -64,6 +64,7 @@ P6-1 threads、P6-2 位置分享、P6-3 polls、P6-8 語音/視訊通話（無 W
 - `LocalUiState` 是 `staticCompositionLocalOf`：**只能在 composable 作用域讀 `.current`**，放進 `onClick` lambda 會撞 `@Composable invocations can only happen from the context ...`；要在事件裡改 UiState，就在 composable 頂部抓一個區域變數（例：`ChatScreen` 的 `uiState`）。
 - `UiState` 是 `App.kt` 裡那個 `var` 欄位全在記憶體＋本地持久化的類別，沒有 ViewModel；平台旗標要同步給 `AudioSelection` 之类的全域 sink 才會有即時效應。
 - 媒體上傳一律「`prepareUploadMedia`/`prepareUploadEncryptedMedia` → `uploadMedia(cacheUri)`」兩步（見 P4-3 的坑）。
+- 音訊裝置分兩層，別混用：`AudioDevice.id` 是存進設定、給平台開線用的識別名（桌面＝javax.sound 的 Mixer 名，形如 `Generic_1 [plughw:1,0]`），`label` 才是給人看的。顯示一律走 `audioDevicesFor()`／`audioDeviceLabel()`（底欄面板與設置頁共用），桌面 actual 再用 `pactl` 把 `alsa.card`/`alsa.device` 對回 PipeWire 節點描述（「Ryzen HD Audio Controller Speaker」），對不上退回 `Mixer.Info` 描述，再沒有才顯示 id——**不要把 id 直接印到 UI**。
 - 沒有 logger：失敗路徑可以留 `println`，成功路徑與高頻事件（hover、每則訊息、每幀）不要印。
 
 ## 環境事實（2026-09-24 核對）

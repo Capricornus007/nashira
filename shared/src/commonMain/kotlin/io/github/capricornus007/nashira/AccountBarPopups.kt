@@ -173,10 +173,15 @@ fun AudioDevicePanel(
 ) {
     val ui = LocalUiState.current
     val strings = stringsFor(ui.language)
-    val devices = remember { if (isInput) AudioDevices.inputs() else AudioDevices.outputs() }
+    val devices = remember { audioDevicesFor(isInput) }
     var deviceListOpen by remember { mutableStateOf(false) }
     val currentDevice = if (isInput) ui.audioInput else ui.audioOutput
     val volume = if (isInput) ui.audioInputGain else ui.audioOutputVolume
+    // 清單與顯示文字都走 audioDevicesFor / audioDeviceLabel，跟設置頁同一個
+    // 口徑（Discord 式「系統預設: Ryzen …」，存進設定的是 id、不直接拿去顯示）。
+    val defaultName = remember { if (isInput) AudioDevices.defaultInputLabel() else AudioDevices.defaultOutputLabel() }
+    val defaultText = audioDeviceLabel(strings, devices, null, defaultName)
+    val currentText = audioDeviceLabel(strings, devices, currentDevice, defaultName)
 
     Popup(
         alignment = Alignment.BottomEnd,
@@ -208,7 +213,7 @@ fun AudioDevicePanel(
                             color = MaterialTheme.colorScheme.onSurface,
                         )
                         Text(
-                            currentDevice ?: strings.audioDeviceDefault,
+                            currentText,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -231,12 +236,12 @@ fun AudioDevicePanel(
                     ) {
                         Column {
                             DeviceOptionRow(
-                                label = strings.audioDeviceDefault,
+                                label = defaultText,
                                 selected = currentDevice == null,
                             ) { if (isInput) ui.audioInput = null else ui.audioOutput = null }
                             devices.forEach { device ->
-                                DeviceOptionRow(label = device, selected = currentDevice == device) {
-                                    if (isInput) ui.audioInput = device else ui.audioOutput = device
+                                DeviceOptionRow(label = device.label, selected = currentDevice == device.id) {
+                                    if (isInput) ui.audioInput = device.id else ui.audioOutput = device.id
                                 }
                             }
                         }

@@ -258,6 +258,12 @@ interface Strings {
     val audioInputDevice: String
     val audioOutputDevice: String
     val audioDeviceDefault: String
+    /**
+     * 「系統預設: <裝置名>」——Discord 的寫法，一眼看出預設其實落在哪個裝置。
+     * 六種語言都是「<標籤>: <名字>」同一個順序，所以給預設實作就好（不像
+     * formatDate 每種語法真的不同）；哪天要調語序，某個語言 override 即可。
+     */
+    fun audioDeviceDefaultNamed(name: String): String = "$audioDeviceDefault: $name"
     val trayOpen: String
     val trayQuit: String
     val jumpToLatest: String

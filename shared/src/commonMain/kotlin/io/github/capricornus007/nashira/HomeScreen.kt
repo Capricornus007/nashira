@@ -256,38 +256,44 @@ private fun SettingsRoot(
             }
         }
         // 音訊裝置（僅桌面）：javax.sound mixer 枚舉；Android 由系統路由
+        // 顯示一律走 audioDevicesFor／audioDeviceLabel，與底欄快捷面板同口徑：
+        // 存設定的是 ALSA 識別名，給人看的是可讀名，「系統預設」還帶出它實際是哪個。
         if (audioDeviceSettingsSupported) {
             SettingsGroup(title = strings.audioSection) {
                 item { shape ->
-                    val inputs = remember { AudioDevices.inputs() }
+                    val devices = remember { audioDevicesFor(isInput = true) }
+                    val defaultName = remember { AudioDevices.defaultInputLabel() }
                     SettingsDropdownItem(
                         shape = shape,
                         title = strings.audioInputDevice,
-                        current = ui.audioInput ?: strings.audioDeviceDefault,
+                        current = audioDeviceLabel(strings, devices, ui.audioInput, defaultName),
                     ) { close ->
-                        SettingsMenuOption(strings.audioDeviceDefault, ui.audioInput == null) {
-                            ui.audioInput = null; close()
-                        }
-                        inputs.forEach { device ->
-                            SettingsMenuOption(device, ui.audioInput == device) {
-                                ui.audioInput = device; close()
+                        SettingsMenuOption(
+                            audioDeviceLabel(strings, devices, null, defaultName),
+                            ui.audioInput == null,
+                        ) { ui.audioInput = null; close() }
+                        devices.forEach { device ->
+                            SettingsMenuOption(device.label, ui.audioInput == device.id) {
+                                ui.audioInput = device.id; close()
                             }
                         }
                     }
                 }
                 item { shape ->
-                    val outputs = remember { AudioDevices.outputs() }
+                    val devices = remember { audioDevicesFor(isInput = false) }
+                    val defaultName = remember { AudioDevices.defaultOutputLabel() }
                     SettingsDropdownItem(
                         shape = shape,
                         title = strings.audioOutputDevice,
-                        current = ui.audioOutput ?: strings.audioDeviceDefault,
+                        current = audioDeviceLabel(strings, devices, ui.audioOutput, defaultName),
                     ) { close ->
-                        SettingsMenuOption(strings.audioDeviceDefault, ui.audioOutput == null) {
-                            ui.audioOutput = null; close()
-                        }
-                        outputs.forEach { device ->
-                            SettingsMenuOption(device, ui.audioOutput == device) {
-                                ui.audioOutput = device; close()
+                        SettingsMenuOption(
+                            audioDeviceLabel(strings, devices, null, defaultName),
+                            ui.audioOutput == null,
+                        ) { ui.audioOutput = null; close() }
+                        devices.forEach { device ->
+                            SettingsMenuOption(device.label, ui.audioOutput == device.id) {
+                                ui.audioOutput = device.id; close()
                             }
                         }
                     }
