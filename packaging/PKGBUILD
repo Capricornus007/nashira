@@ -8,7 +8,7 @@
 # 佈局鏡像 jpackage 的 deb/rpm：/opt/nashira + desktop entry + hicolor 圖標，
 # 另加 /usr/bin/nashira 便利連結。app image 自帶 JRE，不需要 java-runtime。
 pkgname=nashira
-pkgver=${NASHIRA_VERSION:-0.1.1}
+pkgver=${NASHIRA_VERSION:-0.1.2}
 pkgrel=1
 pkgdesc="Nashira — Matrix messenger for Android and Linux (Kotlin/Compose Multiplatform)"
 depends=('xdg-utils')
