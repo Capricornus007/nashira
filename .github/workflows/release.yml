@@ -9,7 +9,7 @@ on:
       version:
         description: "Version to tag & release (e.g. 0.1.0)"
         required: false
-        default: "0.1.0"
+        default: "0.1.1"
 
 permissions:
   contents: write
@@ -48,13 +48,18 @@ jobs:
 
       - name: Determine release tag
         id: tag
+        # dispatch 的 input 走 env 帶進來，不要直接插值進 shell（那樣等於讓
+        # input 內容決定命令列）；再驗一次格式，不對就回退到建置配置裡的版號。
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
         run: |
           REF="${GITHUB_REF#refs/tags/}"
           if [ "$REF" = "$GITHUB_REF" ]; then
-            # push（master）或 dispatch：版本取自建置配置；dispatch 帶 input 時優先
-            INPUT="${{ github.event.inputs.version }}"
-            if [ -n "$INPUT" ]; then REF="v$INPUT"
-            else REF="v$(grep -oP 'packageVersion\s*=\s*\"\K[^\"]+' desktopApp/build.gradle.kts)"
+            # push（master）或 dispatch：版本取自建置配置；dispatch 帶合法 input 時優先
+            if [ -n "$INPUT_VERSION" ] && printf '%s' "$INPUT_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+              REF="v$INPUT_VERSION"
+            else
+              REF="v$(grep -oP 'packageVersion\s*=\s*\"\K[^\"]+' desktopApp/build.gradle.kts)"
             fi
           fi
           echo "TAG=$REF" >> "$GITHUB_ENV"
