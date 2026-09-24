@@ -39,6 +39,10 @@ interface Strings {
     val send: String
     val sticker: String
     val emoticons: String
+    /** 表情分頁：搜尋提示、查無結果、最近使用區標題。 */
+    val emojiSearchHint: String
+    val emojiNoResults: String
+    val emojiRecent: String
     val stickerEmpty: String
     val notifImage: String
     val notifSticker: String

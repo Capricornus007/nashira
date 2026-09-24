@@ -28,6 +28,9 @@ object ZhTwStrings : Strings {
     override val sticker = "貼圖"
     override val stickerEmpty = "還沒有貼圖包"
     override val emoticons = "表情"
+    override val emojiSearchHint = "搜尋表情"
+    override val emojiNoResults = "找不到符合的表情"
+    override val emojiRecent = "最近使用"
     override val notifImage = "[圖片]"
     override val notifSticker = "[貼圖]"
     override val notifUndecryptable = "[無法解密]"
@@ -281,6 +284,9 @@ object ZhCnStrings : Strings by ZhTwStrings {
     override val recording = "录音中"
     override val recordingMutedHint = "麦克风已静音，点击底栏的麦克风图标取消后再录"
     override val voiceUnsupported = "此平台无法播放此格式"
+    override val emojiSearchHint = "搜索表情"
+    override val emojiNoResults = "找不到匹配的表情"
+    override val emojiRecent = "最近使用"
 }
 
 /**

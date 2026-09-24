@@ -187,6 +187,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.foundation.text.input.insert
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.ui.input.key.Key
@@ -1781,6 +1782,14 @@ private fun TimelinePane(
             },
             onPickEmoticon = { emote ->
                 pendingEmoticons = pendingEmoticons + emote
+            },
+            onPickEmoji = { entry ->
+                // 插進游標處而不是換掉整串；面板不自動收——連續插幾個表情是常態
+                draft.edit {
+                    val at = selection.min.coerceIn(0, length)
+                    insert(at, entry.glyph)
+                    selection = androidx.compose.ui.text.TextRange(at + entry.glyph.length)
+                }
             },
             modifier = panelModifier,
         )

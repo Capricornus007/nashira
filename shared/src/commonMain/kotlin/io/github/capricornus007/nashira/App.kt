@@ -149,6 +149,16 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
         stored["hiddenMedia"]?.split('\n')?.filter { it.isNotBlank() }?.toSet() ?: emptySet()
     )
 
+    /** 最近用過的 Unicode 表情（hexcode，最近在前）。 */
+    var emojiRecents by mutableStateOf(
+        stored["emojiRecents"]?.split('\n')?.filter { it.isNotBlank() } ?: emptyList()
+    )
+
+    /** 用過就頂到最前面；同一個不會出現兩次。上限 48——再長就失去「一眼找回常用」的意義。 */
+    fun rememberEmojiUsage(hexcode: String) {
+        emojiRecents = (listOf(hexcode) + emojiRecents.filter { it != hexcode }).take(48)
+    }
+
     init {
         AudioSelection.input = audioInput
         AudioSelection.output = audioOutput
@@ -175,6 +185,7 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
             "backgroundSync" to backgroundSync.toString(),
             "sendShortcut" to sendShortcut.name,
             "hiddenMedia" to hiddenMedia.joinToString("\n"),
+            "emojiRecents" to emojiRecents.joinToString("\n"),
             "pureBlack" to pureBlack.toString(),
         ) + mapOf(
             "audioInput" to (audioInput ?: ""),
