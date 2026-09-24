@@ -19,6 +19,9 @@ actual class VoiceRecorder actual constructor() {
     private var reader: Thread? = null
     private val pcm = ByteArrayOutputStream()
     private var startedAt = 0L
+    // 最近一個讀取块的峰值電平（0..1）：javax.sound 沒有電平 API，但 PCM 本来就
+    // 從我們手上過，自己算 peak 就有與 Android maxAmplitude 同標度的值。
+    @Volatile private var lastAmp = 0f
 
     actual fun start() {
         if (AudioSelection.micMuted) return  // 底欄麥克風靜音（Discord 語義）
@@ -32,12 +35,16 @@ actual class VoiceRecorder actual constructor() {
         l.start()
         line = l
         startedAt = System.currentTimeMillis()
+        lastAmp = 0f
         synchronized(pcm) { pcm.reset() }
         reader = thread(isDaemon = true, name = "voice-recorder") {
             val chunk = ByteArray(4 * 1024)
             while (l.isOpen) {
                 val n = l.read(chunk, 0, chunk.size)
-                if (n > 0) synchronized(pcm) { pcm.write(chunk, 0, n) }
+                if (n > 0) {
+                    synchronized(pcm) { pcm.write(chunk, 0, n) }
+                    lastAmp = peakLevel(chunk, n)
+                }
             }
         }
     }
@@ -64,8 +71,20 @@ actual class VoiceRecorder actual constructor() {
         synchronized(pcm) { pcm.reset() }
     }
 
-    /** javax.sound 沒有麥克風電平 API；回 0 讓 UI 畫靜態圓點。 */
-    actual fun amplitude(): Float = 0f
+    /** 最近一塊 PCM 的峰值（16bit 小端），換算 0..1——與 Android maxAmplitude 同標度。 */
+    private fun peakLevel(buf: ByteArray, len: Int): Float {
+        var peak = 0
+        var i = 0
+        while (i + 1 < len) {
+            val sample = ((buf[i].toInt() and 0xFF) or (buf[i + 1].toInt() shl 8)).toShort()
+            val abs = kotlin.math.abs(sample.toInt())
+            if (abs > peak) peak = abs
+            i += 2
+        }
+        return (peak / 32767f).coerceIn(0f, 1f)
+    }
+
+    actual fun amplitude(): Float = lastAmp
 }
 
 private const val MinDurationMs = 500L
