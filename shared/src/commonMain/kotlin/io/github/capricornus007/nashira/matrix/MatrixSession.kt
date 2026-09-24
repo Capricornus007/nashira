@@ -280,7 +280,6 @@ object MatrixEngine {
 
     private suspend fun loginWithTokenInternal(baseUrl: String, loginToken: String): Result<Unit> {
         if (_session.value != null) return Result.failure(IllegalStateException("already logged in"))
-        println("NASHIRA_LOGIN: SSO token exchange starting (baseUrl=$baseUrl)")
         val authData = MatrixClientAuthProviderData.classicLoginWithToken(
             baseUrl = Url(baseUrl),
             identifier = null,
@@ -293,7 +292,6 @@ object MatrixEngine {
             println("NASHIRA_LOGIN: token exchange rejected: ${it::class.simpleName}: ${it.message}")
             return Result.failure(it)
         }
-        println("NASHIRA_LOGIN: token exchange OK (authData acquired)")
         // 交換拿到的 authData 只有 token；userId/deviceId 在 client 起來後才知道。
         // 交換階段先用臨時鍵（誰都不衝突）；client 建立後讀真身分再定真庫。
         val tempKey = databaseKey(baseUrl, "sso")
@@ -328,7 +326,6 @@ object MatrixEngine {
             }
         }
         val realKey = databaseKey(baseUrl, probe.userId.full)
-        println("NASHIRA_LOGIN: probe OK (userId=${probe.userId.full}), realKey=$realKey")
         val client = if (realKey == tempKey) {
             probe
         } else {
@@ -348,7 +345,6 @@ object MatrixEngine {
                 }
             }
         }
-        println("NASHIRA_LOGIN: client ready (deviceId=${client.deviceId})")
         storage.save(
             baseUrl = baseUrl,
             userId = client.userId.full,

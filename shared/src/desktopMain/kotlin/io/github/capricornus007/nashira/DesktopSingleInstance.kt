@@ -122,7 +122,6 @@ object DesktopSingleInstance {
                     if (!url.startsWith("nashira://", ignoreCase = true)) continue
                     linkEvents.tryEmit(url)
                     NashiraUri.parseSsoCallback(url)?.let { data ->
-                        println("NASHIRA_LOGIN: nashira:// SSO callback received")
                         synchronized(this) {
                             (pendingCallback ?: CompletableDeferred<Pair<String, String>>().also { pendingCallback = it })
                                 .complete(data)
