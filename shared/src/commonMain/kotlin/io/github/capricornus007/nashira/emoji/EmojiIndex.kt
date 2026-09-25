@@ -36,8 +36,18 @@ object EmojiIndex {
     }
 
     private val byHexcode: Map<String, EmojiEntry> by lazy {
-        // 同一 hexcode 理論上唯一；真的重複時留第一筆
-        EmojiTable.all.associateBy { it.hexcode }
+        // 膚色變體的 hexcode（1F44D-1F3FB 這種）也要查得到，否則「最近使用」存了
+        // 變體、下次開來那筆就不見了。變體列沿用基底條目的名稱與 tokens，
+        // 只換 hexcode/glyph——搜「thumbs up」時變體不會自己跳出來（變體不進 tokens），
+        // 但從最近還原、渲染、送出都拿得到正確的膚色。
+        val map = LinkedHashMap<String, EmojiEntry>()
+        for (entry in EmojiTable.all) {
+            map.putIfAbsent(entry.hexcode, entry)
+            for ((hex, glyph) in entry.skins) {
+                if (!map.containsKey(hex)) map[hex] = entry.copy(hexcode = hex, glyph = glyph)
+            }
+        }
+        map
     }
 
     fun byHexcode(hex: String): EmojiEntry? = byHexcode[hex]

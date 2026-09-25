@@ -81,6 +81,7 @@ object JaStrings : Strings by EnStrings {
     override val stickerPanelPosition = "スタンプパネルの位置"
     override val stickerPanelAbove = "入力欄の上に浮かせる"
     override val stickerPanelBelow = "入力欄の下に固定"
+    override val stickerPanelPin = "入力中でもパネルを開いたままにする"
     override val sessionLogoutViaAccountPage = "このサーバーではアカウント管理ページからデバイスをサインアウトします。ブラウザーで開きました"
     override val messageSendFailed = "送信に失敗しました"
     override val attachPhoto = "写真"

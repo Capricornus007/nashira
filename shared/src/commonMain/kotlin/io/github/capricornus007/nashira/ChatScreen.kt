@@ -1704,8 +1704,10 @@ private fun TimelinePane(
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     var composerFocused by remember(room.roomId) { mutableStateOf(false) }
-    LaunchedEffect(composerFocused) {
-        if (composerFocused) stickerPanel = false
+    val uiState = LocalUiState.current
+    LaunchedEffect(composerFocused, uiState.stickerPanelPinned) {
+        // 釘選時不打斷：64Gram 的「固定」就是讓面板在打字期間留在原位（用戶比對截圖時點名要這行為）
+        if (composerFocused && !uiState.stickerPanelPinned) stickerPanel = false
     }
     // 「檢視原始碼」對話框：null = 關；內容是 JSON 或載入失敗訊息
     var viewSource by remember(room.roomId) { mutableStateOf<String?>(null) }
@@ -1731,7 +1733,6 @@ private fun TimelinePane(
     }
     var downloadNotice by remember(room.roomId) { mutableStateOf<String?>(null) }
     val imageSaver = rememberImageSaver()
-    val uiState = LocalUiState.current
     // 只有桌面有底欄那顆麥克風靜音鈕（audioDeviceSettingsSupported），Android 上恆
     // false：手機既沒有開關可擋錄音，也不該提示用戶去點一顆不存在的鈕。
     val micBlockedByMute = audioDeviceSettingsSupported && uiState.audioMicMuted
@@ -1791,6 +1792,8 @@ private fun TimelinePane(
                     selection = androidx.compose.ui.text.TextRange(at + entry.glyph.length)
                 }
             },
+            pinned = uiState.stickerPanelPinned,
+            onTogglePin = { uiState.stickerPanelPinned = !uiState.stickerPanelPinned },
             modifier = panelModifier,
         )
     }

@@ -10,9 +10,10 @@
   <ver>/meta/groups.json      9 個分類的 id／名稱
 
 產出的每列格式（| 分隔，行內不會出現 | 與換行）：
-  group|hexcode|glyph|en|zh|tokens|skins
+  group|hexcode|glyph|en|zh|tokens|skins|shortcode
   tokens = 英文 tags + 中文 tags + shortcode，全部小寫、以空格分隔
   skins  = 空 或 `hex:glyph` 以空格分隔（膚色變體）
+  shortcode = github.json 的第一個 :名字:（Discord 系），沒有就留空
 
 重跑：
   python3 tools/emoji/gen_emoji_table.py            # 會用 ~/.cache/nashira-emoji 裡的快取
@@ -117,9 +118,14 @@ def main() -> int:
         skins = " ".join(
             f"{s['hexcode']}:{s['emoji']}" for s in e.get("skins", []) if s.get("emoji")
         )
+        # Discord 系那個 :名字:：hover 預覽條要用，單靠 tokens 摳不出「哪個才是 shortcode」
+        # （tokens 裡還有英文 tags 與中文名，多個 shortcode 時也分不清主次）。
+        sc = gh.get(hexcode)
+        first = sc if isinstance(sc, str) else (str(sc[0]) if isinstance(sc, list) and sc else "")
+        shortcode = clean(first).lower()
         rows.append("|".join([
             str(e["group"]), hexcode, e["emoji"], clean(e.get("label", "")),
-            zh_label, " ".join(toks.split()), skins,
+            zh_label, " ".join(toks.split()), skins, shortcode,
         ]))
 
     rows.sort(key=lambda r: (int(r.split("|")[0]),))
@@ -142,7 +148,7 @@ def main() -> int:
     body.append("// 由 tools/emoji/gen_emoji_table.py 產生 —— 不要手改，改請改腳本重跑。\n")
     body.append(f"// 來源：emojibase-data {VERSION}（MIT；底層為 Unicode CLDR / emoji-test.txt）\n")
     body.append("//   en/data.json ＋ zh-hant/data.json ＋ en/shortcodes/github.json ＋ meta/groups.json\n")
-    body.append(f"// 共 {len(rows)} 筆，{len(chunks)} 個分塊。每列：group|hexcode|glyph|en|zh|tokens|skins\n\n")
+    body.append(f"// 共 {len(rows)} 筆，{len(chunks)} 個分塊。每列：group|hexcode|glyph|en|zh|tokens|skins|shortcode\n\n")
     body.append("/** 分類名稱（索引＝group id）。UI 的分類 tab 用 glyph 不用文字，這裡留給需要時。 */\n")
     body.append(f"internal val EMOJI_GROUP_NAMES: List<String> = listOf({group_names})\n\n")
     for i, c in enumerate(chunks):
@@ -150,8 +156,9 @@ def main() -> int:
     body.append("private val EMOJI_ROWS_RAW: String =\n")
     body.append("    " + " +\n    ".join(f"EMOJI_ROWS_{i}" for i in range(len(chunks))) + "\n\n")
     body.append("""/**
- * 一個表情。[tokens] 是給搜尋用的空白分隔字串（英文名、中文 tags、膚色變體
- * 不進 tokens——變體由 [skins] 單獨帶）；[skins] 是 `hexcode:glyph` 清單。
+ * 一個表情。[tokens] 是給搜尋用的空白分隔字串（英文名、中文 tags、shortcode 都在裡面，
+ * 膚色變體不進 tokens——變體由 [skins] 單獨帶）；[skins] 是 `hexcode:glyph` 清單；
+ * [shortcode] 是 github 系那套 `:名字:` 的第一個（Discord 的 hover 預覽條用，可能為空）。
  */
 data class EmojiEntry(
     val group: Int,
@@ -161,6 +168,7 @@ data class EmojiEntry(
     val nameZh: String,
     val tokens: String,
     val skins: List<Pair<String, String>>,
+    val shortcode: String,
 )
 
 internal object EmojiTable {
@@ -181,6 +189,7 @@ internal object EmojiTable {
                 nameZh = f.getOrElse(4) { "" },
                 tokens = f.getOrElse(5) { "" }.lowercase(),
                 skins = skins,
+                shortcode = f.getOrElse(7) { "" },
             )
         }.toList()
     }

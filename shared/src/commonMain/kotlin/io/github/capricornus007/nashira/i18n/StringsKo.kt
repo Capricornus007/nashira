@@ -81,6 +81,7 @@ object KoStrings : Strings by EnStrings {
     override val stickerPanelPosition = "스티커 패널 위치"
     override val stickerPanelAbove = "입력창 위에 띄우기"
     override val stickerPanelBelow = "입력창 아래에 고정"
+    override val stickerPanelPin = "입력하는 동안 패널 열어 두기"
     override val sessionLogoutViaAccountPage = "이 서버는 계정 관리 페이지에서 기기를 로그아웃합니다. 브라우저에서 열었습니다"
     override val messageSendFailed = "보내지 못했습니다"
     override val attachPhoto = "사진"

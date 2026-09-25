@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -32,6 +33,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import de.connect2x.trixnity.client.MatrixClient
 import de.connect2x.trixnity.client.media.MediaService
@@ -63,6 +66,9 @@ fun StickerPicker(
     onPickEmoticon: (StickerItem) -> Unit = {},
     /** 點 Unicode 表情：插進輸入列游標處（不是送訊息）。 */
     onPickEmoji: (EmojiEntry) -> Unit = {},
+    /** 64Gram 式釘選：釘住時點輸入列不會把這個面板收起來。 */
+    pinned: Boolean = false,
+    onTogglePin: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val client = roomRepository.client
@@ -102,6 +108,21 @@ fun StickerPicker(
                         )
                     }
                 }
+                Spacer(Modifier.weight(1f))
+                // 釘選鈕：核心圖示集沒有 PushPin，直接用 📌 glyph（跟表情格一樣是文字渲染，
+                // 不必為一顆鈕拖進 material-icons-extended 那包依賴）。
+                Text(
+                    "📌",
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            if (pinned) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+                        )
+                        .semantics { contentDescription = strings.stickerPanelPin }
+                        .clickable(onClick = onTogglePin)
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                )
             }
             if (emojiTab) {
                 val emoticons by remember(client) { repository.emoticons() }.collectAsState(initial = emptyList())

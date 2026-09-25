@@ -1,6 +1,9 @@
 package io.github.capricornus007.nashira
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
@@ -28,6 +32,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,6 +41,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import de.connect2x.trixnity.client.MatrixClient
 import io.github.capricornus007.nashira.emoji.EmojiEntry
@@ -68,17 +74,28 @@ internal fun EmojiBrowser(
 ) {
     val ui = LocalUiState.current
     var query by remember { mutableStateOf("") }
+    // 長按（觸控）／右鍵（滑鼠）有膚色的表情 → 網格上方浮出一條膚色列。
+    // 刻意不用 Popup 第二層視窗：反應選擇器本身就在 DropdownMenu 裡，再開一層
+    // 會搶走下層選單的焦點、選單直接收起，膚色列跟著消失（選不到）。
+    var toneSource by remember { mutableStateOf<EmojiEntry?>(null) }
+    // Discord 的招牌：滑鼠停在格子上時，下方顯示 :shortcode: 與名稱
+    var preview by remember { mutableStateOf<EmojiEntry?>(null) }
     val gridState = rememberLazyGridState()
     val scope = rememberCoroutineScope()
     val recents = remember(ui.emojiRecents) { EmojiIndex.byHexcodes(ui.emojiRecents) }
     val plan = remember(query, recents, emoticons, strings) {
         buildEmojiPlan(strings, query, recents, emoticons)
     }
+    // 用過就進「最近使用」；插進輸入列還是加反應由呼叫端決定
+    val pick: (EmojiEntry) -> Unit = { entry ->
+        ui.rememberEmojiUsage(entry.hexcode)
+        onPickEmoji(entry)
+    }
 
     Column(modifier) {
         OutlinedTextField(
             value = query,
-            onValueChange = { query = it },
+            onValueChange = { query = it; toneSource = null },
             singleLine = true,
             leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
             trailingIcon = {
@@ -105,10 +122,33 @@ internal fun EmojiBrowser(
                 }
             }
         }
+        toneSource?.let { base ->
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                EmojiCell(base, onShowTones = {}, onClick = { toneSource = null; pick(base) })
+                base.skins.forEach { (hex, glyph) ->
+                    val variant = base.copy(hexcode = hex, glyph = glyph)
+                    EmojiCell(variant, onShowTones = {}, onClick = { toneSource = null; pick(variant) })
+                }
+                Spacer(Modifier.weight(1f))
+                IconButton(onClick = { toneSource = null }, modifier = Modifier.size(24.dp)) {
+                    Icon(
+                        Icons.Filled.Close,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(14.dp),
+                    )
+                }
+            }
+        }
         LazyVerticalGrid(
             columns = GridCells.Adaptive(40.dp),
             state = gridState,
-            modifier = Modifier.fillMaxSize(),
+            // 剩下的高度全給網格（下方預覽條是固定高）；用 fillMaxSize 會把
+            // 整列高度吃光、預覽條被擠掉
+            modifier = Modifier.weight(1f),
             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(2.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -122,11 +162,15 @@ internal fun EmojiBrowser(
             ) { _, row ->
                 when (row) {
                     is EmojiRow.Header -> EmojiSectionHeader(row, onClearRecents = { ui.emojiRecents = emptyList() })
-                    is EmojiRow.Emoji -> EmojiCell(row.entry) {
-                        // 用過就進「最近使用」；插進輸入列還是加反應由呼叫端決定
-                        ui.rememberEmojiUsage(row.entry.hexcode)
-                        onPickEmoji(row.entry)
-                    }
+                    is EmojiRow.Emoji -> EmojiCell(
+                        row.entry,
+                        onShowTones = { toneSource = row.entry },
+                        onClick = {
+                            toneSource = null
+                            pick(row.entry)
+                        },
+                        onHover = { preview = row.entry },
+                    )
                     is EmojiRow.Emote -> Box(
                         Modifier.size(40.dp).padding(2.dp).clip(RoundedCornerShape(8.dp))
                             .clickable { onPickEmoticon(row.item) },
@@ -134,6 +178,31 @@ internal fun EmojiBrowser(
                         StickerThumb(client, row.item)
                     }
                 }
+            }
+        }
+        // 預覽條高度固定：沒有停在任何格子上時留白（不撤掉這一列，否則網格會跳動）。
+        // 指針離開整個面板時也不清，保留最後停過的那個。
+        Row(
+            Modifier.fillMaxWidth().height(26.dp).padding(horizontal = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            preview?.let { e ->
+                Text(e.glyph, style = MaterialTheme.typography.titleMedium)
+                if (e.shortcode.isNotEmpty()) {
+                    Text(
+                        ":" + e.shortcode + ":",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                Text(
+                    e.nameZh.ifEmpty { e.nameEn },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     }
@@ -216,15 +285,27 @@ private fun EmojiSectionHeader(row: EmojiRow.Header, onClearRecents: () -> Unit)
 }
 
 @Composable
-private fun EmojiCell(entry: EmojiEntry, onClick: () -> Unit) {
-    // 膚色變體（entry.skins）暫時不做長按選色——先確保插入與最近使用是對的，
-    // 選色器是另一件事（Discord 是長按彈出，Telegram 是右鍵）
+private fun EmojiCell(
+    entry: EmojiEntry,
+    onShowTones: () -> Unit,
+    onClick: () -> Unit,
+    onHover: () -> Unit = {},
+) {
+    // 沒有膚色的表情（絕大多數）長按／右鍵不做事，別讓它看起來壞了
+    val hasTones = entry.skins.isNotEmpty()
+    val hoverSource = remember { MutableInteractionSource() }
+    val hovered by hoverSource.collectIsHoveredAsState()
+    LaunchedEffect(hovered) { if (hovered) onHover() }
     Box(
         Modifier
             .size(40.dp)
             .padding(2.dp)
             .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick),
+            .hoverable(hoverSource)
+            .contextMenuGestures(
+                onClick = onClick,
+                onContextMenu = { if (hasTones) onShowTones() },
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Text(entry.glyph, style = MaterialTheme.typography.headlineSmall)

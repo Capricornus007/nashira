@@ -138,6 +138,7 @@ object EnStrings : Strings {
     override val stickerPanelPosition = "Sticker panel position"
     override val stickerPanelAbove = "Floats above the composer"
     override val stickerPanelBelow = "Docks below the composer"
+    override val stickerPanelPin = "Keep the panel open while typing"
     override val sessionLogoutViaAccountPage = "This server logs out devices on its account page; opened in your browser"
     override val messageSendFailed = "Failed to send"
     override val attachPhoto = "Photo"
