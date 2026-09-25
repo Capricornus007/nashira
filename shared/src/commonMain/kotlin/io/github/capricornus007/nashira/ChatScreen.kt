@@ -1646,16 +1646,9 @@ private fun TimelinePane(
         }
     }
 
-    // 貼圖面板：狀態放在 Scaffold 之外，因為它有兩種擺法——
-    // 浮在訊息區上方（Telegram／Discord／Element 的做法，不推動輸入列），
-    // 或釘在輸入列下方。由設定 stickerPanelAbove 決定。
+    // 貼圖／表情面板：開著時它進 bottomBar、排在輸入列**下方**（64Gram／Telegram／
+    // Discord 手機版與 Discord 桌面的排法），輸入列被頂上去，不蓋住任何訊息。
     var stickerPanel by remember(room.roomId) { mutableStateOf(false) }
-    // P5-5 等高鍵盤面板：緩存最後一次鍵盤 insets 高度（面板與鍵盤互斥，
-    // 開面板時鍵盤已收起，只能用緩存值），面板高度跟鍵盤等高，Telegram 式。
-    val density = LocalDensity.current
-    var lastImeBottomPx by remember(room.roomId) { mutableStateOf(0) }
-    val imeBottom = WindowInsets.ime.getBottom(density)
-    SideEffect { if (imeBottom > 0) lastImeBottomPx = imeBottom }
     // 「＋」的附件選單（桌面是小彈窗、手機是底部面板）
     var attachMenu by remember(room.roomId) { mutableStateOf(false) }
     // P5-1 語音錄音：recorder 非 null = 錄音中；錄完停在 recordedPreview 等確認
@@ -2388,6 +2381,21 @@ private fun TimelinePane(
                         }
                     }
                 }
+                if (stickerPanel) {
+                    // 面板釘在輸入列**下方**：輸入列被頂上去、面板貼住螢幕底，
+                    // 這才是 64Gram／Telegram／Discord 手機版的排法（用戶拿截圖點名過）。
+                    // 高度用固定 300dp，不再拿 lastImeBottomPx 去湊——那個值是「上一次
+                    // 鍵盤的高度」，面板收起＋鍵盤彈出時兩者不一致，正是輸入列與鍵盤之間
+                    // 那道 843px 縫隙的来源。
+                    stickerPanelContent(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(300.dp)
+                            .navigationBarsPadding()
+                            .padding(horizontal = 8.dp)
+                            .padding(bottom = 8.dp)
+                    )
+                }
                 }
             }
         },
@@ -2618,24 +2626,6 @@ private fun TimelinePane(
                         )
                     }
                 }
-            }
-
-            if (stickerPanel) {
-                // Telegram/微信式：貼圖面板疊層蓋在時間線底部、貼齊 bottomBar 上緣。
-                // 之前放 bottomBar 內會撐高它：Scaffold 在「面板收起+鍵盤彈出」的
-                // 量測競態下把舊高度（含面板 300dp）鎖進 content padding，輸入列
-                // 與鍵盤之間出現等於面板高度的縫隙（真機像素分析 843px 實證）。
-                // 疊層不參與 Scaffold 量測——bottomBar 高度只由輸入列決定。
-                val panelHeight = with(density) { lastImeBottomPx.toDp() }.coerceAtLeast(300.dp)
-                stickerPanelContent(
-                    Modifier
-                        .align(Alignment.BottomCenter)
-                        .zIndex(2f)
-                        .height(panelHeight)
-                        .navigationBarsPadding()
-                        .padding(horizontal = 8.dp)
-                        .padding(bottom = 8.dp)
-                )
             }
         }
     }
