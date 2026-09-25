@@ -70,10 +70,24 @@ internal fun EmojiBrowser(
     emoticons: List<StickerItem>,
     onPickEmoji: (EmojiEntry) -> Unit,
     onPickEmoticon: (StickerItem) -> Unit = {},
+    /**
+     * 外部過濾詞：輸入列的表情面板**不自帶搜尋欄**——MoregramX／Nagram XF 實錄與
+     * 64Gram 桌面版都是「在輸入列打字就是過濾表情」，再擺一個全寬搜尋欄是重複入口。
+     * 呼叫端把游標前那個詞傳進來即可。
+     */
+    query: String = "",
+    /**
+     * 只有反應選擇器需要自帶搜尋欄：它沒有輸入列可借用，而 Discord 的反應表
+     * （用戶截圖 m-discord-reaction.png）頂部確實有一格「尋找完美的反應」。
+     */
+    showSearch: Boolean = false,
+    /** 網格第一格（跨整行）：貼圖／表情分頁列。放進來才會跟著內容一起捲動。 */
+    header: @Composable () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val ui = LocalUiState.current
-    var query by remember { mutableStateOf("") }
+    var localQuery by remember { mutableStateOf("") }
+    val filter = if (showSearch) localQuery else query
     // 長按（觸控）／右鍵（滑鼠）有膚色的表情 → 網格上方浮出一條膚色列。
     // 刻意不用 Popup 第二層視窗：反應選擇器本身就在 DropdownMenu 裡，再開一層
     // 會搶走下層選單的焦點、選單直接收起，膚色列跟著消失（選不到）。
@@ -83,8 +97,8 @@ internal fun EmojiBrowser(
     val gridState = rememberLazyGridState()
     val scope = rememberCoroutineScope()
     val recents = remember(ui.emojiRecents) { EmojiIndex.byHexcodes(ui.emojiRecents) }
-    val plan = remember(query, recents, emoticons, strings) {
-        buildEmojiPlan(strings, query, recents, emoticons)
+    val plan = remember(filter, recents, emoticons, strings) {
+        buildEmojiPlan(strings, filter, recents, emoticons)
     }
     // 用過就進「最近使用」；插進輸入列還是加反應由呼叫端決定
     val pick: (EmojiEntry) -> Unit = { entry ->
@@ -93,35 +107,27 @@ internal fun EmojiBrowser(
     }
 
     Column(modifier) {
-        OutlinedTextField(
-            value = query,
-            onValueChange = { query = it; toneSource = null },
-            singleLine = true,
-            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
-            trailingIcon = {
-                if (query.isNotEmpty()) {
-                    IconButton(onClick = { query = "" }, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+        if (showSearch) {
+            OutlinedTextField(
+                value = localQuery,
+                onValueChange = { localQuery = it; toneSource = null },
+                singleLine = true,
+                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                trailingIcon = {
+                    if (localQuery.isNotEmpty()) {
+                        IconButton(onClick = { localQuery = "" }, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                        }
                     }
-                }
-            },
-            placeholder = { Text(strings.emojiSearchHint, style = MaterialTheme.typography.bodyMedium) },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-        )
-        // 分類圖示條：點了捲到該分類。搜尋時收起來（結果本来就是扁平清單，沒有分類可跳）
-        if (query.isBlank()) {
-            LazyRow(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
-                itemsIndexed(EmojiIndex.categories) { _, cat ->
-                    val target = plan.categoryIndex[cat.group] ?: return@itemsIndexed
-                    IconButton(
-                        onClick = { scope.launch { gridState.animateScrollToItem(target) } },
-                        modifier = Modifier.size(34.dp),
-                    ) {
-                        Text(cat.icon, style = MaterialTheme.typography.titleMedium)
-                    }
-                }
-            }
+                },
+                placeholder = { Text(strings.emojiSearchHint, style = MaterialTheme.typography.bodyMedium) },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+            )
         }
+        // 分類圖示條與呼叫端的分頁列都放進網格當「跨整行的第一格」，不是釘在面板上：
+        // MoregramX／Nagram XF 實錄（~/ref-shots/mgx-panel.mp4）顯示往下捲時它們會
+        // 跟著滑走、捲回頂才回來；釘死會白白吃掉一格高度。
+        // 膚色列相反——它是情境性控件，跟著捲走就摸不到了，所以留在網格外面。
         toneSource?.let { base ->
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 6.dp),
@@ -153,6 +159,24 @@ internal fun EmojiBrowser(
             horizontalArrangement = Arrangement.spacedBy(2.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
+            item(key = "h-header", span = { GridItemSpan(maxLineSpan) }) { header() }
+            if (filter.isBlank()) {
+                item(key = "h-cats", span = { GridItemSpan(maxLineSpan) }) {
+                    LazyRow(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+                        itemsIndexed(EmojiIndex.categories) { _, cat ->
+                            val target = plan.categoryIndex[cat.group] ?: return@itemsIndexed
+                            IconButton(
+                                // +2：這個索引是相對於 plan.rows，網格前面還壓著
+                                // 分頁列與這一格圖示條本身
+                                onClick = { scope.launch { gridState.animateScrollToItem(target + 2) } },
+                                modifier = Modifier.size(34.dp),
+                            ) {
+                                Text(cat.icon, style = MaterialTheme.typography.titleMedium)
+                            }
+                        }
+                    }
+                }
+            }
             gridItemsIndexed(
                 plan.rows,
                 key = { _, row -> row.key },
@@ -250,7 +274,9 @@ private fun buildEmojiPlan(
         val entries = EmojiTable.byGroup[cat.group].orEmpty()
         if (entries.isEmpty()) continue
         index[cat.group] = rows.size
-        rows += EmojiRow.Header("h-cat" + cat.group, cat.icon, null, false)
+        // 節標用本地化的分類名（四套參考客戶端都是文字標題）；glyph 只留在頂部
+        // 那條用來跳轉的圖示條上。
+        rows += EmojiRow.Header("h-cat" + cat.group, null, strings.emojiCategoryName(cat.group), false)
         entries.forEach { rows += EmojiRow.Emoji("u-" + it.hexcode, it) }
     }
     return EmojiPlan(rows, index)

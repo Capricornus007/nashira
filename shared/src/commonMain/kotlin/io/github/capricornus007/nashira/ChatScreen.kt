@@ -69,6 +69,7 @@ import androidx.compose.ui.unit.em
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.Image
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.text.font.FontWeight
@@ -1653,13 +1654,18 @@ private fun TimelinePane(
     var stickerPanel by remember(room.roomId) { mutableStateOf(false) }
     // 從面板切回輸入法時要把焦點還給文字欄（不然 requestFocus 無處可去）
     val composerFocus = remember { FocusRequester() }
-    // 面板與鍵盤互斥，開面板時鍵盤已收起、拿不到即時 insets，所以緩存「最後一次鍵盤
-    // 的高度」給面板用——兩者同高，切換時輸入列才不會上下跳（用戶 2026-09-25 點名）。
-    // 舊的 843px 縫隙不是這個值造成的，是當時面板走疊層、高度被鎖進 content padding。
+    // 面板不自帶搜尋欄：游標前那個詞就是過濾詞（打字即過濾，見 StickerPicker 註解）
+    val emojiFilter = if (stickerPanel) trailingFilterWord(draft.text.toString(), draft.selection.min) else ""
+    // 面板與鍵盤互斥，開面板時鍵盤已收起、拿不到即時高度，所以要緩存「最後一次鍵盤的
+    // 高度」給面板——兩者同高，切換時輸入列才不會上下跳（用戶 2026-09-25 點名）。
+    //
+    // 這個值**不是**讀 WindowInsets.ime 得來的：組合區讀那個值在這台裝置上量不到
+    // （v0.1.8 實測面板永遠退回 300dp、與鍵盤差 179px）。改成量輸入列自己的位置：
+    // 「空場」時它貼在螢幕下方（baseline），鍵盤開時被 imePadding 頂上去，
+    // 兩個 top 的差就是鍵盤高度。純佈局觀測，不碰 insets API。
     val density = LocalDensity.current
     var lastImeBottomPx by remember(room.roomId) { mutableStateOf(0) }
-    val imeBottom = WindowInsets.ime.getBottom(density)
-    SideEffect { if (imeBottom > 0) lastImeBottomPx = imeBottom }
+    var composerBaselineTopPx by remember(room.roomId) { mutableStateOf(0) }
     // 「＋」的附件選單（桌面是小彈窗、手機是底部面板）
     var attachMenu by remember(room.roomId) { mutableStateOf(false) }
     // P5-1 語音錄音：recorder 非 null = 錄音中；錄完停在 recordedPreview 等確認
@@ -1789,13 +1795,16 @@ private fun TimelinePane(
                 pendingEmoticons = pendingEmoticons + emote
             },
             onPickEmoji = { entry ->
-                // 插進游標處而不是換掉整串；面板不自動收——連續插幾個表情是常態
+                // 插進游標處而不是換掉整串；面板不自動收——連續插幾個表情是常態。
+                // 過濾中的那個詞會被表情替掉（Telegram 行為：打 cat 選 🐱 → 變成 🐱）
                 draft.edit {
                     val at = selection.min.coerceIn(0, length)
-                    insert(at, entry.glyph)
-                    selection = androidx.compose.ui.text.TextRange(at + entry.glyph.length)
+                    val from = (at - emojiFilter.length).coerceAtLeast(0)
+                    replace(from, at, entry.glyph)
+                    selection = androidx.compose.ui.text.TextRange(from + entry.glyph.length)
                 }
             },
+            emojiFilter = emojiFilter,
             modifier = panelModifier,
         )
     }
@@ -2214,7 +2223,19 @@ private fun TimelinePane(
                 // Discord/SchildiChat 的輸入列：整條膠囊，左「+」右送出。
                 // 有草稿時送出鍵變成 primary 實心圓，空著時只是灰色圖示。
                 Row(
-                    Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 8.dp),
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 8.dp)
+                        // 鍵盤等高的量測點：空場時記下基準 top，鍵盤開時两者的差就是鍵盤高度
+                        // （面板開著時不取樣——那時把輸入列頂起來的是面板自己）
+                        .onGloballyPositioned { c ->
+                            val top = c.boundsInRoot().top.toInt()
+                            when {
+                                !stickerPanel && !composerFocused -> composerBaselineTopPx = top
+                                !stickerPanel && composerFocused && composerBaselineTopPx > top ->
+                                    lastImeBottomPx = composerBaselineTopPx - top
+                            }
+                        },
                     verticalAlignment = Alignment.Bottom,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
@@ -3053,6 +3074,17 @@ private val QuickReactions = listOf(
     "\uD83D\uDC4F", // 👏
 )
 
+/**
+ * 游標前那個詞（「打字即過濾」用）：往回吃到第一個非字母數字/連字號為止，最長 32 字元。
+ * 含 CJK——表情表的 tokens 裡有繁中名稱與標籤，打「笑臉」也要能過濾。
+ */
+private fun trailingFilterWord(text: String, cursor: Int): String {
+    val end = cursor.coerceIn(0, text.length)
+    var i = end
+    while (i > 0 && (text[i - 1].isLetterOrDigit() || text[i - 1] == '-' || text[i - 1] == '_')) i--
+    return text.substring(i, end).take(32)
+}
+
 /** 兩則訊息合併顯示的最大間隔，對齊 Discord 的 7 分鐘。 */
 private const val GroupingWindowMillis = 7 * 60 * 1000L
 
@@ -3331,6 +3363,8 @@ private fun MessageRow(
                 strings = strings,
                 client = client,
                 emoticons = emptyList(),
+                // 反應表沒有輸入列可借用，所以它自帶搜尋欄（Discord 的反應表也是这样）
+                showSearch = true,
                 onPickEmoji = { entry ->
                     reactOpen = false
                     onToggleReaction(entry.glyph, msg.reactions[entry.glyph]?.mine)

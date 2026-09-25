@@ -29,6 +29,18 @@ object JaStrings : Strings by EnStrings {
     override val emojiSearchHint = "絵文字を検索"
     override val emojiNoResults = "該当する絵文字がありません"
     override val emojiRecent = "最近使った絵文字"
+    override fun emojiCategoryName(group: Int) = when (group) {
+        0 -> "顔と感情"
+        1 -> "人と体"
+        3 -> "動物と自然"
+        4 -> "食べ物と飲み物"
+        5 -> "旅行と場所"
+        6 -> "アクティビティ"
+        7 -> "物"
+        8 -> "記号"
+        9 -> "旗"
+        else -> ""
+    }
     override val stickerEmpty = "スタンプパックはまだありません"
     override val notifImage = "[画像]"
     override val notifSticker = "[スタンプ]"

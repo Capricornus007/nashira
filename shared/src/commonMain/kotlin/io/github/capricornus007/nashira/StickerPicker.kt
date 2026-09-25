@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -65,6 +66,11 @@ fun StickerPicker(
     onPickEmoticon: (StickerItem) -> Unit = {},
     /** 點 Unicode 表情：插進輸入列游標處（不是送訊息）。 */
     onPickEmoji: (EmojiEntry) -> Unit = {},
+    /**
+     * 輸入列游標前那個詞：面板不自帶搜尋欄，**打字就是過濾**（MoregramX／Nagram XF
+     * 實錄與 64Gram 桌面版的行為）。空字串＝不過濾。
+     */
+    emojiFilter: String = "",
     modifier: Modifier = Modifier,
 ) {
     val client = roomRepository.client
@@ -83,11 +89,12 @@ fun StickerPicker(
         shape = RoundedCornerShape(16.dp),
         shadowElevation = 8.dp,
     ) {
-        // P5-2：頂部分頁——貼圖（發 m.sticker）／表情（插入輸入列當 custom emoji）
+        // P5-2：分頁——貼圖（發 m.sticker）／表情（插入輸入列當 custom emoji）
         var emojiTab by remember { mutableStateOf(false) }
-        Column(Modifier.fillMaxSize()) {
-            // 分頁置中、純文字，選中的上主色——64Gram 桌面版頂部就是「表情符號／貼圖／GIF」
-            // 三格置中。之前是靠左兩顆 pill，讀起來像標籤而不像分頁。
+        // 分頁列是「網格的第一格」而不是釘在面板頂：MoregramX／Nagram XF 實錄
+        // （~/ref-shots/mgx-panel.mp4）往下捲時它會跟著滑走、捲回頂才回來。
+        // 置中純文字、選中上主色，對齊 64Gram 桌面版的「表情符號／貼圖／GIF」。
+        val tabs: @Composable () -> Unit = {
             Row(
                 Modifier.fillMaxWidth().padding(vertical = 4.dp),
                 horizontalArrangement = Arrangement.Center,
@@ -106,6 +113,8 @@ fun StickerPicker(
                     )
                 }
             }
+        }
+        Column(Modifier.fillMaxSize()) {
             if (emojiTab) {
                 val emoticons by remember(client) { repository.emoticons() }.collectAsState(initial = emptyList())
                 EmojiBrowser(
@@ -114,15 +123,20 @@ fun StickerPicker(
                     emoticons = emoticons,
                     onPickEmoji = onPickEmoji,
                     onPickEmoticon = onPickEmoticon,
+                    query = emojiFilter,
+                    header = tabs,
                     modifier = Modifier.weight(1f),
                 )
             } else if (packs.isEmpty()) {
-                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Text(
-                        strings.stickerEmpty,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                Column(Modifier.weight(1f).fillMaxWidth()) {
+                    tabs()
+                    Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                        Text(
+                            strings.stickerEmpty,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             } else {
                 // 包名優先用包自己的 display_name（state_key 兜底）。同一個貼圖倉庫房會掛
@@ -136,16 +150,24 @@ fun StickerPicker(
                 }
                 var selected by remember(packs.size) { mutableStateOf(0) }
                 val index = selected.coerceIn(0, packs.lastIndex)
-                // 64Gram 的排法：網格在上面吃滿剩餘高度，**包名與封面圖示條沉在面板底部**
-                // （之前圖示條在網格上方，跟參考截圖上下顛倒）。
-                StickerGrid(packs[index], client, onSend, Modifier.weight(1f))
-                Text(
-                    packNames.getOrElse(index) { "" },
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 2.dp),
+                // 網格吃滿剩餘高度；分頁列與當前包名進網格第一格（會跟著捲動），
+                // 封面圖示條固定在面板底部（64Gram／MoregramX 都是這個配置）。
+                StickerGrid(
+                    pack = packs[index],
+                    client = client,
+                    onSend = onSend,
+                    header = {
+                        tabs()
+                        Text(
+                            packNames.getOrElse(index) { "" },
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 2.dp),
+                        )
+                    },
+                    modifier = Modifier.weight(1f),
                 )
                 // 包選擇是封面圖示條（Telegram／Discord／Element 都是這樣）：
                 // 原本的長文字標籤在包多時會橫向溢出，只能靠拖曳，滑鼠與觸控板都不順手。
@@ -220,6 +242,8 @@ private fun StickerGrid(
     pack: StickerPack,
     client: MatrixClient,
     onSend: (StickerItem) -> Unit,
+    /** 網格第一格（跨整行）：分頁列＋當前包名。放進來才會跟著貼圖一起捲動。 */
+    header: @Composable () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     LazyVerticalGrid(
@@ -229,6 +253,7 @@ private fun StickerGrid(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
+        item(key = "h-pack-header", span = { GridItemSpan(maxLineSpan) }) { header() }
         items(pack.stickers, key = { it.shortcode + (it.mxcUrl ?: it.file?.url ?: "") }) { sticker ->
             Box(
                 Modifier

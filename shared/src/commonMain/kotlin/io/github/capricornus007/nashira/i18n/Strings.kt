@@ -43,6 +43,12 @@ interface Strings {
     val emojiSearchHint: String
     val emojiNoResults: String
     val emojiRecent: String
+    /**
+     * Unicode 分類的本地化名稱（面板節標）。四套參考客戶端（64Gram 桌面、MoregramX／
+     * Nagram XF 手機、Discord、Element）的分類標題**一律是文字**，只有頂部用來跳轉的
+     * 那一條是圖示——之前只給 glyph 是自創的變體。[group] 是 emojibase 的 group id。
+     */
+    fun emojiCategoryName(group: Int): String = ""
     val stickerEmpty: String
     val notifImage: String
     val notifSticker: String

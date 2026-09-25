@@ -30,6 +30,18 @@ object KoStrings : Strings by EnStrings {
     override val emojiSearchHint = "이모티콘 검색"
     override val emojiNoResults = "일치하는 이모티콘이 없습니다"
     override val emojiRecent = "최근 사용"
+    override fun emojiCategoryName(group: Int) = when (group) {
+        0 -> "얼굴 및 감정"
+        1 -> "사람 및 신체"
+        3 -> "동물 및 자연"
+        4 -> "음식 및 음료"
+        5 -> "여행 및 장소"
+        6 -> "활동"
+        7 -> "사물"
+        8 -> "기호"
+        9 -> "깃발"
+        else -> ""
+    }
     override val notifImage = "[이미지]"
     override val notifSticker = "[스티커]"
     override val notifUndecryptable = "[복호화할 수 없음]"

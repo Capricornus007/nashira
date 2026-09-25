@@ -31,6 +31,18 @@ object EnStrings : Strings {
     override val emojiSearchHint = "Search emoji"
     override val emojiNoResults = "No matching emoji"
     override val emojiRecent = "Recently used"
+    override fun emojiCategoryName(group: Int) = when (group) {
+        0 -> "Smileys & Emotion"
+        1 -> "People & Body"
+        3 -> "Animals & Nature"
+        4 -> "Food & Drink"
+        5 -> "Travel & Places"
+        6 -> "Activities"
+        7 -> "Objects"
+        8 -> "Symbols"
+        9 -> "Flags"
+        else -> ""
+    }
     override val notifImage = "[Image]"
     override val notifSticker = "[Sticker]"
     override val notifUndecryptable = "[Undecryptable]"

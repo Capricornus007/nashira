@@ -31,6 +31,18 @@ object ZhTwStrings : Strings {
     override val emojiSearchHint = "搜尋表情"
     override val emojiNoResults = "找不到符合的表情"
     override val emojiRecent = "最近使用"
+    override fun emojiCategoryName(group: Int) = when (group) {
+        0 -> "表情符號與情緒"
+        1 -> "人物與身體"
+        3 -> "動物與自然"
+        4 -> "食物與飲料"
+        5 -> "旅遊與地點"
+        6 -> "活動"
+        7 -> "物品"
+        8 -> "符號"
+        9 -> "旗幟"
+        else -> ""
+    }
     override val notifImage = "[圖片]"
     override val notifSticker = "[貼圖]"
     override val notifUndecryptable = "[無法解密]"
@@ -287,6 +299,18 @@ object ZhCnStrings : Strings by ZhTwStrings {
     override val emojiRecent = "最近使用"
     // 「反應」在簡體介面習慣寫作「反应」；「回应」在這裡會跟「回覆」混掉
     override val actionAddReaction = "添加反应"
+    override fun emojiCategoryName(group: Int) = when (group) {
+        0 -> "表情与情绪"
+        1 -> "人物与身体"
+        3 -> "动物与自然"
+        4 -> "食物与饮料"
+        5 -> "旅行与地点"
+        6 -> "活动"
+        7 -> "物品"
+        8 -> "符号"
+        9 -> "旗帜"
+        else -> ""
+    }
 }
 
 /**
