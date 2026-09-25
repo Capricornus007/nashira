@@ -2,73 +2,47 @@
 
 更新：2026-09-24（上一版是 2026-09-10 導出、master @ `76fb1d4`；之後 40+ 筆提交的狀態這版已逐條對碼核過）。
 
-## ⚠ 中斷點：2026-09-24 深夜用戶關機，反應選擇器做到一半（先讀這段）
+## 本輪狀態：2026-09-25（表情／反應這批＋SSO 修正）
 
-**工作區是髒的、未提交、而且此刻大概率編不過**——重啟後第一步不是編譯，是把下面 ③ 做完。
+五筆提交已進 git（`030ae3b`…`9dc1523`），版號 0.1.5 → **0.1.6**，推送後由 `release.yml`
+與 `~/Downloads/repo` 的定時自動構建出產物。**這一段以下方「慣例」與「Trixnity API 備忘」為準，
+上面舊的 release 段落是 v0.1.1 時代寫的，版號已過期。**
 
-### 已经完成、還在工作區沒進 git 的改動
-1. **`EmojiBrowser.kt`（新檔，未 `git add`）**：從 `StickerPicker.kt` 搬出來的表情瀏覽器本體——
-   搜尋列＋分類圖示條＋「最近使用／自訂表情／九個 Unicode 分類」混排網格，
-   `internal fun EmojiBrowser(strings, client, emoticons, onPickEmoji, onPickEmoticon, modifier)`。
-   连同 `EmojiRow` / `EmojiPlan` / `buildEmojiPlan` / `EmojiSectionHeader` / `EmojiCell` 一起搬過來了。
-   底部那個 `emojiCellHighlight()` 辅助函式已刪（它是非 composable 卻讀 `MaterialTheme.colorScheme`，
-   踩 `staticCompositionLocalOf` 只能在組合區讀的坑）。
-2. **`StickerPicker.kt`**：刪掉搬走的 181 行；`if (emojiTab)` 分支改成自己 collect
-   `repository.emoticons()` 再呼叫 `EmojiBrowser(...)`。**還沒驗：`StickerThumb` 目前是 `private`，
-   但 `EmojiBrowser.kt` 要用它 → 必須改成 `internal`，這是第一個要補的編譯錯誤。**
-   另外残留的 import（`StickerItem`、`LazyRow`、`gridItemsIndexed`、`rememberLazyGridState`、
-   `EmojiEntry`/`EmojiIndex`/`EmojiTable`、`collectAsState`、`rememberCoroutineScope`、
-   `Icons.Filled.Search/Close`、`OutlinedTextField`、`Spacer`、`PaddingValues`、`delay` 等）
-   要按編譯器／detekt 的結果清掉，別憑記憶刪。
-3. **i18n 五檔齊加 `actionAddReaction`**（`Strings.kt` 宣告＋En/Ja/Ko/ZhTw 實作＋`ZhCnStrings` 覆寫「添加反应」）：
-   en "Add Reaction" / ja "リアクション追加" / ko "반응 추가" / zh-TW "新增反應" / zh-CN "添加反应"。
-   介面是「全鍵實作」，漏語言會直接編譯失敗，不會靜默顯示英文。
+### 已完成
+- `EmojiBrowser.kt`（新檔）：搜尋列＋分類圖示條＋「最近使用／自訂表情／九個 Unicode 分類」
+  混排網格，輸入列表情頁與訊息反應選擇器共用。`StickerThumb` 改 `internal`。
+- 反應選擇器：hover 列第一顆鈕從「點一下送 👍」換成笑臉開彈窗（320×300）；action 選單保留
+  十個常用表情（改 `FlowRow`，不換行會撐破下拉選單寬度）＋「新增反應」列——安卓沒有 hover，
+  那列是它唯一入口。i18n 五檔齊加 `actionAddReaction`。
+- 膚色變體：`EmojiCell` 走 `contextMenuGestures`，長按／右鍵浮出膚色列（原色＋5 色＋✕）。
+  **不用第二層 Popup**：反應選擇器本身在 `DropdownMenu` 裡，再開一層視窗會搶走下層焦點、
+  選單收起。`EmojiIndex.byHexcode` 順帶把變體 hexcode 建進索引，否則「最近使用」存了
+  👍🏽 下次開來那筆會查無此表情。
+- `:shortcode:` 懸停預覽條（Discord 那味）：表情表新增第 8 欄 shortcode（產生器多讀
+  `github.json` 第一個名字；tokens 裡混著英文 tags 與中文名，摳不出哪個才是 shortcode）。
+  重跑產生器＝1914 筆、1870 筆有名字。
+- 64Gram 式面板釘選：面板分頁列右端一顆 📌（核心圖示集沒有 PushPin，不為一顆鈕拖進
+  material-icons-extended），釘住時點輸入列不收面板；偏好存 `UiState.stickerPanelPinned`。
+- **SSO 修正（`9dc1523`）**：拿掉 localhost HTTP server 回退整條路，`nashira://` 查不到接收端
+  就自己補註冊使用者層級 `nashira.desktop` ＋ `xdg-mime default`，補不上才回
+  `NASHIRA_SSO_SCHEME_MISSING`（LoginErrors 翻成人話）。Android 本來就是 deep link，兩端一致。
 
-### 還沒動的部分（接下來的活）
-① **反應選擇器接上 `EmojiBrowser`（`ChatScreen.kt`）**—— presently `MessageRow` 的 hover 浮條第一個鈕
-   是「點一下送 👍」（`QuickReactions.first()`，ChatScreen.kt 約 3268 行），要換成
-   `Icons.Filled.Face`（核心圖示集已有，專案其他地方在用）開彈出選擇器：
-   - `var pickerOpen`、`var pickerAnchor`；位置用 threeDot 那招
-     `.onGloballyPositioned { c -> c.positionInRoot() + Offset(0f, c.size.height.toFloat()) - boxOrigin }`。
-   - 容器沿用 `ContextMenuSurface(expanded=..., onDismiss=..., anchor=...)`（內部是 `DropdownMenu`，會自動避邊），
-     內容 `Box(Modifier.width(320.dp).height(300.dp)) { EmojiBrowser(strings, client, emptyList(), onPickEmoji = {...}) }`。
-   - 點選：`onToggleReaction(entry.glyph, msg.reactions[entry.glyph]?.mine)` 然後關掉彈窗。
-   - `QuickReactions`（10 個，約 3033 行）**留著**當 action 選單裡的一列快速反應；
-     選單裡再補一列 `ContextMenuItem(strings.actionAddReaction)` 也開同一個選擇器（安卓沒有 hover，這是它唯一入口）。
-   - 3022 行那句註解「完整選擇器還沒做，這幾個對齊 Discord 的預設快捷」做完要改掉/刪掉。
-   - 反應選擇器**不列自訂表情**（`emoticons = emptyList()`）：本輪已二次核實 Trixnity 5.8.1
-     `RelatesTo$Annotation` 只有 `(eventId, key)` 兩個欄位、放不下 MSC2545 反應要的
-     `m.relates_to.url`（`ReactionEventContent` 那個 `externalUrl` 是 content 層的字，不是 spec 位置）。
-     給按了卻送不出去的表情比不給更糟，這條已寫進 `EmojiBrowser.kt` 檔頭。
-② **膚色變體**（`EmojiEntry.skins`，長按彈色）——`EmojiCell` 裡那條 TODO 註解就是它。
-③ **桌面滑鼠懸停顯示 `:shortcode:` 預覽條** ＋ 64Gram 式釘選/停靠面板。
-④ 全部做完 → `--no-daemon` 雙目標編譯（desktop＋android）→ commit → 一批一個 release：
-   版本號 0.1.5 → **0.1.6**（`androidApp` versionCode/versionName＋`desktopApp` packageVersion）→ 推 → 盯 CI 到全綠。
+### 這輪踩到的兩個坑（下次別再踩）
+1. **`desktopApp/build/compose/binaries/main/app/` 會是過期垃圾**：`packageDistributionForCurrentOS`
+   只刷新 deb/rpm，那個 `app/` 映像目錄留著 9/12 的舊 jar。用舊映像啟動會同時踩到
+   「SSO 起伺服器 + jpackage 沒帶 `jdk.httpserver` → NoClassDefFoundError」與
+   「恢復登入時拿 prefs 舊 token 去 re-authenticate → 401 並覆蓋 DB 裡已輪替的新 token」
+   （後者是 `MatrixSession.kt:172-178` 註解記過的根因），實測把用戶的桌面 session 弄死、
+   必須重新登入。**要跑桌面版一律 `./gradlew :desktopApp:run` 或裝 deb，別碰 `binaries/main/app/`。**
+2. **`grep -c "e: "` 找不到匹配時回 exit 1**，會把「編譯成功」報成「命令失敗」。判成敗要看
+   gradle 自己的 `EXIT=`，不是看 grep。
 
-### 本地未推的提交（2 筆，HEAD=4d82da1，origin/master=f594cdb）
-- `030ae3b` 表情表產生器與 `EmojiTable`（資料層）
-- `4d82da1` 表情分頁完成——搜尋＋最近使用＋自訂表情＋Unicode 九個分類
-故意先不推：等這一整批（①②③）湊齊再一起出 v0.1.6（用戶已核准「版本一堆那就一堆」＝一批一版）。
-
-### 待驗證清單（綠燈不等於產物，得實機/實際核對）
-- v0.1.5 的 HTML 渲染與語音.amplitude 只在 desktop 看過，安卓端還沒照會。
-- 頭像上傳兩段式修正（`prepareUploadMedia` → `uploadMedia`）尚未實機驗證真的傳到伺服器和下發。
-- 之前測試時**誤貼了一張貼圖到「水晶玉」房間（21:33）**，用戶尚未回答要不要刪——別自己動。
-
-### 下次接手入口命令
-```bash
-cd ~/Downloads/nashira && git status --short && git log --oneline -3
-# 先補 StickerThumb → internal，再編：
-./gradlew --no-daemon :shared:compileKotlinDesktop :shared:compileAndroidMain   # 跑完 pkill 殘留 daemon
-# 看未推的兩筆：
-git log --oneline origin/master..HEAD
-# CI（run number ≠ databaseId，列 job 要 --paginate）：
-gh run list --repo Capricornus007/nashira --limit 5
-```
-- 手機（adb）目前**歸隔壁 qoder 國際版 CLI 用**（在修 nb4a）。要碰手機先
-  `~/bin/phone-lock acquire nashira`、動完 `touch`/`release`，**禁 `adb kill-server`、動完別鎖屏**。
-- 本檔下方的「當前狀態／release」段落是 v0.1.1 時代寫的，版號已過期（實際已發到 v0.1.5），
-  只有裡面的「慣例」「Trixnity API 備忘」還有效。
+### 待辦
+- 桌面實測截圖：反應選擇器、膚色列、預覽條、釘選鈕（需用戶重新登入後才能做）。
+- 之前測試誤貼一張貼圖到「水晶玉」（21:33），用戶尚未決定刪不刪——別自己動。
+- MSC2545 自訂表情**當反應**仍做不了：Trixnity 5.8.1 `RelatesTo$Annotation` 只有
+  `(eventId, key)`，放不下 `m.relates_to.url`（`ReactionEventContent` 那個 `externalUrl`
+  是 content 層的字，不是 spec 位置）。等上游。
 
 ## 當前狀態
 - 倉庫：`~/Downloads/nashira`，master 與 origin 同步（本檔撰寫時 HEAD 為版本號 0.1.1 那筆）。
