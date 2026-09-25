@@ -126,6 +126,9 @@ internal object NativeAudioNodes {
         val parts = description.removePrefix("Direct Audio Device:")
             .split(',')
             .map { it.trim() }
+            // 「capture」／「playback」是重複資訊：那一欄標題已經寫明是輸入裝置（麥克風）
+            // 還是輸出裝置（喇叭），留在名字裡只會讓人以為它是型號的一部分。
+            .map { it.replace(Regex("""\s+\b(?:capture|playback)\b""", RegexOption.IGNORE_CASE), "").trim() }
             .filter { it.isNotEmpty() }
             .distinct()
         return parts.joinToString(" · ").takeIf { it.isNotBlank() }

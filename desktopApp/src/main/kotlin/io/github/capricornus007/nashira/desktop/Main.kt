@@ -3,7 +3,9 @@ package io.github.capricornus007.nashira.desktop
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.DpSize
@@ -120,8 +122,11 @@ fun main(args: Array<String>) {
                 g.fill(star)
                 g.dispose()
             }
-            val trayIconAwt = java.awt.TrayIcon(trayIcon, "Nashira")
-            trayIconAwt.isImageAutoSize = true
+            // remember：TrayIcon 必須全程同一個實例——下面只 add 一次，若每次重組都 new
+            // 一顆，托盤就會被疊成一排（用戶 2026-09-25 照片：右鍵一次多一顆）。
+            val trayIconAwt = remember {
+                java.awt.TrayIcon(trayIcon, "Nashira").apply { isImageAutoSize = true }
+            }
             // AWT 字體渲染：系統屬性在 JVM 啟動時設定（main() 最前面），
             // 這裡只設字體本身。抗鋸齒/LCD 子像素由 awt.useSystemAAFontSettings 控制。
             // AWT PopupMenu 在 Linux 上不用系統字體渲染管線（FreeType），
@@ -131,17 +136,29 @@ fun main(args: Array<String>) {
             // 右鍵時記錄鼠標位置：菜單錨在托盤圖示上方（PlatformDefault 在
             // bspwm 會把窗口丟到屏幕頂部，2026-09-14 用戶截圖回報位置錯）。
             var trayMenuScreenPos by remember { mutableStateOf(java.awt.Point(0, 0)) }
-            trayIconAwt.addMouseListener(object : java.awt.event.MouseAdapter() {
-                override fun mousePressed(e: java.awt.event.MouseEvent) {
-                    if (e.button == java.awt.event.MouseEvent.BUTTON3) {
-                        trayMenuScreenPos = java.awt.MouseInfo.getPointerInfo().location
-                        trayMenuOpen = true
-                    } else if (e.button == java.awt.event.MouseEvent.BUTTON1) {
-                        showMainWindow()
+            // 監聽器與托盤註冊都收進 DisposableEffect：原本兩行直接寫在 Composable 本體，
+            // **每次重組就再 add 一次**——托盤被右鍵疊成一排、一次右鍵同時觸發好幾個監聽器
+            // （用戶 2026-09-25 照片）。一進一出，離開時也把圖示拿掉，不留孤兒。
+            DisposableEffect(trayIconAwt) {
+                val listener = object : java.awt.event.MouseAdapter() {
+                    override fun mousePressed(e: java.awt.event.MouseEvent) {
+                        when (e.button) {
+                            java.awt.event.MouseEvent.BUTTON3 -> {
+                                trayMenuScreenPos = java.awt.MouseInfo.getPointerInfo().location
+                                trayMenuOpen = true
+                            }
+                            java.awt.event.MouseEvent.BUTTON1 -> showMainWindow()
+                        }
                     }
                 }
-            })
-            java.awt.SystemTray.getSystemTray().add(trayIconAwt)
+                val tray = java.awt.SystemTray.getSystemTray()
+                trayIconAwt.addMouseListener(listener)
+                runCatching { tray.add(trayIconAwt) }
+                onDispose {
+                    runCatching { tray.remove(trayIconAwt) }
+                    runCatching { trayIconAwt.removeMouseListener(listener) }
+                }
+            }
 
             // Compose 托盤菜單（右鍵彈出）：獨立 Window，不掛主窗口——
             // Popup 在 application{} 裡沒有 LocalHostDefaultProvider 會崩
@@ -149,24 +166,30 @@ fun main(args: Array<String>) {
             if (trayMenuOpen) {
                 val menuW = 200.dp
                 val menuH = 118.dp
-                // 屏幕坐標 → Compose Window 位置：菜單出現在鼠標（托盤圖示）
-                // 左上方，右緣對齊鼠標、底緣留 8dp 不蓋住欄條。
-                val scr = java.awt.Toolkit.getDefaultToolkit().screenSize
-                val scaleX = scr.width / 2240f  // bspwm 單屏；近似換算物理→邏輯
-                val scaleY = scr.height / 1400f
-                val px = (trayMenuScreenPos.x / scaleX).dp - menuW + 12.dp
-                val py = (trayMenuScreenPos.y / scaleY).dp - menuH - 8.dp
+                val density = LocalDensity.current
                 Window(
                     onCloseRequest = { trayMenuOpen = false },
                     undecorated = true,
                     transparent = true,
                     resizable = false,
                     alwaysOnTop = true,
-                    state = rememberWindowState(
-                        position = WindowPosition(px.coerceAtLeast(0.dp), py.coerceAtLeast(0.dp)),
-                        size = DpSize(menuW, menuH),
-                    ),
+                    state = rememberWindowState(size = DpSize(menuW, menuH)),
                 ) {
+                    // 位置改用 AWT 的物理像素直接擺。原本那套 `scr.width / 2240f` 是把邏輯
+                    // dp 硬換算成螢幕座標、而且寫死一台機器的解析度，換螢幕或縮放就整個飄走
+                    // （用戶 2026-09-25 照片：托盤在右上角，選單卻出現在螢幕左側）。
+                    LaunchedEffect(window, trayMenuScreenPos) {
+                        val scr = java.awt.Toolkit.getDefaultToolkit().screenSize
+                        val w = window.width.takeIf { it > 1 } ?: with(density) { menuW.toPx() }.toInt()
+                        val h = window.height.takeIf { it > 1 } ?: with(density) { menuH.toPx() }.toInt()
+                        val x = (trayMenuScreenPos.x - w + 8).coerceIn(0, (scr.width - w).coerceAtLeast(0))
+                        // 托盤在螢幕上半部 → 選單往下長；在下半部才往上長
+                        val y = (
+                            if (trayMenuScreenPos.y < scr.height / 2) trayMenuScreenPos.y + 6
+                            else trayMenuScreenPos.y - h - 6
+                        ).coerceIn(0, (scr.height - h).coerceAtLeast(0))
+                        window.setLocation(x, y)
+                    }
                     // undecorated Window 不會因點擊外部而關閉（onCloseRequest 只
                     // 響應 WM 關閉）——焦點丟失＝點了別處＝收起菜單。
                     LaunchedEffect(window) {
