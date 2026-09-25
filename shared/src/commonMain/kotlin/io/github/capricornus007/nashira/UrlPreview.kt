@@ -55,7 +55,28 @@ private val META_REGEX = Regex(
 )
 private val TITLE_REGEX = Regex("""<title[^>]*>([^<]*)</title>""", RegexOption.IGNORE_CASE)
 
-fun firstUrlInText(text: String): String? = URL_REGEX.find(text)?.value?.trimEnd(',', '.', ';', ':', '!', '?')
+// 回覆的引用塊：Matrix 把它包在 <mx-reply>…</mx-reply> 裡，裡面**一定**有一個
+// matrix.to 連結（「In reply to …」那顆）。它不是你貼的連結。
+private val MX_REPLY_REGEX = Regex("(?is)<mx-reply>.*?</mx-reply>")
+
+/**
+ * 取「使用者自己貼進訊息裡」的連結（去重、依出現順序），用來決定要掛幾張 og 預覽卡。
+ *
+ * 兩件事是踩過的坑：
+ * ① 必須先拔掉 `<mx-reply>` 區塊再找。之前直接把整段 formatted_body 丟進 regex，
+ *    結果**回覆訊息一律會冒出一張 matrix.org 的預覽卡**，即使訊息文字裡一個連結
+ *    都沒有（用戶 2026-09-25 點名：「它這根本就沒發鏈接」）。
+ * ② 一則訊息帶多個連結時全部顯示（Element 就是一張連結一張卡），不是只挑第一個。
+ *    上限 3 張：橋接機器人常把同一頁的兩三個連結都列出來，再多就蓋掉對話本身。
+ */
+fun urlsInMessage(formattedBody: String?, plainBody: String): List<String> {
+    val haystack = formattedBody?.replace(MX_REPLY_REGEX, "") ?: plainBody
+    return URL_REGEX.findAll(haystack)
+        .map { it.value.trimEnd(',', '.', ';', ':', '!', '?') }
+        .distinct()
+        .take(3)
+        .toList()
+}
 
 /** 抓取並解析 og meta。任何失敗都回 null（呼叫端只顯示空白，不打擾）。 */
 suspend fun fetchUrlPreview(url: String): UrlPreviewData? = withContext(Dispatchers.Default) {
@@ -78,15 +99,17 @@ suspend fun fetchUrlPreview(url: String): UrlPreviewData? = withContext(Dispatch
             if (title == null && metas["description"].isNullOrBlank() && metas["site_name"].isNullOrBlank()) {
                 return@withTimeout null
             }
-            // 反轉義 HTML 常見實體（不引 HTML 解析器，僅覆蓋預覽會用到的）
-            fun unescape(v: String) = v
-                .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
-                .replace("&quot;", "\"").replace("&#39;", "'").replace("&apos;", "'").trim()
+            // 反轉義 HTML 實體。Element 那側是問家伺服器要預覽（preview_url），實體由
+            // homeserver 解好；我們自己抓網頁解 og，不解就會把「983222 &ndash; app-portage/…」
+            // 原封不動顯示出來（用戶 2026-09-25 拿 Element 截圖對照點名）。
+            // 解碼器沿用 ChatScreen 裡那一份（有完整命名實體表＋掃描過快取，不另寫第二份）。
             UrlPreviewData(
                 url = url,
-                siteName = metas["site_name"]?.let(::unescape)?.takeIf { it.isNotBlank() },
-                title = title?.let(::unescape),
-                description = metas["description"]?.let(::unescape)?.takeIf { it.isNotBlank() },
+                siteName = metas["site_name"]?.let { decodeHtmlEntities(it).trim() }.orEmpty()
+                    .takeIf { it.isNotBlank() },
+                title = title?.let { decodeHtmlEntities(it).trim() },
+                description = metas["description"]?.let { decodeHtmlEntities(it).trim() }.orEmpty()
+                    .takeIf { it.isNotBlank() },
             )
         }
     } catch (_: Throwable) {

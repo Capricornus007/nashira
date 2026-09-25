@@ -3731,7 +3731,7 @@ fun htmlToAnnotatedString(
  */
 private val NumericEntityRegex = Regex("&#(?:([0-9]{1,7})|x([0-9a-fA-F]{1,6}));")
 
-private fun decodeHtmlEntities(s: String): String {
+internal fun decodeHtmlEntities(s: String): String {
     var amp = s.indexOf('&')
     if (amp < 0) return s
     val out = StringBuilder(s.length)
@@ -3826,10 +3826,13 @@ private fun MessageBodyContent(
                     modifier = modifier,
                 )
             }
-            // P5-3：訊息含連結時附上 og 預覽卡
-            val previewUrl = firstUrlInText(formatted ?: body.text)
-            if (previewUrl != null) {
-                UrlPreviewInline(url = previewUrl, modifier = Modifier.padding(top = 6.dp))
+            // P5-3：訊息**本身**含連結時才附 og 預覽卡，一個連結一張卡
+            // （回覆的引用塊不算，見 urlsInMessage）
+            val previewUrls = urlsInMessage(formatted, body.text)
+            if (previewUrls.isNotEmpty()) {
+                Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    previewUrls.forEach { url -> UrlPreviewInline(url = url) }
+                }
             }
         }
         is MessageBody.Image -> {
@@ -3946,7 +3949,13 @@ fun UrlPreviewInline(url: String, modifier: Modifier = Modifier) {
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
         tonalElevation = 1.dp,
     ) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                // 整張卡可點，點了開連結（Element 那張卡右側有個外部連結鈕，至少得能點）
+                .clickable { openLink(url) }
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+        ) {
             data.siteName?.let {
                 Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
             }
