@@ -109,6 +109,7 @@ object KoStrings : Strings by EnStrings {
     override val actionUnmute = "음소거 해제"
     override val actionPin = "고정"
     override val actionUnpin = "고정 해제"
+    override val actionAddReaction = "반응 추가"
     override val actionSourceUrl = "소스 URL"
     override val actionViewSource = "소스 보기"
     override val actionForward = "전달"

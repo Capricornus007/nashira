@@ -109,6 +109,7 @@ object JaStrings : Strings by EnStrings {
     override val actionUnmute = "ミュートを解除"
     override val actionPin = "ピン留め"
     override val actionUnpin = "ピン留めを解除"
+    override val actionAddReaction = "リアクション追加"
     override val actionSourceUrl = "ソース URL"
     override val actionViewSource = "ソースを表示"
     override val actionForward = "転送"

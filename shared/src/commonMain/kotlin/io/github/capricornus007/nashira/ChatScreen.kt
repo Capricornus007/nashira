@@ -3019,7 +3019,7 @@ private fun AttachRow(icon: androidx.compose.ui.graphics.vector.ImageVector, lab
         Text(label, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
     }
 }
-/** 選單裡的常用表情。完整選擇器還沒做，這幾個對齊 Discord 的預設快捷。 */
+/** 選單裡的常用表情：完整選擇器是 `EmojiBrowser`，這幾個是免點搜尋列的捷徑。 */
 
 /** 回覆預覽的一段文字：文字取前 60 字（換行摺疊），媒體給類型名。 */
 internal fun bodyPreview(body: MessageBody): String? = when (body) {
@@ -3108,6 +3108,9 @@ private fun MessageRow(
 {
     var menuOpen by remember(msg.eventId) { mutableStateOf(false) }
     var menuAnchor by remember(msg.eventId) { mutableStateOf(Offset.Unspecified) }
+    // 反應選擇器：跟 action 選單分開兩個彈窗，從 hover 列的笑臉鈕或選單裡那列開
+    var reactOpen by remember { mutableStateOf(false) }
+    var reactAnchor by remember { mutableStateOf(Offset.Unspecified) }
     val hoverSource = remember { MutableInteractionSource() }
     val hovered by hoverSource.collectIsHoveredAsState()
     var boxOrigin by remember { mutableStateOf(Offset.Zero) }
@@ -3257,7 +3260,7 @@ private fun MessageRow(
                 }
             }
         }
-        if ((hovered || menuOpen) && msg.eventId != null) {
+        if ((hovered || menuOpen || reactOpen) && msg.eventId != null) {
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 shape = RoundedCornerShape(10.dp),
@@ -3265,10 +3268,24 @@ private fun MessageRow(
                 modifier = Modifier.align(Alignment.TopEnd).padding(end = 16.dp),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    var reactButtonOrigin by remember { mutableStateOf(Offset.Unspecified) }
                     IconButton(
-                        onClick = { onToggleReaction(QuickReactions.first(), msg.reactions[QuickReactions.first()]?.mine) },
-                        modifier = Modifier.size(32.dp),
-                    ) { Text(QuickReactions.first(), style = MaterialTheme.typography.labelLarge) }
+                        // 第一個鈕是「加反應」開選擇器，不是「點一下送 👍」：
+                        // 對齊 Discord 的 hover 列，也讓常用表情不用擠成十個一排。
+                        onClick = { reactAnchor = reactButtonOrigin; reactOpen = true },
+                        modifier = Modifier
+                            .size(32.dp)
+                            .onGloballyPositioned { c ->
+                                reactButtonOrigin =
+                                    c.positionInRoot() + Offset(0f, c.size.height.toFloat()) - boxOrigin
+                            },
+                    ) {
+                        Icon(
+                            Icons.Filled.Face,
+                            contentDescription = strings.actionAddReaction,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
                     IconButton(onClick = onReply, modifier = Modifier.size(32.dp)) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
@@ -3297,14 +3314,29 @@ private fun MessageRow(
                 }
             }
         }
+        // 反應選擇器：獨立於 action 選單的第二個彈窗。不列 MSC2545 自訂表情——
+        // Trixnity 5.8.1 的 RelatesTo.Annotation 放不下 m.relates_to.url，按了送不出去。
+        ContextMenuSurface(expanded = reactOpen, onDismiss = { reactOpen = false }, anchor = reactAnchor) {
+            EmojiBrowser(
+                strings = strings,
+                client = client,
+                emoticons = emptyList(),
+                onPickEmoji = { entry ->
+                    reactOpen = false
+                    onToggleReaction(entry.glyph, msg.reactions[entry.glyph]?.mine)
+                },
+                modifier = Modifier.width(320.dp).height(300.dp),
+            )
+        }
         ContextMenuSurface(expanded = menuOpen, onDismiss = { menuOpen = false }, anchor = menuAnchor) {
             // 還在 outbox 的訊息沒有 eventId，回覆／連結／刪除都無從指定
             val settled = msg.eventId != null
             if (settled) {
-                // 常用表情一排（還沒有完整表情選擇器，先給這幾個最常用的）
-                Row(
-                    Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                // 常用表情一排，後面接「更多反應」開完整選擇器
+                FlowRow(
+                    Modifier.width(320.dp).padding(horizontal = 12.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     QuickReactions.forEach { key ->
                         val existing = msg.reactions[key]?.mine
@@ -3321,6 +3353,12 @@ private fun MessageRow(
                                 .padding(horizontal = 6.dp, vertical = 4.dp),
                         )
                     }
+                }
+                ContextMenuItem(strings.actionAddReaction) {
+                    menuOpen = false
+                    // 從選單進來時沒有指標位置可錨，讓 DropdownMenu 自己決定開哪裡
+                    reactAnchor = Offset.Unspecified
+                    reactOpen = true
                 }
             }
             if (msg.body is MessageBody.Text) {

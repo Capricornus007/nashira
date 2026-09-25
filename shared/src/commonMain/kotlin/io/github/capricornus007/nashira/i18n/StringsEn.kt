@@ -166,6 +166,7 @@ object EnStrings : Strings {
     override val actionUnmute = "Unmute"
     override val actionPin = "Pin"
     override val actionUnpin = "Unpin"
+    override val actionAddReaction = "Add Reaction"
     override val actionSourceUrl = "Source URL"
     override val actionViewSource = "View source"
     override val actionForward = "Forward"

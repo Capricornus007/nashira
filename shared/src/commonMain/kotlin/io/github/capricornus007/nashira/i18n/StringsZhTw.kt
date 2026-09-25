@@ -102,6 +102,7 @@ object ZhTwStrings : Strings {
     override val actionUnmute = "取消靜音"
     override val actionPin = "釘選"
     override val actionUnpin = "取消釘選"
+    override val actionAddReaction = "新增反應"
     override val actionSourceUrl = "來源網址"
     override val actionViewSource = "檢視原始碼"
     override val actionForward = "轉寄"
@@ -287,6 +288,8 @@ object ZhCnStrings : Strings by ZhTwStrings {
     override val emojiSearchHint = "搜索表情"
     override val emojiNoResults = "找不到匹配的表情"
     override val emojiRecent = "最近使用"
+    // 「反應」在簡體介面習慣寫作「反应」；「回应」在這裡會跟「回覆」混掉
+    override val actionAddReaction = "添加反应"
 }
 
 /**

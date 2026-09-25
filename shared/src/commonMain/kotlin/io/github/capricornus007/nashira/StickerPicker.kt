@@ -43,31 +43,16 @@ import io.github.capricornus007.nashira.matrix.StickerItem
 import io.github.capricornus007.nashira.matrix.StickerPack
 import io.github.capricornus007.nashira.matrix.StickerRepository
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.itemsIndexed as gridItemsIndexed
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.runtime.rememberCoroutineScope
 import io.github.capricornus007.nashira.emoji.EmojiEntry
-import io.github.capricornus007.nashira.emoji.EmojiIndex
-import io.github.capricornus007.nashira.emoji.EmojiTable
-import kotlinx.coroutines.launch
 /**
- * Discord 式貼圖面板：頂部「貼圖／表情」分頁，貼圖頁是一排貼圖包籤＋當前包的
- * 貼圖網格（點擊直接送出），表情頁是所有包裡 usage=emoticon 的條目
- * （點擊插進輸入列，隨文字一起以 formatted_body 發送，P5-2）。
- * 包清單來自 MSC2545（個人包 + emote 房間包）。
+ * Discord 式貼圖面板：頂部「貼圖／表情」分頁。貼圖頁是一排貼圖包籤＋當前包的貼圖
+ * 網格（點擊直接送 m.sticker）；表情頁是整個 Unicode 表情瀏覽器（`EmojiBrowser`），
+ * 點的 Unicode 表情插進輸入列游標處，點的 MSC2545 自訂表情則隨文字一起以
+ * formatted_body 發送（P5-2）。包清單來自 MSC2545（個人包 + emote 房間包）。
  */
 @Composable
 fun StickerPicker(
@@ -119,7 +104,15 @@ fun StickerPicker(
                 }
             }
             if (emojiTab) {
-                EmojiPage(repository, client, strings, onPickEmoticon, onPickEmoji)
+                val emoticons by remember(client) { repository.emoticons() }.collectAsState(initial = emptyList())
+                EmojiBrowser(
+                    strings = strings,
+                    client = client,
+                    emoticons = emoticons,
+                    onPickEmoji = onPickEmoji,
+                    onPickEmoticon = onPickEmoticon,
+                    modifier = Modifier.fillMaxSize(),
+                )
             } else if (packs.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
@@ -168,188 +161,6 @@ fun StickerPicker(
                 StickerGrid(packs[index], client, onSend)
             }
         }
-    }
-}
-
-/**
- * 「表情」分頁：搜尋＋最近使用＋自訂表情（MSC2545 emoticon）＋Unicode 分類，
- * 全部混在同一個網格裡——Discord 就是這麼排的（自訂表情排在分類前面），
- * 拆成兩個分頁反而要多點一次。
- *
- * 分類節標用 glyph 不用文字：九個分類×六種語言是 54 個翻譯鍵，而 Discord／
- * Telegram 的分類條本來就只有圖標沒有文字；同一個 glyph 兼作節標與分隔線。
- */
-@Composable
-private fun EmojiPage(
-    repository: StickerRepository,
-    client: MatrixClient,
-    strings: Strings,
-    onPickEmoticon: (StickerItem) -> Unit,
-    onPickEmoji: (EmojiEntry) -> Unit,
-) {
-    val ui = LocalUiState.current
-    var query by remember { mutableStateOf("") }
-    val emoticons by remember(client) { repository.emoticons() }.collectAsState(initial = emptyList())
-    val gridState = rememberLazyGridState()
-    val scope = rememberCoroutineScope()
-    val recents = remember(ui.emojiRecents) { EmojiIndex.byHexcodes(ui.emojiRecents) }
-    val plan = remember(query, recents, emoticons, strings) {
-        buildEmojiPlan(strings, query, recents, emoticons)
-    }
-
-    Column(Modifier.fillMaxSize()) {
-        OutlinedTextField(
-            value = query,
-            onValueChange = { query = it },
-            singleLine = true,
-            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
-            trailingIcon = {
-                if (query.isNotEmpty()) {
-                    IconButton(onClick = { query = "" }, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(16.dp))
-                    }
-                }
-            },
-            placeholder = { Text(strings.emojiSearchHint, style = MaterialTheme.typography.bodyMedium) },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-        )
-        // 分類圖示條：點了捲到該分類。搜尋時收起來（結果本来就是扁平清單，沒有分類可跳）
-        if (query.isBlank()) {
-            LazyRow(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
-                itemsIndexed(EmojiIndex.categories) { _, cat ->
-                    val target = plan.categoryIndex[cat.group] ?: return@itemsIndexed
-                    IconButton(
-                        onClick = { scope.launch { gridState.animateScrollToItem(target) } },
-                        modifier = Modifier.size(34.dp),
-                    ) {
-                        Text(cat.icon, style = MaterialTheme.typography.titleMedium)
-                    }
-                }
-            }
-        }
-        LazyVerticalGrid(
-            columns = GridCells.Adaptive(40.dp),
-            state = gridState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            gridItemsIndexed(
-                plan.rows,
-                key = { _, row -> row.key },
-                span = { _, row ->
-                    if (row is EmojiRow.Header) GridItemSpan(maxLineSpan) else GridItemSpan(1)
-                },
-            ) { _, row ->
-                when (row) {
-                    is EmojiRow.Header -> EmojiSectionHeader(row, onClearRecents = { ui.emojiRecents = emptyList() })
-                    is EmojiRow.Emoji -> EmojiCell(row.entry) {
-                        // 用過就進「最近使用」；插進輸入列由呼叫端決定（游標位置只有它知道）
-                        ui.rememberEmojiUsage(row.entry.hexcode)
-                        onPickEmoji(row.entry)
-                    }
-                    is EmojiRow.Emote -> Box(
-                        Modifier.size(40.dp).padding(2.dp).clip(RoundedCornerShape(8.dp))
-                            .clickable { onPickEmoticon(row.item) },
-                    ) {
-                        StickerThumb(client, row.item)
-                    }
-                }
-            }
-        }
-    }
-}
-
-private sealed interface EmojiRow {
-    val key: String
-    /** 橫跨整行的節標。[text] 與 [icon] 二擇一：前者是「最近使用／表情」這類本地化標題，後者是分類 glyph。 */
-    data class Header(override val key: String, val icon: String?, val text: String?, val clearable: Boolean) : EmojiRow
-    data class Emoji(override val key: String, val entry: EmojiEntry) : EmojiRow
-    data class Emote(override val key: String, val item: StickerItem) : EmojiRow
-}
-
-private class EmojiPlan(val rows: List<EmojiRow>, val categoryIndex: Map<Int, Int>)
-
-/** 把「搜尋結果」或「最近＋自訂＋九個分類」攤成一格一筆的清單，順帶記每個分類的起始索引。 */
-private fun buildEmojiPlan(
-    strings: Strings,
-    query: String,
-    recents: List<EmojiEntry>,
-    emoticons: List<StickerItem>,
-): EmojiPlan {
-    val rows = ArrayList<EmojiRow>()
-    if (query.isNotBlank()) {
-        val hits = EmojiIndex.search(query)
-        if (hits.isEmpty()) {
-            rows += EmojiRow.Header("h-none", null, strings.emojiNoResults, false)
-        } else {
-            hits.forEach { rows += EmojiRow.Emoji("s-" + it.hexcode, it) }
-        }
-        return EmojiPlan(rows, emptyMap())
-    }
-    if (recents.isNotEmpty()) {
-        rows += EmojiRow.Header("h-recent", null, strings.emojiRecent, true)
-        recents.forEach { rows += EmojiRow.Emoji("r-" + it.hexcode, it) }
-    }
-    if (emoticons.isNotEmpty()) {
-        rows += EmojiRow.Header("h-emote", null, strings.emoticons, false)
-        emoticons.forEach {
-            rows += EmojiRow.Emote("e-" + it.shortcode + (it.mxcUrl ?: it.file?.url ?: ""), it)
-        }
-    }
-    val index = LinkedHashMap<Int, Int>()
-    for (cat in EmojiIndex.categories) {
-        val entries = EmojiTable.byGroup[cat.group].orEmpty()
-        if (entries.isEmpty()) continue
-        index[cat.group] = rows.size
-        rows += EmojiRow.Header("h-cat" + cat.group, cat.icon, null, false)
-        entries.forEach { rows += EmojiRow.Emoji("u-" + it.hexcode, it) }
-    }
-    return EmojiPlan(rows, index)
-}
-
-@Composable
-private fun EmojiSectionHeader(row: EmojiRow.Header, onClearRecents: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().padding(start = 8.dp, end = 4.dp, top = 6.dp, bottom = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        when {
-            row.text != null -> Text(
-                row.text,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            row.icon != null -> Text(row.icon, style = MaterialTheme.typography.labelLarge)
-        }
-        if (row.clearable) {
-            Spacer(Modifier.weight(1f))
-            IconButton(onClick = onClearRecents, modifier = Modifier.size(22.dp)) {
-                Icon(
-                    Icons.Filled.Close,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(14.dp),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun EmojiCell(entry: EmojiEntry, onClick: () -> Unit) {
-    // 膚色變體（entry.skins）暫時不做長按選色——先確保插入與最近使用是對的，
-    // 選色器是另一件事（Discord 是長按彈出，Telegram 是右鍵）
-    Box(
-        Modifier
-            .size(40.dp)
-            .padding(2.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(entry.glyph, style = MaterialTheme.typography.headlineSmall)
     }
 }
 
@@ -421,7 +232,7 @@ private fun StickerGrid(pack: StickerPack, client: MatrixClient, onSend: (Sticke
 }
 
 @Composable
-private fun StickerThumb(
+internal fun StickerThumb(
     client: MatrixClient,
     sticker: StickerItem,
     /** 載入失敗時交給呼叫端接手（PackTab 換下一個封面候選）；null 時顯示 ↻ 重試磚。 */

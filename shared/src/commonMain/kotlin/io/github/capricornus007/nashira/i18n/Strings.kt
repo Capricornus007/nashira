@@ -123,6 +123,8 @@ interface Strings {
     val actionUnmute: String
     val actionPin: String
     val actionUnpin: String
+    /** 反應選擇器的入口：hover 列的笑臉鈕與選單裡那一列共用。 */
+    val actionAddReaction: String
     val actionSourceUrl: String
     val actionViewSource: String
     val actionForward: String
