@@ -85,7 +85,7 @@ fun markdownToHtml(text: String): String? {
     flushParagraph()
 
     val html = out.toString().trimEnd('\n')
-    // 標記存在但一個標籤都沒生成（例如只有 `\*\*` 這種被逃脫掉的），當純文字發
+    // 標記存在卻一個標籤都沒生成（例如只有 `\*\*` 這種被逃脫掉的），就回 null 當純文字發。
     return html.takeIf { it.contains('<') }
 }
 

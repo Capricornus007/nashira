@@ -1,6 +1,40 @@
 # Nashira 交接文檔
 
-更新：2026-09-24（上一版是 2026-09-10 導出、master @ `76fb1d4`；之後 40+ 筆提交的狀態這版已逐條對碼核過）。
+更新：2026-09-25（上一版是 2026-09-24 導出、master @ `76fb1d4`；之後 70+ 筆提交的狀態這版已逐條對碼核過）。
+
+## 本輪狀態：2026-09-25 第二批（0.1.15 → **0.1.16**）
+
+- **托盤兩個 bug（`18ee92e`，已在 0.1.15）**：`TrayIcon` 與 `addMouseListener` 原本直接寫在
+  Composable 本體 → 每次重組多掛一顆圖示（用戶照片：右鍵一次多一顆）。改成 `remember` 一顆
+  ＋`DisposableEffect` 一進一出。選單位置從「拿 `Toolkit.screenSize` 硬換算邏輯 dp、還寫死
+  2240×1400」改成 `window.setLocation(物理像素)`，照指標位置擺、上下半屏自行翻向。
+- **程式碼塊終於是「一塊」**（用戶先決「真區塊」）：`htmlToRichText()` 把 `<pre>` 從 HTML 裡
+  切出來，`MessageBodyContent` 依段落渲染——文字段一個 `Text`，程式碼段 `CodeBlockBubble`
+  （圓角底色＋等寬＋`horizontalScroll`＋右上角複製鈕，蓋在區塊上、不另佔一列）。
+  舊做法是 `SpanStyle.background` 一行之行刷底色，AnnotatedString 給不了容器／內距／捲動。
+  `RichSegment` 是 `sealed interface`（Text／Code），`FormattedRichText` 從「一個
+  AnnotatedString」改成「segments 清單」；行內 `<pre>` 解析分支已移除（`htmlToAnnotatedString`
+  降成 private，回 `Pair<AnnotatedString, List<InlineEmoticon>>`）。
+- **Markdown 才打得開**：新增 `MarkdownToHtml.kt` 的 `markdownToHtml(text): String?`，
+  在 `sendDraft` 決定要不要附 `formatted_body`（回 null 就老實發純文字）。**為什麼非加不可**：
+  格式化按鈕插的是 `**粗體**`／```` ``` ```` 這種標記，沒有這層轉換，發出去別家（含我們自己）
+  看到的就是字面星號。不支援 `_底線_`（檔名識別符會中槍）、不做巢疊清單。
+- **輸入框右鍵格式化選單**（`ComposerFormat.kt`）：項目照 Element Web `Formatting` 列舉——
+  粗體／斜體／刪除線／程式碼塊／引用／連結（它沒有底線與清單鈕，我們也不自己加）；整欄空時
+  全排灰色（`ContextMenuItem(enabled=)`）。掛的是新的 `Modifier.secondaryClickMenu`（只吃右鍵），
+  **不要用 `contextMenuGestures`**：它的 `combinedClickable` 會跟文字欄搶游標／選取，而且手機
+  長按本來是系統選字工具列，不能被選單頂掉。i18n 五檔齊加 `format*` 六鍵。
+- **音訊裝置對鍵換成 `api.alsa.path`**（見「慣例」那條的為什麼）。
+
+### 這輪新增的一個坑
+- **本機 `assembleRelease` 的 APK 是未簽名的**（`hasReleaseSigning` 只看環境變數，本機沒有
+  `RELEASE_KEYSTORE`）→ 本機驗簽沒有任何意義，`apksigner` 只會回 `Missing META-INF/MANIFEST.MF`。
+  規則 71 的「驗產物不驗配置」在這裡＝**下載 CI release 的資產來驗**（`gh release download`
+  ＋`--clobber`），本機產物只能拿來確認能編、能裝。
+
+### 待辦（用戶已點頭、尚未動工的）
+- 桌面聊天室清單可調寬（最窄退化成頭像直欄）、公開聊天室地球圖示、聊天記錄搜尋多語言＋按日期、
+  nagram 式 pangu 化、訊息 hover 動作列與房間標題列快捷鈕對齊 Element——細項見本輪待辦 #16–#22。
 
 ## 本輪狀態：2026-09-25（表情／反應這批＋SSO 修正）
 
@@ -98,7 +132,8 @@ P6-1 threads、P6-2 位置分享、P6-3 polls、P6-8 語音/視訊通話（無 W
 - `LocalUiState` 是 `staticCompositionLocalOf`：**只能在 composable 作用域讀 `.current`**，放進 `onClick` lambda 會撞 `@Composable invocations can only happen from the context ...`；要在事件裡改 UiState，就在 composable 頂部抓一個區域變數（例：`ChatScreen` 的 `uiState`）。
 - `UiState` 是 `App.kt` 裡那個 `var` 欄位全在記憶體＋本地持久化的類別，沒有 ViewModel；平台旗標要同步給 `AudioSelection` 之类的全域 sink 才會有即時效應。
 - 媒體上傳一律「`prepareUploadMedia`/`prepareUploadEncryptedMedia` → `uploadMedia(cacheUri)`」兩步（見 P4-3 的坑）。
-- 音訊裝置分兩層，別混用：`AudioDevice.id` 是存進設定、給平台開線用的識別名（桌面＝javax.sound 的 Mixer 名，形如 `Generic_1 [plughw:1,0]`），`label` 才是給人看的。顯示一律走 `audioDevicesFor()`／`audioDeviceLabel()`（底欄面板與設置頁共用），桌面 actual 再用 `pactl` 把 `alsa.card`/`alsa.device` 對回 PipeWire 節點描述（「Ryzen HD Audio Controller Speaker」），對不上退回 `Mixer.Info` 描述，再沒有才顯示 id——**不要把 id 直接印到 UI**。
+- 音訊裝置分兩層，別混用：`AudioDevice.id` 是存進設定、給平台開線用的識別名（桌面＝javax.sound 的 Mixer 名，形如 `Generic_1 [plughw:1,0]`），`label` 才是給人看的。顯示一律走 `audioDevicesFor()`／`audioDeviceLabel()`（底欄面板與設置頁共用），桌面 actual 再用 `pactl` 把 **`api.alsa.path`** 對回 PipeWire 節點描述（「Ryzen HD Audio Controller Speaker」），對不上退回 `Mixer.Info` 描述，再沒有才顯示 id——**不要把 id 直接印到 UI**。
+  - 為什麼非 `api.alsa.path` 不可：UCM 會把同一張卡的多個裝置（喇叭、Mic1 數位麥、Mic2 類比麥）全回報成同一組 `alsa.card`＋`alsa.device`（實測這台機器兩個麥克風都是 1/0），拿數字那組對會兩列都誤配同一個節點（用戶 2026-09-25 截圖的重複列＋`DMIC dmic-hifi-0` 亂碼名就是這個）。mixer 給數字、節點給卡名，橋樑是 `/proc/asound/cardN/id`。
 - 沒有 logger：失敗路徑可以留 `println`，成功路徑與高頻事件（hover、每則訊息、每幀）不要印。
 
 ## 環境事實（2026-09-24 核對）
