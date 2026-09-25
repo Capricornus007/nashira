@@ -3525,8 +3525,6 @@ private fun MessageRow(
     }
 }
 
-
-
 /**
  * 一則訊息的富文本：文字段與程式碼塊交錯排列。
  *
@@ -3547,60 +3545,21 @@ fun htmlToRichText(
     val segments = splitHtmlCodeBlocks(html).mapNotNull { (isCode, chunk) ->
         if (isCode) {
             RichSegment.Code(codeTextOf(chunk)).takeIf { it.text.isNotEmpty() }
-        } else if (chunk.isBlank()) {
-            null
         } else {
-            val parsed = htmlToAnnotatedString(chunk, baseStyle, linkColor)
-            emoticons += parsed.second
-            RichSegment.Text(parsed.first)
+            // 區塊與區塊之間的換行是 HTML 的區塊間距，不是訊息裡的空行：
+            // 留著會被照字面排成一行空白
+            val text = chunk.trim('\n')
+            if (text.isBlank()) null
+            else {
+                val parsed = htmlToAnnotatedString(text, baseStyle, linkColor)
+                emoticons += parsed.second
+                RichSegment.Text(parsed.first)
+            }
         }
     }
     return FormattedRichText(segments, emoticons)
 }
 
-/** 一段 HTML 切出來的結果：`isCode` 為真時這段是要獨立成塊的 `<pre>` 內容。 */
-private typealias HtmlChunk = Pair<Boolean, String>
-
-/**
- * 把 `<pre>…</pre>` 從 HTML 裡挖出來當獨立區塊，其餘留給行內解析器。
- * 先剝 `<mx-reply>`：那是「回覆來源」的複製內容，裡頭的 `<pre>` 若跟著挖出來，
- * 會把本來該隱掉的引用又變回一塊看得見的程式碼。
- */
-private fun splitHtmlCodeBlocks(html: String): List<HtmlChunk> {
-    val source = MxReplyBlockRegex.replace(html, "")
-    val out = ArrayList<HtmlChunk>()
-    var pos = 0
-    for (match in PreBlockRegex.findAll(source)) {
-        if (match.range.first > pos) out += false to source.substring(pos, match.range.first)
-        out += true to match.groupValues[1]
-        pos = match.range.last + 1
-    }
-    val tail = source.substring(pos)
-    // 橋接器送來的 HTML 未必閉合（Element 的解析器也是把沒關的 <pre> 一路收到結尾）
-    val open = OpenPreRegex.find(tail)
-    if (open == null) {
-        if (tail.isNotEmpty()) out += false to tail
-    } else {
-        if (open.range.first > 0) out += false to tail.substring(0, open.range.first)
-        out += true to tail.substring(open.range.last + 1)
-    }
-    return out
-}
-
-/** `<pre>` 裡頭通常還包一層 `<code>`；標籤先剝、實體後解，順序不能反。 */
-private fun codeTextOf(innerHTML: String): String =
-    decodeHtmlEntities(HTML_TAG_REGEX.replace(innerHTML, "")).removeSuffix("\n")
-
-/**
- * 回覆的引用塊：Matrix 把它包在 `<mx-reply>…</mx-reply>` 裡，內容是「被回覆那則」的
- * 副本（訊息上方另有 ↩ 那一列呈現，所以這段不進內文）。裡面**一定**有一顆
- * matrix.to 連結（「In reply to …」），那不是你貼的連結——連結偵測與 `<pre>`
- * 切段都要先剝掉它。
- */
-internal val MxReplyBlockRegex = Regex("(?is)<mx-reply>.*?</mx-reply>")
-private val PreBlockRegex = Regex("(?is)<pre[^>]*>(.*?)</pre>")
-private val OpenPreRegex = Regex("(?is)<pre[^>]*>")
-private val HTML_TAG_REGEX = Regex("(?is)</?[a-z][^>]*>")
 /**
  * 簡易 HTML → AnnotatedString 解析器（Matrix org.matrix.custom.html 常見標籤）。
  *
@@ -3818,50 +3777,6 @@ private fun htmlToAnnotatedString(
     return annotated to emoticons
 }
 
-/**
- * HTML 實體解碼：全量 HTML5 命名表（[HtmlEntities.kt]，2125 條）＋十進制/十六進制
- * 數字實體（&#8211; / &#x2713;）。
- *
- * 單趟掃描。舊寫法是 `HtmlNamedEntities.forEach { out = out.replace("&$it", …) }`
- * ——渲染一段文字要把整串掃 2125 遍、每遍還配置一個新字串，而這函數在訊息列的
- * 渲染路徑上（時間線一滾就是一片，且 `<a href>` 解碼時還會再走一次）。現在只在
- * 真的遇到 `&` 時往後找名稱邊界、查一次表；字串裡沒有 `&` 就直接原樣返回。
- */
-private val NumericEntityRegex = Regex("&#(?:([0-9]{1,7})|x([0-9a-fA-F]{1,6}));")
-
-internal fun decodeHtmlEntities(s: String): String {
-    var amp = s.indexOf('&')
-    if (amp < 0) return s
-    val out = StringBuilder(s.length)
-    var i = 0
-    while (true) {
-        if (amp < 0) {
-            out.append(s, i, s.length)
-            break
-        }
-        out.append(s, i, amp)
-        val numeric = NumericEntityRegex.find(s, amp)
-        if (numeric != null && numeric.range.first == amp) {
-            val code = numeric.groupValues[1].toIntOrNull() ?: numeric.groupValues[2].toIntOrNull(16)
-            out.append(code?.let { Character.toChars(it).concatToString() } ?: numeric.value)
-            i = numeric.range.last + 1
-        } else {
-            // 命名實體 &名稱;：名稱只有英數字，HTML5 最長 31 字元；對不上就原樣留 '&'
-            var j = amp + 1
-            while (j < s.length && j - amp <= 32 && s[j].isLetterOrDigit()) j++
-            val named = if (j < s.length && s[j] == ';') HtmlNamedEntities[s.substring(amp + 1, j)] else null
-            if (named != null) {
-                out.append(named)
-                i = j + 1
-            } else {
-                out.append('&')
-                i = amp + 1
-            }
-        }
-        amp = s.indexOf('&', i)
-    }
-    return out.toString()
-}
 
 /** 巢疊清單的一層：<ol> 要自己編號，<ul> 用點（巢疊深一層換成 ◦）。 */
 private class ListLevel(val ordered: Boolean) {

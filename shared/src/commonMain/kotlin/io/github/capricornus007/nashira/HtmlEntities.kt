@@ -2133,3 +2133,48 @@ internal val HtmlNamedEntities: Map<String, String> = buildMap {
     put("zwj", "‍")
     put("zwnj", "‌")
 }
+
+/**
+ * HTML 實體解碼：全量 HTML5 命名表（[HtmlEntities.kt]，2125 條）＋十進制/十六進制
+ * 數字實體（&#8211; / &#x2713;）。
+ *
+ * 單趟掃描。舊寫法是 `HtmlNamedEntities.forEach { out = out.replace("&$it", …) }`
+ * ——渲染一段文字要把整串掃 2125 遍、每遍還配置一個新字串，而這函數在訊息列的
+ * 渲染路徑上（時間線一滾就是一片，且 `<a href>` 解碼時還會再走一次）。現在只在
+ * 真的遇到 `&` 時往後找名稱邊界、查一次表；字串裡沒有 `&` 就直接原樣返回。
+ */
+private val NumericEntityRegex = Regex("&#(?:([0-9]{1,7})|x([0-9a-fA-F]{1,6}));")
+
+internal fun decodeHtmlEntities(s: String): String {
+    var amp = s.indexOf('&')
+    if (amp < 0) return s
+    val out = StringBuilder(s.length)
+    var i = 0
+    while (true) {
+        if (amp < 0) {
+            out.append(s, i, s.length)
+            break
+        }
+        out.append(s, i, amp)
+        val numeric = NumericEntityRegex.find(s, amp)
+        if (numeric != null && numeric.range.first == amp) {
+            val code = numeric.groupValues[1].toIntOrNull() ?: numeric.groupValues[2].toIntOrNull(16)
+            out.append(code?.let { Character.toChars(it).concatToString() } ?: numeric.value)
+            i = numeric.range.last + 1
+        } else {
+            // 命名實體 &名稱;：名稱只有英數字，HTML5 最長 31 字元；對不上就原樣留 '&'
+            var j = amp + 1
+            while (j < s.length && j - amp <= 32 && s[j].isLetterOrDigit()) j++
+            val named = if (j < s.length && s[j] == ';') HtmlNamedEntities[s.substring(amp + 1, j)] else null
+            if (named != null) {
+                out.append(named)
+                i = j + 1
+            } else {
+                out.append('&')
+                i = amp + 1
+            }
+        }
+        amp = s.indexOf('&', i)
+    }
+    return out.toString()
+}

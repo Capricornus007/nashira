@@ -31,7 +31,10 @@ fun markdownToHtml(text: String): String? {
 
     fun flushParagraph() {
         if (paragraph.isEmpty()) return
-        out.append(paragraph.joinToString("<br>") { inlineMarkdownToHtml(it) })
+        // 段尾補一個換行：區塊與區塊之間在 HTML 裡本來就是分開的，黏在一起
+        // （「前文<pre>…」）我們自己的渲染器會照字面排
+        while (paragraph.lastOrNull()?.isBlank() == true) paragraph.removeAt(paragraph.size - 1)
+        out.append(paragraph.joinToString("<br>") { inlineMarkdownToHtml(it) }).append('\n')
         paragraph.clear()
     }
 
@@ -51,11 +54,11 @@ fun markdownToHtml(text: String): String? {
             if (body.isNotEmpty()) out.append("<pre><code>").append(htmlEscape(body.toString())).append("</code></pre>\n")
             continue
         }
-        if (QUOTE_LINE.matches(line.trimStart())) {
+        if (isQuotedLine(line)) {
             flushParagraph()
             val quoted = ArrayList<String>()
-            while (i < lines.size && QUOTE_LINE.matches(lines[i].trimStart())) {
-                quoted += QUOTE_LINE.replaceFirst(lines[i].trimStart(), "")
+            while (i < lines.size && isQuotedLine(lines[i])) {
+                quoted += stripQuote(lines[i])
                 i++
             }
             out.append("<blockquote>").append(quoted.joinToString("<br>") { inlineMarkdownToHtml(it) }).append("</blockquote>\n")
@@ -79,7 +82,8 @@ fun markdownToHtml(text: String): String? {
             out.append("</").append(tag).append(">\n")
             continue
         }
-        paragraph += line
+        // 區塊之後緊跟著的空行不進內文（否則段首會多出一個 `<br>` 的空白行）
+        if (!(line.isBlank() && paragraph.isEmpty())) paragraph += line
         i++
     }
     flushParagraph()
@@ -91,17 +95,21 @@ fun markdownToHtml(text: String): String? {
 
 /** 快速決斷：值不值得跑一趟完整解析。 */
 private fun containsMarkdownMarkup(text: String): Boolean =
-    text.indexOf('*') >= 0 || text.indexOf('~') >= 0 || text.indexOf('`') >= 0 ||
-        text.indexOf('[') >= 0 || text.contains("> ") || text.startsWith(">") ||
-        text.contains("\n> ") || text.contains("\n- ") || text.startsWith("- ") ||
-        text.contains("\n* ") || text.startsWith("* ") ||
-        text.contains("\n+ ") || text.startsWith("+ ") || ORDERED_ITEM_START.matches(text) ||
-        text.contains("\n1. ") || text.contains("\\*") || text.contains("\\`") || text.contains("\\~")
+    text.indexOf('*') >= 0 || text.indexOf('~') >= 0 || text.indexOf('`') >= 0 || text.indexOf('[') >= 0 ||
+        LINE_MARKUP.containsMatchIn(text) || ESCAPE_MARKUP.containsMatchIn(text)
+
+/** 行首標記：`>` 引用、`- `/`* `/`+ ` 項目符號、`1. ` 編號。`(?m)` 讓每行的行首都算。 */
+private val LINE_MARKUP = Regex("""(?m)^\s*(?:>|[-*+]\s|\d+\.\s)""")
+private val ESCAPE_MARKUP = Regex("""\\[*~`]""")
 
 private val FENCE_LINE = Regex("^\\s*```.*$")
-private val QUOTE_LINE = Regex("^>\\s?.*$")
 private val LIST_ITEM = Regex("^\\s*(?:([-*+])|(\\d+\\.))\\s+(.*)$")
-private val ORDERED_ITEM_START = Regex("^\\s*\\d+\\.\\s")
+
+/** 引用行：行首一顆 `>`（`>文字` 與 `> 文字` 都算）。 */
+private fun isQuotedLine(line: String): Boolean = line.trimStart().startsWith(">")
+
+/** 把引用標記那顆 `>` 與它後面的一個空格拿掉。 */
+private fun stripQuote(line: String): String = line.trimStart().drop(1).removePrefix(" ")
 
 /** 行內標記：一趟掃描，`` ` `` 優先（程式碼裡的其他符號一律不算標記）。 */
 private fun inlineMarkdownToHtml(raw: String): String {
