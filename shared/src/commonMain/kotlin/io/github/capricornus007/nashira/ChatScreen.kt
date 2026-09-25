@@ -1497,10 +1497,6 @@ private fun TimelinePane(
     val sendTarget = alias?.substringBefore(':') ?: room.name
     // TextFieldState（BTF2）：輸入法要靠它回報游標位置
     val draft = remember(room.roomId) { TextFieldState() }
-    // 右鍵輸入框彈出的格式化選單（照 Element format bar 那幾項；做成選單而不是
-    // 常駐一排鈕——手機沒地方放，桌面 Element 平時也把這排藏起來）
-    var formatMenuOpen by remember(room.roomId) { mutableStateOf(false) }
-    var formatMenuAnchor by remember(room.roomId) { mutableStateOf(Offset.Unspecified) }
     var sending by remember(room.roomId) { mutableStateOf(false) }
     var sendError by remember(room.roomId) { mutableStateOf<String?>(null) }
     /** 選了「回覆」之後要附上的目標訊息；送出後清掉。 */
@@ -2290,79 +2286,64 @@ private fun TimelinePane(
                         shape = RoundedCornerShape(22.dp),
                         modifier = Modifier.weight(1f),
                     ) {
-                        // Box：DropdownMenu 要有個錨點可擺（右鍵按下的位置是相對這裡算的）
-                        Box {
-                            // 用 state 版的 BasicTextField（BTF2）而不是 value/onValueChange 版：
-                            // 舊版在 Linux 不會把游標矩形回報給輸入法，fcitx5 的候選詞窗只能
-                            // 退回視窗原點，於是跑到畫面左下角。BTF2 走新的文字輸入會話，
-                            // 會回報 composition/cursor 位置。
-                            BasicTextField(
-                                state = draft,
-                                modifier = Modifier.fillMaxWidth()
-                                    .focusRequester(composerFocus)
-                                    .heightIn(min = 44.dp)
-                                    .onFocusChanged { composerFocused = it.isFocused }
-                                    // 右鍵＝格式化選單。只做右鍵、不搶長按：長按在輸入框裡
-                                    // 是叫系統的選字工具列（手機），頂掉它就是減功能。
-                                    .secondaryClickMenu { position ->
-                                        formatMenuAnchor = position
-                                        formatMenuOpen = true
+                        // 用 state 版的 BasicTextField（BTF2）而不是 value/onValueChange 版：
+                        // 舊版在 Linux 不會把游標矩形回報給輸入法，fcitx5 的候選詞窗只能
+                        // 退回視窗原點，於是跑到畫面左下角。BTF2 走新的文字輸入會話，
+                        // 會回報 composition/cursor 位置。
+                        BasicTextField(
+                            state = draft,
+                            modifier = Modifier.fillMaxWidth()
+                                .focusRequester(composerFocus)
+                                .heightIn(min = 44.dp)
+                                .onFocusChanged { composerFocused = it.isFocused }
+                                // 右鍵＝在文字欄自己的選單尾端追加格式化六項（同一個選單、
+                                // 同一套主題）。自己再開一個 DropdownMenu 會跟內建那層疊成
+                                // 兩層，2026-09-25 用戶截圖點名過。
+                                .appendTextContextMenuComponents {
+                                    appendComposerFormatItems(
+                                        strings = strings,
+                                        // 「空時灰色」：整欄是空的，插標記只會留一對空符號在框裡
+                                        enabled = draft.text.isNotEmpty(),
+                                        onPick = { format -> applyComposerFormat(draft, format) },
+                                    )
+                                }
+                                // 送出鍵：命中設定的組合就送並吃掉事件，其餘 Enter 交回去換行
+                                .onPreviewKeyEvent { event ->
+                                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                    if (event.key != Key.Enter && event.key != Key.NumPadEnter) {
+                                        return@onPreviewKeyEvent false
                                     }
-                                    // 送出鍵：命中設定的組合就送並吃掉事件，其餘 Enter 交回去換行
-                                    .onPreviewKeyEvent { event ->
-                                        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                                        if (event.key != Key.Enter && event.key != Key.NumPadEnter) {
-                                            return@onPreviewKeyEvent false
-                                        }
-                                        val matches = when (sendShortcut) {
-                                            SendShortcut.ENTER ->
-                                                !event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed
-                                            SendShortcut.CTRL_ENTER -> event.isCtrlPressed
-                                            SendShortcut.ALT_ENTER -> event.isAltPressed
-                                            SendShortcut.SHIFT_ENTER -> event.isShiftPressed
-                                        }
-                                        if (matches) {
-                                            sendDraft()
-                                            true
-                                        } else {
-                                            false
-                                        }
+                                    val matches = when (sendShortcut) {
+                                        SendShortcut.ENTER ->
+                                            !event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed
+                                        SendShortcut.CTRL_ENTER -> event.isCtrlPressed
+                                        SendShortcut.ALT_ENTER -> event.isAltPressed
+                                        SendShortcut.SHIFT_ENTER -> event.isShiftPressed
                                     }
-                                    .padding(horizontal = 16.dp, vertical = 11.dp),
-                                textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-                                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                                lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 6),
-                                decorator = { inner ->
-                                    if (draft.text.isEmpty()) {
-                                        Text(
-                                            strings.sendTo.format(sendTarget),
-                                            style = MaterialTheme.typography.bodyLarge,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
+                                    if (matches) {
+                                        sendDraft()
+                                        true
+                                    } else {
+                                        false
                                     }
-                                    inner()
-                                },
-                            )
-                            ContextMenuSurface(
-                                expanded = formatMenuOpen,
-                                onDismiss = { formatMenuOpen = false },
-                                anchor = formatMenuAnchor,
-                            ) {
-                                // 「空時灰色」：整欄是空的，插標記只會留一對空符號在框裡
-                                ComposerFormatItems(
-                                    strings = strings,
-                                    enabled = draft.text.isNotEmpty(),
-                                    onPick = { format ->
-                                        formatMenuOpen = false
-                                        applyComposerFormat(draft, format)
-                                        // 焦點留給文字欄：選完就能接著打，不用再點一次
-                                        scope.launch { composerFocus.requestFocus() }
-                                    },
-                                )
-                            }
-                        }
+                                }
+                                .padding(horizontal = 16.dp, vertical = 11.dp),
+                            textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                            lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 6),
+                            decorator = { inner ->
+                                if (draft.text.isEmpty()) {
+                                    Text(
+                                        strings.sendTo.format(sendTarget),
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                inner()
+                            },
+                        )
                     }
                     // 尾端只有一顆鍵，內容隨草稿切換（實機對照：微信空白時是「＋」、
                     // 有字就換成「傳送」；Telegram 空白時是麥克風＋迴紋針，有字就變紙飛機）。

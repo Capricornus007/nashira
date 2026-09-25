@@ -1,7 +1,9 @@
 package io.github.capricornus007.nashira
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.text.contextmenu.builder.TextContextMenuBuilderScope
+import androidx.compose.foundation.text.contextmenu.builder.item
 import androidx.compose.foundation.text.input.TextFieldState
-import androidx.compose.runtime.Composable
 import androidx.compose.ui.text.TextRange
 import io.github.capricornus007.nashira.i18n.Strings
 
@@ -32,11 +34,21 @@ enum class ComposerFormat {
     }
 }
 
-/** 選單裡的六列。`enabled=false`（輸入框是空的）時整排灰色、點了沒反應。 */
-@Composable
-fun ComposerFormatItems(strings: Strings, enabled: Boolean, onPick: (ComposerFormat) -> Unit) {
+/**
+ * 把六項格式化追加到**文字欄自己那個**右鍵選單尾端（系統項與自訂項同清單、同主題）。
+ *
+ * 教訓（2026-09-25 用戶截圖）：第一版是自己掛 `pointerInput` 收右鍵、再開一個
+ * `DropdownMenu`，結果桌面 BasicTextField 內建的選單（剪下／複製／貼上／全部選取）
+ * 照樣彈出來——同一個位置疊兩層選單，而且內建那層是淺底色，在深色主題裡特別突兀。
+ * 正解是 `Modifier.appendTextContextMenuComponents`：只有一個選單，且手機端的
+ * 文字工具列（TextToolbar）也走同一份清單，不用另外做入口。
+ */
+@OptIn(ExperimentalFoundationApi::class)
+fun TextContextMenuBuilderScope.appendComposerFormatItems(strings: Strings, enabled: Boolean, onPick: (ComposerFormat) -> Unit) {
+    separator()
     ComposerFormat.entries.forEach { format ->
-        ContextMenuItem(format.label(strings), enabled = enabled) { onPick(format) }
+        // 參數一律用位置傳：順序是 (key, label, enabled, leadingIcon, onClick)
+        item("nashira.format.${format.name}", format.label(strings), enabled, null) { onPick(format) }
     }
 }
 

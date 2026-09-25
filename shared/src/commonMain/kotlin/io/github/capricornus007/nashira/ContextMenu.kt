@@ -37,21 +37,7 @@ fun Modifier.contextMenuGestures(
     onClick: (() -> Unit)? = null,
     onContextMenu: (Offset) -> Unit,
 ): Modifier = this
-    .secondaryClickMenu(onContextMenu)
-    // 觸控長按沒有「指標位置」的概念，用 Offset.Unspecified 表示「照預設位置開」
-    .combinedClickable(
-        onClick = { onClick?.invoke() },
-        onLongClick = { onContextMenu(Offset.Unspecified) },
-    )
-
-/**
- * 只吃右鍵的選單觸發器（不含觸控長按）。
- *
- * 文字欄要的就是這個：`combinedClickable` 掛上去會跟游標／選取搶手勢，
- * 而長按在輸入框裡本來是叫出系統的選字工具列，不該被選單頂掉。
- */
-fun Modifier.secondaryClickMenu(onContextMenu: (Offset) -> Unit): Modifier =
-    pointerInput(onContextMenu) {
+    .pointerInput(onContextMenu) {
         awaitPointerEventScope {
             while (true) {
                 val event = awaitPointerEvent(PointerEventPass.Main)
@@ -64,27 +50,26 @@ fun Modifier.secondaryClickMenu(onContextMenu: (Offset) -> Unit): Modifier =
             }
         }
     }
+    // 觸控長按沒有「指標位置」的概念，用 Offset.Unspecified 表示「照預設位置開」
+    .combinedClickable(
+        onClick = { onClick?.invoke() },
+        onLongClick = { onContextMenu(Offset.Unspecified) },
+    )
 
 /** 選單的一列；`destructive` 用錯誤色（離開房間、刪除訊息這類）。 */
 @Composable
 fun ContextMenuItem(
     label: String,
     destructive: Boolean = false,
-    enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
     DropdownMenuItem(
         text = {
             Text(
                 label,
-                color = when {
-                    !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                    destructive -> MaterialTheme.colorScheme.error
-                    else -> MaterialTheme.colorScheme.onSurface
-                },
+                color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
             )
         },
-        enabled = enabled,
         onClick = onClick,
     )
 }
