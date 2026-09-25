@@ -1497,6 +1497,10 @@ private fun TimelinePane(
     val sendTarget = alias?.substringBefore(':') ?: room.name
     // TextFieldState（BTF2）：輸入法要靠它回報游標位置
     val draft = remember(room.roomId) { TextFieldState() }
+    // 右鍵輸入框彈出的格式化選單（照 Element format bar 那幾項；做成選單而不是
+    // 常駐一排鈕——手機沒地方放，桌面 Element 平時也把這排藏起來）
+    var formatMenuOpen by remember(room.roomId) { mutableStateOf(false) }
+    var formatMenuAnchor by remember(room.roomId) { mutableStateOf(Offset.Unspecified) }
     var sending by remember(room.roomId) { mutableStateOf(false) }
     var sendError by remember(room.roomId) { mutableStateOf<String?>(null) }
     /** 選了「回覆」之後要附上的目標訊息；送出後清掉。 */
@@ -1613,17 +1617,19 @@ private fun TimelinePane(
             sending = true
             // P5-2：帶 custom emoji 時組 org.matrix.custom.html——文字跳脫＋img 標籤；
             // body 側放 :shortcode:（Element 相容的回退形式）
-            val formatted = if (emotes.isEmpty()) null else {
-                val escaped = text
-                    .replace("&", "&amp;")
-                    .replace("<", "&lt;")
-                    .replace(">", "&gt;")
-                    .replace("\n", "<br>")
-                val imgs = emotes.joinToString("") { emote ->
-                    val src = emote.mxcUrl
-                    if (src.isNullOrBlank()) "" else "<img data-mx-emoticon src=\"$src\" alt=\":${emote.shortcode}:\">"
-                }
-                escaped + imgs
+            val imgs = emotes.joinToString("") { emote ->
+                val src = emote.mxcUrl
+                if (src.isNullOrBlank()) "" else "<img data-mx-emoticon src=\"$src\" alt=\":${emote.shortcode}:\">"
+            }
+            // 打過標記（**粗體**、``` 碼塊、> 引用…）就附上 HTML，否則老實發純文字：
+            // formatted_body 的存在與否由 markdownToHtml 判斷，沒標記時它回 null。
+            // body 一律留原文（Element 也是這樣——不認得 HTML 的客戶端至少看得到符號）。
+            val markdown = markdownToHtml(text)
+            val formatted = when {
+                markdown != null && imgs.isNotEmpty() -> markdown + imgs
+                markdown != null -> markdown
+                imgs.isEmpty() -> null
+                else -> htmlEscape(text).replace("\n", "<br>") + imgs
             }
             val body = buildString {
                 append(text)
@@ -1636,7 +1642,7 @@ private fun TimelinePane(
             if (edit == null) editTarget = null
             scope.launch {
                 val result = if (edit != null) {
-                    roomRepository.editText(room.roomId, edit, body)
+                    roomRepository.editText(room.roomId, edit, body, formatted)
                 } else if (target != null) {
                     roomRepository.sendReply(room.roomId, target, body, formatted)
                 } else {
@@ -2284,53 +2290,79 @@ private fun TimelinePane(
                         shape = RoundedCornerShape(22.dp),
                         modifier = Modifier.weight(1f),
                     ) {
-                        // 用 state 版的 BasicTextField（BTF2）而不是 value/onValueChange 版：
-                        // 舊版在 Linux 不會把游標矩形回報給輸入法，fcitx5 的候選詞窗只能
-                        // 退回視窗原點，於是跑到畫面左下角。BTF2 走新的文字輸入會話，
-                        // 會回報 composition/cursor 位置。
-                        BasicTextField(
-                            state = draft,
-                            modifier = Modifier.fillMaxWidth()
-                                .focusRequester(composerFocus)
-                                .heightIn(min = 44.dp)
-                                .onFocusChanged { composerFocused = it.isFocused }
-                                // 送出鍵：命中設定的組合就送並吃掉事件，其餘 Enter 交回去換行
-                                .onPreviewKeyEvent { event ->
-                                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                                    if (event.key != Key.Enter && event.key != Key.NumPadEnter) {
-                                        return@onPreviewKeyEvent false
+                        // Box：DropdownMenu 要有個錨點可擺（右鍵按下的位置是相對這裡算的）
+                        Box {
+                            // 用 state 版的 BasicTextField（BTF2）而不是 value/onValueChange 版：
+                            // 舊版在 Linux 不會把游標矩形回報給輸入法，fcitx5 的候選詞窗只能
+                            // 退回視窗原點，於是跑到畫面左下角。BTF2 走新的文字輸入會話，
+                            // 會回報 composition/cursor 位置。
+                            BasicTextField(
+                                state = draft,
+                                modifier = Modifier.fillMaxWidth()
+                                    .focusRequester(composerFocus)
+                                    .heightIn(min = 44.dp)
+                                    .onFocusChanged { composerFocused = it.isFocused }
+                                    // 右鍵＝格式化選單。只做右鍵、不搶長按：長按在輸入框裡
+                                    // 是叫系統的選字工具列（手機），頂掉它就是減功能。
+                                    .secondaryClickMenu { position ->
+                                        formatMenuAnchor = position
+                                        formatMenuOpen = true
                                     }
-                                    val matches = when (sendShortcut) {
-                                        SendShortcut.ENTER ->
-                                            !event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed
-                                        SendShortcut.CTRL_ENTER -> event.isCtrlPressed
-                                        SendShortcut.ALT_ENTER -> event.isAltPressed
-                                        SendShortcut.SHIFT_ENTER -> event.isShiftPressed
+                                    // 送出鍵：命中設定的組合就送並吃掉事件，其餘 Enter 交回去換行
+                                    .onPreviewKeyEvent { event ->
+                                        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                        if (event.key != Key.Enter && event.key != Key.NumPadEnter) {
+                                            return@onPreviewKeyEvent false
+                                        }
+                                        val matches = when (sendShortcut) {
+                                            SendShortcut.ENTER ->
+                                                !event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed
+                                            SendShortcut.CTRL_ENTER -> event.isCtrlPressed
+                                            SendShortcut.ALT_ENTER -> event.isAltPressed
+                                            SendShortcut.SHIFT_ENTER -> event.isShiftPressed
+                                        }
+                                        if (matches) {
+                                            sendDraft()
+                                            true
+                                        } else {
+                                            false
+                                        }
                                     }
-                                    if (matches) {
-                                        sendDraft()
-                                        true
-                                    } else {
-                                        false
+                                    .padding(horizontal = 16.dp, vertical = 11.dp),
+                                textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 6),
+                                decorator = { inner ->
+                                    if (draft.text.isEmpty()) {
+                                        Text(
+                                            strings.sendTo.format(sendTarget),
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
                                     }
-                                }
-                                .padding(horizontal = 16.dp, vertical = 11.dp),
-                            textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                            lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 6),
-                            decorator = { inner ->
-                                if (draft.text.isEmpty()) {
-                                    Text(
-                                        strings.sendTo.format(sendTarget),
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                                inner()
-                            },
-                        )
+                                    inner()
+                                },
+                            )
+                            ContextMenuSurface(
+                                expanded = formatMenuOpen,
+                                onDismiss = { formatMenuOpen = false },
+                                anchor = formatMenuAnchor,
+                            ) {
+                                // 「空時灰色」：整欄是空的，插標記只會留一對空符號在框裡
+                                ComposerFormatItems(
+                                    strings = strings,
+                                    enabled = draft.text.isNotEmpty(),
+                                    onPick = { format ->
+                                        formatMenuOpen = false
+                                        applyComposerFormat(draft, format)
+                                        // 焦點留給文字欄：選完就能接著打，不用再點一次
+                                        scope.launch { composerFocus.requestFocus() }
+                                    },
+                                )
+                            }
+                        }
                     }
                     // 尾端只有一顆鍵，內容隨草稿切換（實機對照：微信空白時是「＋」、
                     // 有字就換成「傳送」；Telegram 空白時是麥克風＋迴紋針，有字就變紙飛機）。
@@ -3413,7 +3445,7 @@ private fun MessageRow(
                 strings = strings,
                 client = client,
                 emoticons = emptyList(),
-                // 反應表沒有輸入列可借用，所以它自帶搜尋欄（Discord 的反應表也是这样）
+                // 反應表沒有輸入列可借用，所以它自帶搜尋欄（Discord 的反應表也是這樣）
                 showSearch = true,
                 onPickEmoji = { entry ->
                     reactOpen = false
@@ -3496,6 +3528,80 @@ private fun MessageRow(
 
 
 /**
+ * 一則訊息的富文本：文字段與程式碼塊交錯排列。
+ *
+ * 分段的原因：`<pre>` 那種「整塊」在 AnnotatedString 裡根本做不到——SpanStyle
+ * 只能替文字刷一層底色，裝不進圓角容器、不能橫向捲、也沒有區塊級外距。之前就是
+ * 拿底色假裝區塊（用戶截圖：一行行灰底糊在氣泡裡，看著不像程式碼塊）。
+ * 所以先把 `<pre>…</pre>` 從 HTML 裡挖出來當獨立區塊，其餘照常走行內解析
+ * （切段見 [splitHtmlCodeBlocks]）。
+ */
+@Composable
+fun htmlToRichText(
+    html: String,
+    baseStyle: TextStyle = MaterialTheme.typography.bodyLarge,
+    linkColor: Color = MaterialTheme.colorScheme.primary,
+): FormattedRichText {
+    val emoticons = ArrayList<InlineEmoticon>()
+    // 切段放純函數做（local 函數不能調 @Composable），這裡只把文字段交給行內解析器
+    val segments = splitHtmlCodeBlocks(html).mapNotNull { (isCode, chunk) ->
+        if (isCode) {
+            RichSegment.Code(codeTextOf(chunk)).takeIf { it.text.isNotEmpty() }
+        } else if (chunk.isBlank()) {
+            null
+        } else {
+            val parsed = htmlToAnnotatedString(chunk, baseStyle, linkColor)
+            emoticons += parsed.second
+            RichSegment.Text(parsed.first)
+        }
+    }
+    return FormattedRichText(segments, emoticons)
+}
+
+/** 一段 HTML 切出來的結果：`isCode` 為真時這段是要獨立成塊的 `<pre>` 內容。 */
+private typealias HtmlChunk = Pair<Boolean, String>
+
+/**
+ * 把 `<pre>…</pre>` 從 HTML 裡挖出來當獨立區塊，其餘留給行內解析器。
+ * 先剝 `<mx-reply>`：那是「回覆來源」的複製內容，裡頭的 `<pre>` 若跟著挖出來，
+ * 會把本來該隱掉的引用又變回一塊看得見的程式碼。
+ */
+private fun splitHtmlCodeBlocks(html: String): List<HtmlChunk> {
+    val source = MxReplyBlockRegex.replace(html, "")
+    val out = ArrayList<HtmlChunk>()
+    var pos = 0
+    for (match in PreBlockRegex.findAll(source)) {
+        if (match.range.first > pos) out += false to source.substring(pos, match.range.first)
+        out += true to match.groupValues[1]
+        pos = match.range.last + 1
+    }
+    val tail = source.substring(pos)
+    // 橋接器送來的 HTML 未必閉合（Element 的解析器也是把沒關的 <pre> 一路收到結尾）
+    val open = OpenPreRegex.find(tail)
+    if (open == null) {
+        if (tail.isNotEmpty()) out += false to tail
+    } else {
+        if (open.range.first > 0) out += false to tail.substring(0, open.range.first)
+        out += true to tail.substring(open.range.last + 1)
+    }
+    return out
+}
+
+/** `<pre>` 裡頭通常還包一層 `<code>`；標籤先剝、實體後解，順序不能反。 */
+private fun codeTextOf(innerHTML: String): String =
+    decodeHtmlEntities(HTML_TAG_REGEX.replace(innerHTML, "")).removeSuffix("\n")
+
+/**
+ * 回覆的引用塊：Matrix 把它包在 `<mx-reply>…</mx-reply>` 裡，內容是「被回覆那則」的
+ * 副本（訊息上方另有 ↩ 那一列呈現，所以這段不進內文）。裡面**一定**有一顆
+ * matrix.to 連結（「In reply to …」），那不是你貼的連結——連結偵測與 `<pre>`
+ * 切段都要先剝掉它。
+ */
+internal val MxReplyBlockRegex = Regex("(?is)<mx-reply>.*?</mx-reply>")
+private val PreBlockRegex = Regex("(?is)<pre[^>]*>(.*?)</pre>")
+private val OpenPreRegex = Regex("(?is)<pre[^>]*>")
+private val HTML_TAG_REGEX = Regex("(?is)</?[a-z][^>]*>")
+/**
  * 簡易 HTML → AnnotatedString 解析器（Matrix org.matrix.custom.html 常見標籤）。
  *
  * 2026-09-14 重寫：舊版被某次編輯損壞——實體解碼變成同值替換（&lt;→< 的
@@ -3505,14 +3611,16 @@ private fun MessageRow(
  *
  * 這版：標籤解析在「原始 HTML」上做，實體只對標籤之間的文字段解碼（避免
  * &lt;div&gt; 被解成真標籤）；<a> 產出可點擊的 LinkAnnotation.Url。
- * 支援：b/strong、i/em、u、del/s、code、pre、a、br、img(data-mx-emoticon)。
+ * 支援：b/strong、i/em、u、del/s、code、a、br、img(data-mx-emoticon)，以及
+ * 引用／清單／標題等區塊標籤。<pre> 不在這裡處理——它要獨立成塊，
+ * [splitHtmlCodeBlocks] 已經先把它切走了。
  */
 @Composable
-fun htmlToAnnotatedString(
+private fun htmlToAnnotatedString(
     html: String,
     baseStyle: TextStyle = MaterialTheme.typography.bodyLarge,
     linkColor: Color = MaterialTheme.colorScheme.primary,
-): FormattedRichText {
+): Pair<AnnotatedString, List<InlineEmoticon>> {
     val emoticons = mutableListOf<InlineEmoticon>()
     val annotated = buildAnnotatedString {
         val tagRegex = """<(/?)(\w+)([^>]*)>""".toRegex()
@@ -3523,14 +3631,13 @@ fun htmlToAnnotatedString(
         var pos = 0
         var currentStyle = baseStyle.toSpanStyle()
         var linkUrl: String? = null
-        var inPreBlock = false
         // 樣式堆疊：開始標籤進棧、對應的結束標籤出棧。之前的寫法是「任何結束
-        // 標籤一律把樣式清回 base」，于是 `<b>粗 <i>斜</i> 還粗嗎</b>` 在 </i>
+        // 標籤一律把樣式清回 base」，於是 `<b>粗 <i>斜</i> 還粗嗎</b>` 在 </i>
         // 之後就忘了自己還在粗體裡（Matrix 橋接進來的訊息大量是巢狀標籤，
         // Element/Riot 發的 formatted_body 都這樣）。
         val styleStack = ArrayDeque<SpanStyle>()
-        val styleTags = setOf("b", "strong", "i", "em", "u", "del", "s", "code", "pre", "span", "h1", "h2", "h3", "h4", "h5", "h6")
-        // 區塊級標籤的狀態。Matrix 的 formatted_body（以及各橋接器）常出現这三種：
+        val styleTags = setOf("b", "strong", "i", "em", "u", "del", "s", "code", "span", "h1", "h2", "h3", "h4", "h5", "h6")
+        // 區塊級標籤的狀態。Matrix 的 formatted_body（以及各橋接器）常出現這三種：
         // · <blockquote>——引用，用「│ 」前綴一條條標出來
         // · <ul>/<ol>/<li>——清單，巢疊時多縮两格，有序清單自己編號
         // · <mx-reply>——Element/Schildi 的「引用回覆」區塊。這段的文字**不進內文**：
@@ -3597,7 +3704,6 @@ fun htmlToAnnotatedString(
             when {
                 isClosing -> {
                     if (tagName == "a") linkUrl = null
-                    if (tagName == "pre") inPreBlock = false
                     if (tagName == "mx-reply") mxReplyDepth = (mxReplyDepth - 1).coerceAtLeast(0)
                     if (tagName == "blockquote") {
                         quoteDepth = (quoteDepth - 1).coerceAtLeast(0)
@@ -3679,19 +3785,11 @@ fun htmlToAnnotatedString(
                 }
                 tagName == "code" -> {
                     styleStack.addLast(currentStyle)
+                    // 行內程式碼：等寬字體＋一層底色。整塊的 <pre> 不走這裡（已切段另行渲染）
                     currentStyle = currentStyle.copy(
                         fontFamily = FontFamily.Monospace,
-                        background = if (inPreBlock) {
-                            MaterialTheme.colorScheme.surfaceContainerHighest
-                        } else {
-                            MaterialTheme.colorScheme.surfaceContainer
-                        },
-                        fontSize = if (inPreBlock) 13.sp else baseStyle.fontSize,
+                        background = MaterialTheme.colorScheme.surfaceContainer,
                     )
-                }
-                tagName == "pre" -> {
-                    styleStack.addLast(currentStyle)
-                    inPreBlock = true
                 }
                 tagName == "a" -> {
                     linkUrl = hrefRegex.find(attrs)?.groupValues?.get(1)
@@ -3717,7 +3815,7 @@ fun htmlToAnnotatedString(
             pos = match.range.last + 1
         }
     }
-    return FormattedRichText(annotated, emoticons)
+    return annotated to emoticons
 }
 
 /**
@@ -3785,7 +3883,13 @@ private fun parseHtmlColor(hex: String): Color? {
 /** P5-2：渲染結果帶出 inline 表情清單，Text(inlineContent=) 用它們建佔位映射。 */
 data class InlineEmoticon(val id: String, val mxc: String, val alt: String)
 
-data class FormattedRichText(val annotated: AnnotatedString, val emoticons: List<InlineEmoticon>)
+data class FormattedRichText(val segments: List<RichSegment>, val emoticons: List<InlineEmoticon>)
+
+/** 富文本的一段：普通文字，或是要獨立成塊的程式碼。 */
+sealed interface RichSegment {
+    data class Text(val annotated: AnnotatedString) : RichSegment
+    data class Code(val text: String) : RichSegment
+}
 
 /** 一則訊息的內容區：文字、圖片／貼圖、附件名，或解密失敗的說明。 */
 @Composable
@@ -3803,20 +3907,23 @@ private fun MessageBodyContent(
             // P4-4：優先渲染 formattedBody (HTML)，回退到純文字
             val formatted = body.formattedBody?.takeIf { it.isNotBlank() }
             if (formatted != null) {
-                val rich = htmlToAnnotatedString(
+                val rich = htmlToRichText(
                     html = formatted,
                     baseStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
                 )
-                if (rich.emoticons.isEmpty()) {
-                    Text(text = rich.annotated, modifier = modifier)
-                } else {
-                    // P5-2：custom emoji 以 inline content 排進文字行
-                    val inlineContent = rich.emoticons.associate { emote ->
-                        emote.id to InlineTextContent(
-                            Placeholder(1.4.em, 1.4.em, PlaceholderVerticalAlign.TextCenter),
-                        ) { EmoticonInline(client, emote) }
+                // P5-2：custom emoji 以 inline content 排進文字行
+                val inlineContent = rich.emoticons.associate { emote ->
+                    emote.id to InlineTextContent(
+                        Placeholder(1.4.em, 1.4.em, PlaceholderVerticalAlign.TextCenter),
+                    ) { EmoticonInline(client, emote) }
+                }
+                Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    rich.segments.forEach { segment ->
+                        when (segment) {
+                            is RichSegment.Text -> Text(text = segment.annotated, inlineContent = inlineContent)
+                            is RichSegment.Code -> CodeBlockBubble(segment.text, strings.copy)
+                        }
                     }
-                    Text(text = rich.annotated, modifier = modifier, inlineContent = inlineContent)
                 }
             } else {
                 Text(
@@ -3881,6 +3988,52 @@ private fun MessageBodyContent(
             color = MaterialTheme.colorScheme.error,
             modifier = modifier,
         )
+    }
+}
+
+/**
+ * 程式碼塊：圓角底色區塊＋等寬字＋橫向捲動＋右上角複製鈕。
+ *
+ * 這是 Element／FluffyChat 的長相。之前用 SpanStyle 底色假裝區塊（一行行灰底
+ * 糊在氣泡文字裡，用戶截圖點名），但 AnnotatedString 给不了容器、內距與捲動，
+ * 所以 [htmlToRichText] 先把 `<pre>` 切成獨立段交給這裡。
+ * 複製鈕蓋在區塊右上角、文字在它下面橫向捲——跟 Element 一樣是覆蓋式，
+ * 不另外佔一列高度（單行程式碼也能有個不突兀的位置）。
+ */
+@Composable
+private fun CodeBlockBubble(code: String, copyLabel: String) {
+    val clipboard = LocalClipboardManager.current
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Box(Modifier.padding(10.dp)) {
+            Text(
+                code,
+                style = TextStyle(
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                ),
+                modifier = Modifier
+                    .horizontalScroll(rememberScrollState())
+                    // 首行讓開複製鈕，否則第一個字會被蓋在鈕下面
+                    .padding(end = 26.dp),
+            )
+            IconButton(
+                onClick = { clipboard.setText(AnnotatedString(code)) },
+                modifier = Modifier.align(Alignment.TopEnd).size(26.dp),
+            ) {
+                Icon(
+                    BarIcons.ContentCopy,
+                    contentDescription = copyLabel,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(15.dp),
+                )
+            }
+        }
     }
 }
 

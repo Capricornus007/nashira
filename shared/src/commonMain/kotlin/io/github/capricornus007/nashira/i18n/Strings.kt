@@ -41,6 +41,17 @@ interface Strings {
     val emoticons: String
     /** 面板開著時那顆鈕的無障礙標籤（圖示是鍵盤，點下去叫回輸入法）。 */
     val keyboard: String
+    /**
+     * 輸入框右鍵選單裡的格式化項目標籤。清單照 Element Web 的 composer format bar
+     * （`Formatting` 列舉：bold／italics／strikethrough／code／quote／insert_link），
+     * 它沒有底線與清單按鈕，我們也不自己加。
+     */
+    val formatBold: String
+    val formatItalics: String
+    val formatStrikethrough: String
+    val formatCodeBlock: String
+    val formatQuote: String
+    val formatLink: String
     /** 表情分頁：搜尋提示、查無結果、最近使用區標題。 */
     val emojiSearchHint: String
     val emojiNoResults: String

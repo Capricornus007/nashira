@@ -55,10 +55,6 @@ private val META_REGEX = Regex(
 )
 private val TITLE_REGEX = Regex("""<title[^>]*>([^<]*)</title>""", RegexOption.IGNORE_CASE)
 
-// 回覆的引用塊：Matrix 把它包在 <mx-reply>…</mx-reply> 裡，裡面**一定**有一個
-// matrix.to 連結（「In reply to …」那顆）。它不是你貼的連結。
-private val MX_REPLY_REGEX = Regex("(?is)<mx-reply>.*?</mx-reply>")
-
 /**
  * 取「使用者自己貼進訊息裡」的連結（去重、依出現順序），用來決定要掛幾張 og 預覽卡。
  *
@@ -70,7 +66,7 @@ private val MX_REPLY_REGEX = Regex("(?is)<mx-reply>.*?</mx-reply>")
  *    上限 3 張：橋接機器人常把同一頁的兩三個連結都列出來，再多就蓋掉對話本身。
  */
 fun urlsInMessage(formattedBody: String?, plainBody: String): List<String> {
-    val haystack = formattedBody?.replace(MX_REPLY_REGEX, "") ?: plainBody
+    val haystack = formattedBody?.replace(MxReplyBlockRegex, "") ?: plainBody
     return URL_REGEX.findAll(haystack)
         .map { it.value.trimEnd(',', '.', ';', ':', '!', '?') }
         .distinct()

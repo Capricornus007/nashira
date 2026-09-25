@@ -632,12 +632,17 @@ class RoomRepository(val client: MatrixClient) {
             }
         }
 
-    /** 編輯自己已送出的文字訊息（m.replace + m.new_content）。 */
-    suspend fun editText(roomId: RoomId, originalEventId: EventId, newBody: String): Result<String> =
+    /** 編輯自己已送出的文字訊息（m.replace + m.new_content）。帶格式時一樣附 formatted_body。 */
+    suspend fun editText(
+        roomId: RoomId,
+        originalEventId: EventId,
+        newBody: String,
+        formattedBody: String? = null,
+    ): Result<String> =
         runCatching {
             client.room.sendMessage(roomId) {
                 replace(originalEventId)
-                text(newBody)
+                text(newBody, formattedBody?.let { "org.matrix.custom.html" }, formattedBody)
             }
         }
 
