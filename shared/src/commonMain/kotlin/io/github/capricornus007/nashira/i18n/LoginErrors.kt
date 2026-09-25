@@ -37,6 +37,10 @@ fun friendlyError(t: Throwable): String {
             "登入已過期，請重新登入"
         msg.contains("M_UNSUPPORTED_ROOM_VERSION") ->
             "這個房間的版本不支援"
+        // 桌面 SSO 的 nashira:// 接收端缺席（SsoLogin.desktop.kt 丟的代碼）。
+        // 這裡不翻成「登入失敗」：問題在操作系統沒註冊網址處理器，跟帳號無關。
+        msg.contains("NASHIRA_SSO_SCHEME_MISSING") ->
+            "這個系統找不到 nashira:// 連結的接收端，自動註冊也沒成功。請改用安裝版（deb／rpm／pkg）啟動一次，或手動把 nashira.desktop 設為該網址協定的預設程式"
         else -> msg.ifBlank { t::class.simpleName ?: "未知的錯誤" }
     }
 }

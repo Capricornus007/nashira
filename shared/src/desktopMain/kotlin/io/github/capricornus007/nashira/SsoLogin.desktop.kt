@@ -1,33 +1,35 @@
 package io.github.capricornus007.nashira
 
-import com.sun.net.httpserver.HttpServer
 import io.github.capricornus007.nashira.matrix.MatrixEngine
 import io.ktor.http.encodeURLParameter
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.withTimeoutOrNull
-import java.net.InetAddress
-import java.net.InetSocketAddress
+import java.io.File
 
 /**
- * Desktop SSO：應用內連結優先。
+ * Desktop SSO：**只走 nashira:// scheme**（與 Android 的 deep link 同構）。
  *
- * 主路徑（nashira:// scheme）：redirectUrl 是 nashira://sso/callback。瀏覽器
- * 認證完成後跳轉 scheme 連結，xdg-open 依 .desktop 的 MimeType 啟動本程式，
- * 次實例把 URL 經 [DesktopSingleInstance] 的本地 socket 轉發給正在跑的主實例。
- * 沒有 localhost HTTP server——不佔埠、不逾時自殺、地址欄不殘留 token URL。
+ * redirectUrl 是 nashira://sso/callback。瀏覽器認證完成後跳轉 scheme 連結，
+ * xdg-open 依 .desktop 的 MimeType 啟動本程式，次實例 handleLaunch() 偵測到
+ * 主實例在跑，把 URL 經 [DesktopSingleInstance] 的本地 socket 轉發過去即刻退出。
  *
- * 回退路徑（loopback HTTP）：發行包的 .desktop 沒註冊 scheme 時（例如
- * jpackage 直出的 deb/rpm）才走，僅供兜底；PKGBUILD 安裝的包一律有 MimeType。
+ * 沒有 localhost HTTP server 回退路徑，兩個理由：
+ * 1. loopback 的先天缺陷（佔埠、逾時後 token 打進死埠、地址欄殘留 loginToken）
+ *    早已在 2026-09-14 桌面實測復現並據此改成 scheme；
+ * 2. jpackage 出的執行時映像根本沒帶 `jdk.httpserver` 模組，留這條回退在發行包
+ *    裡就是彈一顆 `NoClassDefFoundError: com/sun/net/httpserver/HttpServer` 的
+ *    系統錯誤對話框（0.1.6 實測踩到），使用者只會看到「為什麼又要啟動服務器」。
+ *
+ * scheme 沒註冊時**自己補註冊**（寫使用者層級的 .desktop ＋ xdg-mime default），
+ * 而不是退回那台伺服器；補不上才回錯誤訊息給登入頁顯示。
  */
 actual suspend fun startSsoLogin(homeserver: String): Result<Unit>? {
-    if (isSchemeHandlerRegistered()) return startSsoLoginViaScheme(homeserver)
-    return startSsoLoginViaLoopback(homeserver)
+    if (!isSchemeHandlerRegistered() && !registerSchemeHandler()) {
+        // 訊息內容是給 i18n/LoginErrors.kt 比對的代碼，使用者看到的是那邊翻好的人話
+        return Result.failure(IllegalStateException("NASHIRA_SSO_SCHEME_MISSING"))
+    }
+    return startSsoLoginViaScheme(homeserver)
 }
 
-/**
- * xdg-mime 查得到 x-scheme-handler/nashira 才走 scheme 主路徑；查不到（未裝
- * .desktop、xdg-mime 不存在、非 Linux 桌面環境）就回退 loopback。
- */
+/** xdg-mime 查得到 x-scheme-handler/nashira 代表有接收端。 */
 private fun isSchemeHandlerRegistered(): Boolean = runCatching {
     val process = ProcessBuilder("xdg-mime", "query", "default", "x-scheme-handler/nashira")
         .redirectErrorStream(true)
@@ -36,6 +38,45 @@ private fun isSchemeHandlerRegistered(): Boolean = runCatching {
     process.waitFor()
     output.isNotBlank()
 }.getOrDefault(false)
+
+/**
+ * 使用者層級註冊：`~/.local/share/applications/nashira.desktop` 指向**正在跑的這個
+ * 執行檔**，再 `xdg-mime default`。已經有別的接收端（例如開發用的 nashira-dev.desktop）
+ * 時上面那道檢查就會通過、不會走到這裡，所以不會蓋掉用戶自己設的預設程式。
+ *
+ * 就算瀏覽器最後啟動的是「另一個」nashira 實體也無妨：次實例一律先把 URL 經
+ * 47832 埠轉發給正在跑的主實例再退出，跨開發版／安裝版都接得起來。
+ */
+private fun registerSchemeHandler(): Boolean = runCatching {
+    val exe = currentExecutable() ?: return@runCatching false
+    val dir = File(System.getProperty("user.home"), ".local/share/applications")
+    if (!dir.isDirectory && !dir.mkdirs()) return@runCatching false
+    val desktop = File(dir, "nashira.desktop")
+    desktop.writeText(
+        """
+        [Desktop Entry]
+        Type=Application
+        Version=1.0
+        Name=Nashira
+        Exec="$exe" %u
+        Terminal=false
+        NoDisplay=true
+        MimeType=x-scheme-handler/nashira;
+
+        """.trimIndent() + "\n",
+        Charsets.UTF_8,
+    )
+    val process = ProcessBuilder("xdg-mime", "default", "nashira.desktop", "x-scheme-handler/nashira")
+        .redirectErrorStream(true)
+        .start()
+    process.waitFor() == 0 && isSchemeHandlerRegistered()
+}.getOrDefault(false)
+
+/** jpackage 會設 `jpackage.app-path`；從終端機直接跑時退回 /proc/self/exe。 */
+private fun currentExecutable(): String? = runCatching {
+    System.getProperty("jpackage.app-path")?.takeIf { File(it).canExecute() }
+        ?: File("/proc/self/exe").canonicalFile.takeIf { it.canExecute() }?.absolutePath
+}.getOrNull()
 
 private suspend fun startSsoLoginViaScheme(homeserver: String): Result<Unit>? {
     val callback = "nashira://sso/callback"
@@ -48,42 +89,5 @@ private suspend fun startSsoLoginViaScheme(homeserver: String): Result<Unit>? {
         MatrixEngine.loginWithToken(homeserver, callbackData.first)
     } else {
         Result.failure(IllegalStateException("SSO login timed out"))
-    }
-}
-
-/**
- * Loopback 回退（與 2026-09 之前的主路徑完全相同）：臨時 HTTP server 接
- * loginToken，5 分鐘逾時。只在 scheme 未註冊時兜底。
- */
-private suspend fun startSsoLoginViaLoopback(homeserver: String): Result<Unit>? {
-    val server = HttpServer.create(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0)
-    val port = server.address.port
-    val callback = "http://127.0.0.1:$port/callback"
-
-    val loginTokenReceived = CompletableDeferred<String>()
-    server.createContext("/callback") { exchange ->
-        val loginToken = exchange.requestURI.query
-            ?.split("&")
-            ?.firstOrNull { it.startsWith("loginToken=") }
-            ?.substringAfter("loginToken=")
-        val ok = loginToken != null
-        if (loginToken != null) loginTokenReceived.complete(loginToken)
-        val body = (if (ok) "Login successful. You can close this tab and return to Nashira." else "Missing loginToken.").toByteArray()
-        exchange.sendResponseHeaders(if (ok) 200 else 400, body.size.toLong())
-        exchange.responseBody.use { it.write(body) }
-    }
-    server.start()
-
-    openLink("$homeserver/_matrix/client/v3/login/sso/redirect?redirectUrl=${callback.encodeURLParameter()}")
-
-    return try {
-        val loginToken = withTimeoutOrNull(5 * 60 * 1000L) { loginTokenReceived.await() }
-        if (loginToken != null) {
-            MatrixEngine.loginWithToken(homeserver, loginToken)
-        } else {
-            Result.failure(IllegalStateException("SSO login timed out"))
-        }
-    } finally {
-        server.stop(0)
     }
 }

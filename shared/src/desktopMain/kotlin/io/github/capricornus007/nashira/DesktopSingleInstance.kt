@@ -99,7 +99,8 @@ object DesktopSingleInstance {
             ServerSocket(PORT, 50, InetAddress.getLoopbackAddress())
         }.getOrElse {
             // 極罕見：bind 失敗但 connect 也失敗（前實例正在關閉的窗口）。
-            // 繼續啟動但收不到 scheme 連結——SSO 走 localhost 回退路徑。
+            // 繼續啟動，但收不到 scheme 連結——SSO 會卡在等回調直到逾時
+            // （沒有 localhost 伺服器可回退，那是 0.1.6 之前的事，已連模組缺失一起拿掉）。
             System.err.println("Nashira: single-instance server bind failed: $it")
             return
         }
