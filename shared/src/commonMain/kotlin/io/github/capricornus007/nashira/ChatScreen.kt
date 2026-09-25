@@ -1,6 +1,7 @@
 package io.github.capricornus007.nashira
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.AnchoredDraggableDefaults
 import androidx.compose.foundation.gestures.AnchoredDraggableState
@@ -1009,12 +1010,19 @@ private fun ChannelPane(
  * （只變色不夠直觀，2026-09-14 用戶回報困惑；斜線是 Discord 的標準語彙）。
  */
 @Composable
-private fun MuteIconButton(muted: Boolean, onClick: () -> Unit, icon: @Composable () -> Unit) {
+private fun MuteIconButton(
+    muted: Boolean,
+    onClick: () -> Unit,
+    /** 長按／右鍵：叫出音訊裝置面板。原本旁邊那顆獨立的 `^` 鈕就是幹這個的，
+     *  但沒有語音聊天的軟體不需要 Discord 那种分體按鈕（用戶 2026-09-25 點名多餘）。 */
+    onContextMenu: () -> Unit = onClick,
+    icon: @Composable () -> Unit,
+) {
     Box(
         Modifier
             .size(36.dp)
             .clip(RoundedCornerShape(10.dp))
-            .clickable(onClick = onClick),
+            .contextMenuGestures(onClick = onClick, onContextMenu = { onContextMenu() }),
         contentAlignment = Alignment.Center,
     ) {
         CompositionLocalProvider(
@@ -1099,66 +1107,62 @@ private fun AccountBar(
                 ) {
                     AvatarImage(client, avatarUrl, displayName, Modifier.size(40.dp).clip(CircleShape))
                     Column(Modifier.weight(1f).padding(start = 8.dp), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                        Text(displayName, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface, maxLines = 1)
-                        Text("@$accountName${if (accountServer.isNotBlank()) ":$accountServer" else ""}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                        // 窄到放不下時跑馬燈循環捲動，而不是截成「@shln38rlght_dla」
+                        // （用戶 2026-09-25 點名：過窄時昵稱與帳號要自動滾動）
+                        Text(
+                            displayName,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Clip,
+                            modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE),
+                        )
+                        Text(
+                            "@$accountName${if (accountServer.isNotBlank()) ":$accountServer" else ""}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Clip,
+                            modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE),
+                        )
                     }
                 }
                 if (profilePopup) {
                     ProfilePopup(client = client, accountId = accountId, onEditProfile = onOpenAccount, onDismiss = { profilePopup = false })
                 }
             }
-            // 麥克風＋^、耳機＋^：Discord 底欄的輸入/輸出「音訊裝置」列舉與靜音語義，
-            // 只在桌面存在（javax.sound mixer）。Android 由系統自動路由、沒有裝置可選，
-            // 這三顆（麥克風靜音、耳機/拒聽、^ 裝置面板）不該出現——用既有的
-            // audioDeviceSettingsSupported 旗標擋掉（與 HomeScreen 的音訊設定區塊同源）。
+            // 麥克風、耳機兩顆：Discord 底欄的輸入/輸出靜音語義，只在桌面存在
+            // （javax.sound mixer）。Android 由系統自動路由、沒有裝置可選，這兩顆不該
+            // 出現——用既有的 audioDeviceSettingsSupported 旗標擋掉（與 HomeScreen 的
+            // 音訊設定區塊同源）。裝置面板收進長按／右鍵，不再另掛 ^ 鈕。
             if (audioDeviceSettingsSupported) {
-                // 麥克風＋^（Discord 的分體按鈕；無語音聊天靜音語義，兩者都開面板）
                 Box {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        MuteIconButton(muted = ui.audioMicMuted, onClick = { ui.audioMicMuted = !ui.audioMicMuted }) {
-                            Icon(BarIcons.Mic, contentDescription = null, modifier = Modifier.size(21.dp))
-                        }
-                        IconButton(
-                            onClick = {
-                                inputPanel = !inputPanel
-                                outputPanel = false
-                                profilePopup = false
-                            },
-                            modifier = Modifier.size(22.dp),
-                        ) {
-                            Icon(
-                                Icons.Filled.KeyboardArrowUp,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp),
-                            )
-                        }
+                    MuteIconButton(
+                        muted = ui.audioMicMuted,
+                        onClick = { ui.audioMicMuted = !ui.audioMicMuted },
+                        onContextMenu = {
+                            inputPanel = !inputPanel
+                            outputPanel = false
+                            profilePopup = false
+                        },
+                    ) {
+                        Icon(BarIcons.Mic, contentDescription = null, modifier = Modifier.size(21.dp))
                     }
                     if (inputPanel) {
                         AudioDevicePanel(isInput = true, onOpenAudioSettings = onSettings, onDismiss = { inputPanel = false })
                     }
                 }
-                // 耳機＋^（同上）
                 Box {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        MuteIconButton(muted = ui.audioPlaybackMuted, onClick = { ui.audioPlaybackMuted = !ui.audioPlaybackMuted }) {
-                            Icon(BarIcons.Headset, contentDescription = null, modifier = Modifier.size(21.dp))
-                        }
-                        IconButton(
-                            onClick = {
-                                outputPanel = !outputPanel
-                                inputPanel = false
-                                profilePopup = false
-                            },
-                            modifier = Modifier.size(22.dp),
-                        ) {
-                            Icon(
-                                Icons.Filled.KeyboardArrowUp,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp),
-                            )
-                        }
+                    MuteIconButton(
+                        muted = ui.audioPlaybackMuted,
+                        onClick = { ui.audioPlaybackMuted = !ui.audioPlaybackMuted },
+                        onContextMenu = {
+                            outputPanel = !outputPanel
+                            inputPanel = false
+                            profilePopup = false
+                        },
+                    ) {
+                        Icon(BarIcons.Headset, contentDescription = null, modifier = Modifier.size(21.dp))
                     }
                     if (outputPanel) {
                         AudioDevicePanel(isInput = false, onOpenAudioSettings = onSettings, onDismiss = { outputPanel = false })
