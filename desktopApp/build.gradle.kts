@@ -33,7 +33,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Deb, TargetFormat.Rpm)
             packageName = "nashira"
-            packageVersion = "0.1.6"
+            packageVersion = "0.1.7"
             description = "Nashira — Matrix messenger for Android and Linux"
             vendor = "Capricornus007"
             linux {
