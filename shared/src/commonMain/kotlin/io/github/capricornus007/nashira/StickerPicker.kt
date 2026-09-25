@@ -150,14 +150,15 @@ fun StickerPicker(
                 }
                 var selected by remember(packs.size) { mutableStateOf(0) }
                 val index = selected.coerceIn(0, packs.lastIndex)
-                // 網格吃滿剩餘高度；分頁列與當前包名進網格第一格（會跟著捲動），
-                // 封面圖示條固定在面板底部（64Gram／MoregramX 都是這個配置）。
+                // 貼圖頁：分頁條**釘住**（MoregramX 逐幀實測——捲動時它不動），會跟著捲走的
+                // 只有當前包名；表情頁相反，分類圖示條會隨捲動消失（見 EmojiBrowser）。
+                // 底部包封面條兩頁都固定（64Gram／MoregramX 都是這個配置）。
+                tabs()
                 StickerGrid(
                     pack = packs[index],
                     client = client,
                     onSend = onSend,
                     header = {
-                        tabs()
                         Text(
                             packNames.getOrElse(index) { "" },
                             style = MaterialTheme.typography.labelMedium,
