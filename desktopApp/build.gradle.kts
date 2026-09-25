@@ -33,7 +33,8 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Deb, TargetFormat.Rpm)
             packageName = "nashira"
-            packageVersion = "0.1.11"
+            // 版號單一來源＝gradle.properties 的 nashiraVersion（release.yml 打 tag 讀同一行）
+            packageVersion = providers.gradleProperty("nashiraVersion").get()
             description = "Nashira — Matrix messenger for Android and Linux"
             vendor = "Capricornus007"
             linux {

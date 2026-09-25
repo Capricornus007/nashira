@@ -59,7 +59,7 @@ jobs:
             if [ -n "$INPUT_VERSION" ] && printf '%s' "$INPUT_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
               REF="v$INPUT_VERSION"
             else
-              REF="v$(grep -oP 'packageVersion\s*=\s*\"\K[^\"]+' desktopApp/build.gradle.kts)"
+              REF="v$(grep -oP '^nashiraVersion=\K.*' gradle.properties)"
             fi
           fi
           echo "TAG=$REF" >> "$GITHUB_ENV"
@@ -109,7 +109,7 @@ jobs:
           # 容器裡的 pacman 資料庫是空的——不同步連 depends 都解析不了；
           # makepkg 不帶 -s（builder 無 sudo），依賴由 root 這裡預裝
           pacman -Syu --noconfirm --needed xdg-utils
-          VERSION=$(grep -oP 'packageVersion\s*=\s*"\K[^"]+' desktopApp/build.gradle.kts)
+          VERSION=$(grep -oP '^nashiraVersion=\K.*' gradle.properties)
           echo "version: ${VERSION}"
           # upload-artifact v4 的根目錄＝所有上傳路徑的最小共同祖先——
           # 下載後可能是 dist/nashira/（單一目錄保留自身）也可能是 dist/，兩種都相容
@@ -166,7 +166,7 @@ jobs:
           if [ "$REF" = "$GITHUB_REF" ]; then
             INPUT="${{ github.event.inputs.version }}"
             if [ -n "$INPUT" ]; then REF="v$INPUT"
-            else REF="v$(grep -oP 'packageVersion\s*=\s*\"\K[^\"]+' desktopApp/build.gradle.kts)"
+            else REF="v$(grep -oP '^nashiraVersion=\K.*' gradle.properties)"
             fi
           fi
           echo "TAG=$REF" >> "$GITHUB_ENV"

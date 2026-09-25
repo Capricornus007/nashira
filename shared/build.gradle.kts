@@ -1,5 +1,33 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
+// ── 版號單一來源 ────────────────────────────────────────────────────────────
+// 「設定→關於」以前讀的是 AppInfo 裡寫死的 "0.1.0"，誰都沒記得改，結果 v0.1.10
+// 的套件還顯示 0.1.0（用戶 2026-09-25 實測點名）。改成建置時從 gradle.properties
+// 產生常數：版號只存在那一行，這裡（和兩個 app 模組、release.yml）全部跟著走。
+val appVersionValue = providers.gradleProperty("nashiraVersion").get()
+val engineVersionValue = libs.versions.trixnity.get()
+val generatedVersionDir = layout.buildDirectory.dir("generated/nashiraVersion")
+
+val generateAppVersion = tasks.register("generateAppVersion") {
+    group = "nashira"
+    description = "產生 AppInfo 用的版號／引擎常數（別手改生成物）"
+    inputs.property("nashiraVersion", appVersionValue)
+    inputs.property("trixnity", engineVersionValue)
+    outputs.dir(generatedVersionDir)
+    doLast {
+        val out = generatedVersionDir.get()
+            .file("io/github/capricornus007/nashira/AppVersion.kt").asFile
+        out.parentFile.mkdirs()
+        out.writeText(
+            "// 建置時由 :shared:generateAppVersion 產生，別手改。\n" +
+                "package io.github.capricornus007.nashira\n" +
+                "\n" +
+                "const val APP_VERSION: String = \"$appVersionValue\"\n" +
+                "const val APP_ENGINE: String = \"Trixnity $engineVersionValue\"\n",
+        )
+    }
+}
+
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.android.kotlin.multiplatform.library)
@@ -66,3 +94,6 @@ kotlin {
         }
     }
 }
+
+// 產生式常數進 commonMain，Android 與 desktop 兩個目標才都看得到
+kotlin.sourceSets.getByName("commonMain").kotlin.srcDir(generateAppVersion)

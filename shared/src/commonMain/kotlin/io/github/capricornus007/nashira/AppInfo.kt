@@ -1,8 +1,9 @@
 package io.github.capricornus007.nashira
 
 object AppInfo {
-    const val version = "0.1.0"
-    const val engine = "Trixnity 5.8.1"
+    /** 版號不是寫死在這裡的——由 :shared:generateAppVersion 從 gradle.properties 產生。 */
+    const val version = APP_VERSION
+    const val engine = APP_ENGINE
     const val crypto = "vodozemac (Rust)"
     const val license = "AGPL-3.0"
     const val repo = "Capricornus007/nashira"
