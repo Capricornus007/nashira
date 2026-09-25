@@ -154,11 +154,6 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
         stored["emojiRecents"]?.split('\n')?.filter { it.isNotBlank() } ?: emptyList()
     )
 
-    /** 64Gram 式面板釘選：釘住時點輸入列不會把貼圖／表情面板收起來（跨房間保持）。 */
-    var stickerPanelPinned by mutableStateOf(
-        stored["stickerPanelPinned"]?.toBooleanStrictOrNull() ?: false
-    )
-
     /** 用過就頂到最前面；同一個不會出現兩次。上限 48——再長就失去「一眼找回常用」的意義。 */
     fun rememberEmojiUsage(hexcode: String) {
         emojiRecents = (listOf(hexcode) + emojiRecents.filter { it != hexcode }).take(48)
@@ -191,7 +186,6 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
             "sendShortcut" to sendShortcut.name,
             "hiddenMedia" to hiddenMedia.joinToString("\n"),
             "emojiRecents" to emojiRecents.joinToString("\n"),
-            "stickerPanelPinned" to stickerPanelPinned.toString(),
             "pureBlack" to pureBlack.toString(),
         ) + mapOf(
             "audioInput" to (audioInput ?: ""),

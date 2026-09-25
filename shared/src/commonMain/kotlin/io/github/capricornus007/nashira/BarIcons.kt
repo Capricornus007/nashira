@@ -13,6 +13,44 @@ import androidx.compose.ui.unit.dp
  * 一定要顯式 SolidColor。
  */
 object BarIcons {
+    /**
+     * 輸入法／鍵盤圖示：貼圖面板開著時取代輸入列那顆笑臉（Telegram／64Gram 的行為，
+     * 用戶 2026-09-25 點名）。material-icons-core 沒有 Keyboard，照本檔模式手繪。
+     *
+     * 只畫鍵位、不畫外殼：Icon 是單色 tint，外殼與鍵位若畫在同一條 path 需要 EvenOdd
+     * 挖空，而向量 DSL 的接收者是 PathBuilder（只有 moveTo/lineTo/curveTo/close，
+     * 沒有 addRect/fillType），所以改成「三排鍵位＋一條空白鍵」的實心画法——
+     * 讀起來仍是鍵盤，且不會被 tint 塗成一整塊。
+     */
+    val Keyboard: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "Keyboard",
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f,
+        ).apply {
+            path(fill = SolidColor(Color.Black)) {
+                val keyW = 2.6f
+                val keyH = 2.8f
+                val xs = floatArrayOf(3f, 7f, 11f, 15f, 19f)
+                for (y in floatArrayOf(5.6f, 9.6f)) {
+                    for (x in xs) {
+                        moveTo(x, y); lineTo(x + keyW, y)
+                        lineTo(x + keyW, y + keyH); lineTo(x, y + keyH); close()
+                    }
+                }
+                // 第三排：兩顆鍵 ＋ 一條長空白鍵
+                for (x in floatArrayOf(3f, 7f)) {
+                    moveTo(x, 13.6f); lineTo(x + keyW, 13.6f)
+                    lineTo(x + keyW, 13.6f + keyH); lineTo(x, 13.6f + keyH); close()
+                }
+                moveTo(10.6f, 13.6f); lineTo(21.6f, 13.6f)
+                lineTo(21.6f, 13.6f + keyH); lineTo(10.6f, 13.6f + keyH); close()
+            }
+        }.build()
+    }
+
     val Mic: ImageVector by lazy {
         ImageVector.Builder(name = "Mic", defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f).apply {
             path(fill = SolidColor(Color.Black)) {

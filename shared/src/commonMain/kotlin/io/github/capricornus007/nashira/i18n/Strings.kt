@@ -92,11 +92,6 @@ interface Strings {
     val unreadIndicatorsHint: String
     val messagePreview: String
     val messagePreviewHint: String
-    val stickerPanelPosition: String
-    val stickerPanelAbove: String
-    val stickerPanelBelow: String
-    /** 面板釘選鈕的 contentDescription／tooltip（64Gram 式：釘住打字時不收面板）。 */
-    val stickerPanelPin: String
     val sessionLogoutViaAccountPage: String
     val messageSendFailed: String
     val attachPhoto: String

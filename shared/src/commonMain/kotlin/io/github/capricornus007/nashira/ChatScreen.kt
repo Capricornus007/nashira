@@ -40,6 +40,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.LocalFocusManager
@@ -1649,6 +1651,15 @@ private fun TimelinePane(
     // 貼圖／表情面板：開著時它進 bottomBar、排在輸入列**下方**（64Gram／Telegram／
     // Discord 手機版與 Discord 桌面的排法），輸入列被頂上去，不蓋住任何訊息。
     var stickerPanel by remember(room.roomId) { mutableStateOf(false) }
+    // 從面板切回輸入法時要把焦點還給文字欄（不然 requestFocus 無處可去）
+    val composerFocus = remember { FocusRequester() }
+    // 面板與鍵盤互斥，開面板時鍵盤已收起、拿不到即時 insets，所以緩存「最後一次鍵盤
+    // 的高度」給面板用——兩者同高，切換時輸入列才不會上下跳（用戶 2026-09-25 點名）。
+    // 舊的 843px 縫隙不是這個值造成的，是當時面板走疊層、高度被鎖進 content padding。
+    val density = LocalDensity.current
+    var lastImeBottomPx by remember(room.roomId) { mutableStateOf(0) }
+    val imeBottom = WindowInsets.ime.getBottom(density)
+    SideEffect { if (imeBottom > 0) lastImeBottomPx = imeBottom }
     // 「＋」的附件選單（桌面是小彈窗、手機是底部面板）
     var attachMenu by remember(room.roomId) { mutableStateOf(false) }
     // P5-1 語音錄音：recorder 非 null = 錄音中；錄完停在 recordedPreview 等確認
@@ -1698,9 +1709,9 @@ private fun TimelinePane(
     val focusManager = LocalFocusManager.current
     var composerFocused by remember(room.roomId) { mutableStateOf(false) }
     val uiState = LocalUiState.current
-    LaunchedEffect(composerFocused, uiState.stickerPanelPinned) {
-        // 釘選時不打斷：64Gram 的「固定」就是讓面板在打字期間留在原位（用戶比對截圖時點名要這行為）
-        if (composerFocused && !uiState.stickerPanelPinned) stickerPanel = false
+    LaunchedEffect(composerFocused) {
+        // 打字就收面板：64Gram／Telegram 都是這個行為，面板沒有「釘住」這種東西
+        if (composerFocused) stickerPanel = false
     }
     // 「檢視原始碼」對話框：null = 關；內容是 JSON 或載入失敗訊息
     var viewSource by remember(room.roomId) { mutableStateOf<String?>(null) }
@@ -1785,8 +1796,6 @@ private fun TimelinePane(
                     selection = androidx.compose.ui.text.TextRange(at + entry.glyph.length)
                 }
             },
-            pinned = uiState.stickerPanelPinned,
-            onTogglePin = { uiState.stickerPanelPinned = !uiState.stickerPanelPinned },
             modifier = panelModifier,
         )
     }
@@ -2211,8 +2220,13 @@ private fun TimelinePane(
                 ) {
                     IconButton(
                         onClick = {
-                            stickerPanel = !stickerPanel
-                if (stickerPanel) {
+                            if (stickerPanel) {
+                                // 面板開著→這顆是「叫回輸入法」：收面板、把焦點給文字欄並彈鍵盤
+                                stickerPanel = false
+                                runCatching { composerFocus.requestFocus() }
+                                keyboardController?.show()
+                            } else {
+                                stickerPanel = true
                                 keyboardController?.hide()
                                 focusManager.clearFocus()
                             }
@@ -2220,13 +2234,15 @@ private fun TimelinePane(
                         modifier = Modifier.size(44.dp),
                     ) {
                         Icon(
+                            // 笑臉↔鍵盤即時切換（Telegram／64Gram 行為）：面板開著時還畫笑臉
+                            // 會讓人以為再點一次是開另一個面板。
                             // 笑臉而不是加號：加號讀起來像「其他附件的集合」（微信／Telegram
                             // 都是把表情貼圖放在笑臉，附件才是迴紋針或加號）
-                            Icons.Filled.Face,
+                            if (stickerPanel) BarIcons.Keyboard else Icons.Filled.Face,
                             // 光學平衡：Face 字形佔滿 24dp 視窗的 83%，Add/Mic 只佔 58%
                             // ——同尺寸渲染會顯得比鄰居大四成（真機像素實測），縮到 20dp 對齊視覺重量
                             modifier = Modifier.size(20.dp),
-                            contentDescription = strings.sticker,
+                            contentDescription = if (stickerPanel) strings.send else strings.sticker,
                             tint = if (stickerPanel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -2242,6 +2258,7 @@ private fun TimelinePane(
                         BasicTextField(
                             state = draft,
                             modifier = Modifier.fillMaxWidth()
+                                .focusRequester(composerFocus)
                                 .heightIn(min = 44.dp)
                                 .onFocusChanged { composerFocused = it.isFocused }
                                 // 送出鍵：命中設定的組合就送並吃掉事件，其餘 Enter 交回去換行
@@ -2384,13 +2401,13 @@ private fun TimelinePane(
                 if (stickerPanel) {
                     // 面板釘在輸入列**下方**：輸入列被頂上去、面板貼住螢幕底，
                     // 這才是 64Gram／Telegram／Discord 手機版的排法（用戶拿截圖點名過）。
-                    // 高度用固定 300dp，不再拿 lastImeBottomPx 去湊——那個值是「上一次
-                    // 鍵盤的高度」，面板收起＋鍵盤彈出時兩者不一致，正是輸入列與鍵盤之間
-                    // 那道 843px 縫隙的来源。
+                    // 高度與鍵盤一致（見上面 lastImeBottomPx 的註解），沒見過鍵盤的
+                    // 裝置（桌面、或從不開輸入法的手機）退回 300dp。
+                    val panelHeight = with(density) { lastImeBottomPx.toDp() }.coerceAtLeast(300.dp)
                     stickerPanelContent(
                         Modifier
                             .fillMaxWidth()
-                            .height(300.dp)
+                            .height(panelHeight)
                             .navigationBarsPadding()
                             .padding(horizontal = 8.dp)
                             .padding(bottom = 8.dp)

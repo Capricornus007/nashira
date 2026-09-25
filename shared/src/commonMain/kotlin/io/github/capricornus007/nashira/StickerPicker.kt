@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -34,7 +33,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import de.connect2x.trixnity.client.MatrixClient
 import de.connect2x.trixnity.client.media.MediaService
@@ -66,9 +65,6 @@ fun StickerPicker(
     onPickEmoticon: (StickerItem) -> Unit = {},
     /** 點 Unicode 表情：插進輸入列游標處（不是送訊息）。 */
     onPickEmoji: (EmojiEntry) -> Unit = {},
-    /** 64Gram 式釘選：釘住時點輸入列不會把這個面板收起來。 */
-    pinned: Boolean = false,
-    onTogglePin: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val client = roomRepository.client
@@ -81,48 +77,34 @@ fun StickerPicker(
 
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
-        modifier = modifier.fillMaxWidth().height(300.dp),
+        // 高度由呼叫端決定（ChatScreen 給「與鍵盤等高」的那個值）——這裡不能再 .height(300.dp)，
+        // 修飾鏈上後面的 height 會蓋掉傳進來的，面板永遠 300dp，跟輸入法高度永遠對不上。
+        modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         shadowElevation = 8.dp,
     ) {
         // P5-2：頂部分頁——貼圖（發 m.sticker）／表情（插入輸入列當 custom emoji）
         var emojiTab by remember { mutableStateOf(false) }
         Column(Modifier.fillMaxSize()) {
-            Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
-                listOf(false to strings.sticker, true to strings.emoticons).forEach { (isEmoji, label) ->
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = if (emojiTab == isEmoji) MaterialTheme.colorScheme.secondaryContainer
-                        else Color.Transparent,
+            // 分頁置中、純文字，選中的上主色——64Gram 桌面版頂部就是「表情符號／貼圖／GIF」
+            // 三格置中。之前是靠左兩顆 pill，讀起來像標籤而不像分頁。
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                listOf(strings.sticker to false, strings.emoticons to true).forEach { (label, isEmoji) ->
+                    val active = emojiTab == isEmoji
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = if (active) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier
-                            .padding(end = 4.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .clickable { emojiTab = isEmoji },
-                    ) {
-                        Text(
-                            label,
-                            style = MaterialTheme.typography.labelLarge,
-                            color = if (emojiTab == isEmoji) MaterialTheme.colorScheme.onSecondaryContainer
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp),
-                        )
-                    }
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { emojiTab = isEmoji }
+                            .padding(horizontal = 20.dp, vertical = 6.dp),
+                    )
                 }
-                Spacer(Modifier.weight(1f))
-                // 釘選鈕：核心圖示集沒有 PushPin，直接用 📌 glyph（跟表情格一樣是文字渲染，
-                // 不必為一顆鈕拖進 material-icons-extended 那包依賴）。
-                Text(
-                    "📌",
-                    style = MaterialTheme.typography.labelLarge,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(
-                            if (pinned) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
-                        )
-                        .semantics { contentDescription = strings.stickerPanelPin }
-                        .clickable(onClick = onTogglePin)
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                )
             }
             if (emojiTab) {
                 val emoticons by remember(client) { repository.emoticons() }.collectAsState(initial = emptyList())
@@ -132,10 +114,10 @@ fun StickerPicker(
                     emoticons = emoticons,
                     onPickEmoji = onPickEmoji,
                     onPickEmoticon = onPickEmoticon,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.weight(1f),
                 )
             } else if (packs.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                     Text(
                         strings.stickerEmpty,
                         style = MaterialTheme.typography.bodyMedium,
@@ -154,12 +136,23 @@ fun StickerPicker(
                 }
                 var selected by remember(packs.size) { mutableStateOf(0) }
                 val index = selected.coerceIn(0, packs.lastIndex)
+                // 64Gram 的排法：網格在上面吃滿剩餘高度，**包名與封面圖示條沉在面板底部**
+                // （之前圖示條在網格上方，跟參考截圖上下顛倒）。
+                StickerGrid(packs[index], client, onSend, Modifier.weight(1f))
+                Text(
+                    packNames.getOrElse(index) { "" },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 2.dp),
+                )
                 // 包選擇是封面圖示條（Telegram／Discord／Element 都是這樣）：
                 // 原本的長文字標籤在包多時會橫向溢出，只能靠拖曳，滑鼠與觸控板都不順手。
                 // LazyRow 本身吃滾輪與拖曳，且只渲染可見項。
                 LazyRow(
                     modifier = Modifier.fillMaxWidth(),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     itemsIndexed(packs) { position, pack ->
@@ -172,14 +165,6 @@ fun StickerPicker(
                         )
                     }
                 }
-                Text(
-                    packNames.getOrElse(index) { "" },
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 2.dp),
-                )
-                StickerGrid(packs[index], client, onSend)
             }
         }
     }
@@ -231,10 +216,15 @@ private fun PackTab(
 }
 
 @Composable
-private fun StickerGrid(pack: StickerPack, client: MatrixClient, onSend: (StickerItem) -> Unit) {
+private fun StickerGrid(
+    pack: StickerPack,
+    client: MatrixClient,
+    onSend: (StickerItem) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     LazyVerticalGrid(
         columns = GridCells.Adaptive(96.dp),
-        modifier = Modifier.fillMaxSize(),
+        modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),

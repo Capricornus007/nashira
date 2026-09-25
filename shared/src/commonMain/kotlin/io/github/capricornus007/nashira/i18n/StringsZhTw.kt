@@ -71,10 +71,6 @@ object ZhTwStrings : Strings {
     override val appearanceHint = "主題模式、動態顏色與調色盤"
     override val chatListHint = "Space 圖示、未讀提示、訊息預覽與貼圖面板"
     override val messagePreviewHint = "清單第二行顯示最後一則訊息"
-    override val stickerPanelPosition = "貼圖面板位置"
-    override val stickerPanelAbove = "浮在輸入列上方，不推動輸入列"
-    override val stickerPanelBelow = "固定在輸入列下方"
-    override val stickerPanelPin = "釘選：打字時不收面板"
     override val sessionLogoutViaAccountPage = "此伺服器改由帳戶管理頁登出裝置，已在瀏覽器開啟"
     override val messageSendFailed = "送出失敗"
     override val attachPhoto = "照片"
@@ -291,7 +287,6 @@ object ZhCnStrings : Strings by ZhTwStrings {
     override val emojiRecent = "最近使用"
     // 「反應」在簡體介面習慣寫作「反应」；「回应」在這裡會跟「回覆」混掉
     override val actionAddReaction = "添加反应"
-    override val stickerPanelPin = "钉选：打字时不收起面板"
 }
 
 /**

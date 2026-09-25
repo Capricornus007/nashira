@@ -450,7 +450,7 @@ private fun ChatListPage(onBack: () -> Unit) {
                     onCheckedChange = { ui.showMessagePreview = it },
                 )
             }
-            // 送出鍵與貼圖面板位置是實體鍵盤／桌面視窗的慣例，手機上不顯示
+            // 送出鍵是實體鍵盤／桌面視窗的慣例；手機上 Enter 行為由輸入法自己決定，不顯示
             if (keyboardLayoutSettingsSupported) {
                 item { shape ->
                     SettingsDropdownItem(
