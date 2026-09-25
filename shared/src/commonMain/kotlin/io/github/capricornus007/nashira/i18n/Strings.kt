@@ -39,6 +39,8 @@ interface Strings {
     val send: String
     val sticker: String
     val emoticons: String
+    /** 面板開著時那顆鈕的無障礙標籤（圖示是鍵盤，點下去叫回輸入法）。 */
+    val keyboard: String
     /** 表情分頁：搜尋提示、查無結果、最近使用區標題。 */
     val emojiSearchHint: String
     val emojiNoResults: String

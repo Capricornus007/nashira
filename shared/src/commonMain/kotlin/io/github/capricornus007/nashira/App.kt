@@ -15,6 +15,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -159,6 +160,19 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
         emojiRecents = (listOf(hexcode) + emojiRecents.filter { it != hexcode }).take(48)
     }
 
+    /**
+     * 鍵盤高度（畫素，已扣掉導航列），量到一次就存檔。
+     *
+     * MoregramX 也是這個做法（它的 key 是 `keyboard_size` + 螢幕方向）：貼圖面板要和
+     * 鍵盤等高，靠的是「這個數字」而不是當場量——冷啟動、換聊天室都不用重新量一次。
+     * 0 = 還沒量過，呼叫端自己退回預估值。寫入端只送正值進來（量測那側已經先比過
+     * baseline > top），所以這裡不用再加防呆 setter。
+     */
+    var imeHeightPx by mutableIntStateOf(stored["imeHeight"]?.toIntOrNull() ?: 0)
+
+    /** 貼圖面板上次停在哪一頁（true = 表情）。同一個來源：MoregramX 存 `emoji_vp_position`。 */
+    var stickerTabEmoji by mutableStateOf(stored["stickerTab"] == "emoji")
+
     init {
         AudioSelection.input = audioInput
         AudioSelection.output = audioOutput
@@ -186,6 +200,8 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
             "sendShortcut" to sendShortcut.name,
             "hiddenMedia" to hiddenMedia.joinToString("\n"),
             "emojiRecents" to emojiRecents.joinToString("\n"),
+            "imeHeight" to imeHeightPx.toString(),
+            "stickerTab" to if (stickerTabEmoji) "emoji" else "sticker",
             "pureBlack" to pureBlack.toString(),
         ) + mapOf(
             "audioInput" to (audioInput ?: ""),

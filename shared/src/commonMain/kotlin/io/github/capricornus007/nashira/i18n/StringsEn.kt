@@ -28,6 +28,7 @@ object EnStrings : Strings {
     override val sticker = "Stickers"
     override val stickerEmpty = "No sticker packs yet"
     override val emoticons = "Emojis"
+    override val keyboard = "Keyboard"
     override val emojiSearchHint = "Search emoji"
     override val emojiNoResults = "No matching emoji"
     override val emojiRecent = "Recently used"

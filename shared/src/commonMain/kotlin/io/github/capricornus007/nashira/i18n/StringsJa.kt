@@ -26,6 +26,7 @@ object JaStrings : Strings by EnStrings {
     override val send = "送信"
     override val sticker = "スタンプ"
     override val emoticons = "絵文字"
+    override val keyboard = "キーボード"
     override val emojiSearchHint = "絵文字を検索"
     override val emojiNoResults = "該当する絵文字がありません"
     override val emojiRecent = "最近使った絵文字"

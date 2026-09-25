@@ -27,6 +27,7 @@ object KoStrings : Strings by EnStrings {
     override val sticker = "스티커"
     override val stickerEmpty = "스티커 팩이 아직 없습니다"
     override val emoticons = "이모티콘"
+    override val keyboard = "키보드"
     override val emojiSearchHint = "이모티콘 검색"
     override val emojiNoResults = "일치하는 이모티콘이 없습니다"
     override val emojiRecent = "최근 사용"

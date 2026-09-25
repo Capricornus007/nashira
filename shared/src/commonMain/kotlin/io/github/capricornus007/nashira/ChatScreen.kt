@@ -97,6 +97,8 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.lazy.LazyColumn
@@ -180,6 +182,7 @@ import io.github.capricornus007.nashira.matrix.RecordedVoice
 import io.github.capricornus007.nashira.matrix.VoiceRecorder
 import io.github.capricornus007.nashira.matrix.rememberRecordingPermission
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.runtime.DisposableEffect
 import de.connect2x.trixnity.clientserverapi.client.SyncState
@@ -1663,8 +1666,9 @@ private fun TimelinePane(
     // （v0.1.8 實測面板永遠退回 300dp、與鍵盤差 179px）。改成量輸入列自己的位置：
     // 「空場」時它貼在螢幕下方（baseline），鍵盤開時被 imePadding 頂上去，
     // 兩個 top 的差就是鍵盤高度。純佈局觀測，不碰 insets API。
+    // 量到的結果寫進 UiState.imeHeightPx（會存檔），換聊天室不必重新量。
     val density = LocalDensity.current
-    var lastImeBottomPx by remember(room.roomId) { mutableStateOf(0) }
+    val uiState = LocalUiState.current
     var composerBaselineTopPx by remember(room.roomId) { mutableStateOf(0) }
     // 「＋」的附件選單（桌面是小彈窗、手機是底部面板）
     var attachMenu by remember(room.roomId) { mutableStateOf(false) }
@@ -1714,7 +1718,6 @@ private fun TimelinePane(
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     var composerFocused by remember(room.roomId) { mutableStateOf(false) }
-    val uiState = LocalUiState.current
     LaunchedEffect(composerFocused) {
         // 打字就收面板：64Gram／Telegram 都是這個行為，面板沒有「釘住」這種東西
         if (composerFocused) stickerPanel = false
@@ -2226,14 +2229,15 @@ private fun TimelinePane(
                     Modifier
                         .fillMaxWidth()
                         .padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 8.dp)
-                        // 鍵盤等高的量測點：空場時記下基準 top，鍵盤開時两者的差就是鍵盤高度
+                        // 鍵盤等高的量測點：空場時記下基準 top，鍵盤開時兩者的差就是鍵盤高度
                         // （面板開著時不取樣——那時把輸入列頂起來的是面板自己）
                         .onGloballyPositioned { c ->
                             val top = c.boundsInRoot().top.toInt()
                             when {
                                 !stickerPanel && !composerFocused -> composerBaselineTopPx = top
                                 !stickerPanel && composerFocused && composerBaselineTopPx > top ->
-                                    lastImeBottomPx = composerBaselineTopPx - top
+                                    // 寫進 UiState：那裡會存檔，換聊天室／重開程式都直接沿用
+                                    uiState.imeHeightPx = composerBaselineTopPx - top
                             }
                         },
                     verticalAlignment = Alignment.Bottom,
@@ -2260,11 +2264,15 @@ private fun TimelinePane(
                             // 笑臉而不是加號：加號讀起來像「其他附件的集合」（微信／Telegram
                             // 都是把表情貼圖放在笑臉，附件才是迴紋針或加號）
                             if (stickerPanel) BarIcons.Keyboard else Icons.Filled.Face,
+                            // 標籤跟著圖示走：關著時這顆是「開貼圖／表情面板」，開著時是
+                            // 「叫回輸入法」，一律唸成同一個對無障礙語音是錯的。
+                            contentDescription = if (stickerPanel) strings.keyboard else strings.sticker,
                             // 光學平衡：Face 字形佔滿 24dp 視窗的 83%，Add/Mic 只佔 58%
                             // ——同尺寸渲染會顯得比鄰居大四成（真機像素實測），縮到 20dp 對齊視覺重量
                             modifier = Modifier.size(20.dp),
-                            contentDescription = if (stickerPanel) strings.send else strings.sticker,
-                            tint = if (stickerPanel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            // 顏色不動，只換圖示：64Gram／Telegram／MoregramX 實測這顆鈕
+                            // 開面板時不會變亮（用戶 2026-09-25 點名），變色反而像「按住了」
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     Surface(
@@ -2419,12 +2427,29 @@ private fun TimelinePane(
                         }
                     }
                 }
-                if (stickerPanel) {
-                    // 面板釘在輸入列**下方**：輸入列被頂上去、面板貼住螢幕底，
+                AnimatedVisibility(
+                    visible = stickerPanel && compact,
+                    // 從螢幕底**長出來**（expandFrom = Bottom）：輸入列被往上推、面板
+                    // 從下方升起，收起來時往下降。這才是逐幀看 64Gram／Discord 手機版
+                    // 看到的樣子——之前是「啪」一聲直接出現，用戶點名過沒動畫。
+                    enter = expandVertically(tween(220)) + fadeIn(tween(140)),
+                    exit = shrinkVertically(tween(200)) + fadeOut(tween(120)),
+                ) {
+                    // 手機：面板釘在輸入列**下方**，輸入列被頂上去、面板貼住螢幕底，
                     // 這才是 64Gram／Telegram／Discord 手機版的排法（用戶拿截圖點名過）。
-                    // 高度與鍵盤一致（見上面 lastImeBottomPx 的註解），沒見過鍵盤的
-                    // 裝置（桌面、或從不開輸入法的手機）退回 300dp。
-                    val panelHeight = with(density) { lastImeBottomPx.toDp() }.coerceAtLeast(300.dp)
+                    // 高度與鍵盤一致。順序照 MoregramX 的 `Keyboard.getSize()`：
+                    // **量到的算，預估只當兜底**——① 問系統要鍵盤高度（部分 ROM 在鍵盤
+                    // 沒彈出來過之前查不到，會回 0）② UiState 裡量過存著的數（會存檔，
+                    // 換聊天室／重開程式都沿用）③ 兩個都沒有才用螢幕高度 40% 估
+                    // （實測這台鍵盤佔 39.6%；MoregramX 那版是 (螢幕−狀態列)×45%，
+                    // 但那個數含導航列，扣掉之後落在同一個位置）。
+                    // 真機實測：拿 ② 的 950px 時輸入列與鍵盤狀態差 0px，
+                    // 讓 ③ 的 960px 蓋過去會差 10px，所以別改成取最大。
+                    val measuredPx = maxOf(systemImeHeightPx(), uiState.imeHeightPx)
+                    val panelHeight = with(density) {
+                        (if (measuredPx > 0) measuredPx
+                        else (LocalWindowInfo.current.containerSize.height * 0.40f).toInt()).toDp()
+                    }.coerceAtLeast(300.dp)
                     stickerPanelContent(
                         Modifier
                             .fillMaxWidth()
@@ -2663,6 +2688,27 @@ private fun TimelinePane(
                             modifier = Modifier.size(24.dp),
                         )
                     }
+                }
+            }
+            AnimatedVisibility(
+                visible = stickerPanel && !compact,
+                // 桌面：面板是**浮在右下角的小窗**（用戶截圖 #9——聊天區不縮，
+                // 面板蓋住右下角；右側欄被「聊天室資料」佔住時也是這樣浮著，#10）。
+                // 要把它固定進右欄是用戶既有那個「右側欄」開關的事，這裡不加切換鈕。
+                // 出現時從右下角往上滑一點＋淡入（64Gram 桌面版就是這個小幅度位移）。
+                enter = slideInVertically(tween(200)) { it / 6 } + fadeIn(tween(140)),
+                exit = fadeOut(tween(110)) + slideOutVertically(tween(170)) { it / 6 },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .zIndex(2f)
+                    .padding(end = 12.dp, bottom = 12.dp),
+            ) {
+                Box(
+                    Modifier
+                        .width(380.dp)
+                        .height(440.dp)
+                ) {
+                    stickerPanelContent(Modifier.fillMaxSize())
                 }
             }
         }

@@ -1,5 +1,12 @@
 package io.github.capricornus007.nashira
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -89,8 +96,11 @@ fun StickerPicker(
         shape = RoundedCornerShape(16.dp),
         shadowElevation = 8.dp,
     ) {
-        // P5-2：分頁——貼圖（發 m.sticker）／表情（插入輸入列當 custom emoji）
-        var emojiTab by remember { mutableStateOf(false) }
+        // P5-2：分頁——貼圖（發 m.sticker）／表情（插入輸入列當 custom emoji）。
+        // 停在哪一頁存進 UiState（MoregramX 的 `emoji_vp_position` 同款）：
+        // 換聊天室、重開程式都回到上次那頁，不用每次重新點。
+        val uiState = LocalUiState.current
+        val emojiTab = uiState.stickerTabEmoji
         // 分頁列是「網格的第一格」而不是釘在面板頂：MoregramX／Nagram XF 實錄
         // （~/ref-shots/mgx-panel.mp4）往下捲時它會跟著滑走、捲回頂才回來。
         // 置中純文字、選中上主色，對齊 64Gram 桌面版的「表情符號／貼圖／GIF」。
@@ -108,85 +118,107 @@ fun StickerPicker(
                         else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier
                             .clip(RoundedCornerShape(10.dp))
-                            .clickable { emojiTab = isEmoji }
+                            .clickable { uiState.stickerTabEmoji = isEmoji }
                             .padding(horizontal = 20.dp, vertical = 6.dp),
                     )
                 }
             }
         }
         Column(Modifier.fillMaxSize()) {
-            if (emojiTab) {
-                val emoticons by remember(client) { repository.emoticons() }.collectAsState(initial = emptyList())
-                EmojiBrowser(
-                    strings = strings,
-                    client = client,
-                    emoticons = emoticons,
-                    onPickEmoji = onPickEmoji,
-                    onPickEmoticon = onPickEmoticon,
-                    query = emojiFilter,
-                    header = tabs,
-                    modifier = Modifier.weight(1f),
-                )
-            } else if (packs.isEmpty()) {
-                Column(Modifier.weight(1f).fillMaxWidth()) {
+            // 分頁切換是**橫向滑動**，不是交叉淡入，也不是硬切：MoregramX 那邊是
+            // RtlViewPager + setCurrentItem(index, true)（表情在左、貼圖／GIF 在右），
+            // 往右那頁就從右邊進、左邊出。高度兩頁相同（面板高度由呼叫端固定），
+            // 所以滑動時輸入列不會跳。
+            AnimatedContent(
+                targetState = emojiTab,
+                transitionSpec = {
+                    val duration = 220
+                    if (targetState) {
+                        // 貼圖 → 表情：表情是**右邊**那頁，新頁從右進、舊頁往左出
+                        slideInHorizontally(tween(duration)) { it / 2 } + fadeIn(tween(160)) togetherWith
+                            slideOutHorizontally(tween(duration)) { -it / 2 } + fadeOut(tween(160))
+                    } else {
+                        slideInHorizontally(tween(duration)) { -it / 2 } + fadeIn(tween(160)) togetherWith
+                            slideOutHorizontally(tween(duration)) { it / 2 } + fadeOut(tween(160))
+                    }
+                },
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+            ) { isEmoji ->
+                Column(Modifier.fillMaxSize()) {
+                if (isEmoji) {
+                    val emoticons by remember(client) { repository.emoticons() }.collectAsState(initial = emptyList())
+                    EmojiBrowser(
+                        strings = strings,
+                        client = client,
+                        emoticons = emoticons,
+                        onPickEmoji = onPickEmoji,
+                        onPickEmoticon = onPickEmoticon,
+                        query = emojiFilter,
+                        header = tabs,
+                        modifier = Modifier.weight(1f),
+                    )
+                } else if (packs.isEmpty()) {
+                    Column(Modifier.weight(1f).fillMaxWidth()) {
+                        tabs()
+                        Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                            Text(
+                                strings.stickerEmpty,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                } else {
+                    // 包名優先用包自己的 display_name（state_key 兜底）。同一個貼圖倉庫房會掛
+                    // 好幾包，用房間名當標籤會變成三個一樣的「貼圖包倉庫」，分不出來。
+                    val packNames = packs.map { pack ->
+                        when {
+                            pack.roomId == null -> strings.sticker
+                            pack.name.isNotBlank() -> pack.name
+                            else -> names.firstOrNull { it.roomId == pack.roomId }?.name ?: pack.roomId.full
+                        }
+                    }
+                    var selected by remember(packs.size) { mutableStateOf(0) }
+                    val index = selected.coerceIn(0, packs.lastIndex)
+                    // 貼圖頁：分頁條**釘住**（MoregramX 逐幀實測——捲動時它不動），會跟著捲走的
+                    // 只有當前包名；表情頁相反，分類圖示條會隨捲動消失（見 EmojiBrowser）。
+                    // 底部那條包封面圖示條只有貼圖頁有（表情頁靠自己的分類條選類）。
                     tabs()
-                    Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                        Text(
-                            strings.stickerEmpty,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                    StickerGrid(
+                        pack = packs[index],
+                        client = client,
+                        onSend = onSend,
+                        header = {
+                            Text(
+                                packNames.getOrElse(index) { "" },
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 2.dp),
+                            )
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                    // 包選擇是封面圖示條（Telegram／Discord／Element 都是這樣）：
+                    // 原本的長文字標籤在包多時會橫向溢出，只能靠拖曳，滑鼠與觸控板都不順手。
+                    // LazyRow 本身吃滾輪與拖曳，且只渲染可見項。
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        itemsIndexed(packs) { position, pack ->
+                            PackTab(
+                                client = client,
+                                pack = pack,
+                                label = packNames.getOrElse(position) { pack.name },
+                                selected = position == index,
+                                onClick = { selected = position },
+                            )
+                        }
                     }
                 }
-            } else {
-                // 包名優先用包自己的 display_name（state_key 兜底）。同一個貼圖倉庫房會掛
-                // 好幾包，用房間名當標籤會變成三個一樣的「貼圖包倉庫」，分不出來。
-                val packNames = packs.map { pack ->
-                    when {
-                        pack.roomId == null -> strings.sticker
-                        pack.name.isNotBlank() -> pack.name
-                        else -> names.firstOrNull { it.roomId == pack.roomId }?.name ?: pack.roomId.full
-                    }
-                }
-                var selected by remember(packs.size) { mutableStateOf(0) }
-                val index = selected.coerceIn(0, packs.lastIndex)
-                // 貼圖頁：分頁條**釘住**（MoregramX 逐幀實測——捲動時它不動），會跟著捲走的
-                // 只有當前包名；表情頁相反，分類圖示條會隨捲動消失（見 EmojiBrowser）。
-                // 底部包封面條兩頁都固定（64Gram／MoregramX 都是這個配置）。
-                tabs()
-                StickerGrid(
-                    pack = packs[index],
-                    client = client,
-                    onSend = onSend,
-                    header = {
-                        Text(
-                            packNames.getOrElse(index) { "" },
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 2.dp),
-                        )
-                    },
-                    modifier = Modifier.weight(1f),
-                )
-                // 包選擇是封面圖示條（Telegram／Discord／Element 都是這樣）：
-                // 原本的長文字標籤在包多時會橫向溢出，只能靠拖曳，滑鼠與觸控板都不順手。
-                // LazyRow 本身吃滾輪與拖曳，且只渲染可見項。
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    itemsIndexed(packs) { position, pack ->
-                        PackTab(
-                            client = client,
-                            pack = pack,
-                            label = packNames.getOrElse(position) { pack.name },
-                            selected = position == index,
-                            onClick = { selected = position },
-                        )
-                    }
                 }
             }
         }
