@@ -18,8 +18,8 @@ import javax.sound.sampled.TargetDataLine
  * 顯示名是另一回事：javax.sound 的 Mixer 名其實是 ALSA 路徑
  * （`alsa_playback.java [default]`、`Generic_1 [plughw:1,0]`），人看不出那是
  * 喇叭還是麥克風。所以再問一次 PipeWire/PulseAudio（`pactl`）拿節點描述
- * （「Ryzen HD Audio Controller Speaker」），按 `alsa.card`/`alsa.device`
- * 對回去。問不到（沒裝 pactl、純 ALSA、解析失敗）就原樣顯示 id——
+ * （「Ryzen HD Audio Controller Speaker」），按 `api.alsa.path` 對回去。
+ * 問不到（沒裝 pactl、純 ALSA、解析失敗）就原樣顯示 id——
  * 寧可難看也不編一個可能錯的名字。
  */
 actual object AudioDevices {
@@ -73,14 +73,23 @@ internal fun mixerFor(name: String?): Mixer =
  * 整個類別只在桌面用，且一律 runCatching：沒有 pactl 時當作查不到。
  */
 internal object NativeAudioNodes {
-    /** 一個播放／錄製節點：名字（`alsa_output.pci-…__Speaker__sink`）＋人話描述＋ALSA 卡/裝置號。 */
-    data class Node(val name: String, val description: String, val card: String?, val device: String?)
+    /**
+     * 一個播放／錄製節點：名字（`alsa_output.pci-…__Speaker__sink`）＋人話描述
+     * ＋ALSA 路徑（`api.alsa.path`，如 `hw:Generic_1`、`hw:0,3`）。
+     *
+     * 為什麼不用看起來更直觀的 `alsa.card`／`alsa.device`：UCM 把同一張卡的
+     * 好幾個裝置（內建喇叭、Mic1 數位麥、Mic2 類比麥）全回報成同一組數字
+     * 卡號／裝置號。實測這台機器上兩個麥克風節點都是 `alsa.card=1`＋
+     * `alsa.device=0`，只有 `api.alsa.path` 分得開（`hw:Generic_1` 與 `hw:acp`）。
+     * 拿數字那組去對，兩列 mixer 會各自誤配上同一個節點——用戶截圖裡的
+     * 「重複列＋亂碼名」就是這麼來的。
+     */
+    data class Node(val name: String, val description: String, val path: String?)
 
     private val sinkLine = Regex("""^\s*Name:\s*(\S+)\s*$""")
     private val sinkDesc = Regex("""^\s*Description:\s*(.+?)\s*$""")
-    private val propCard = Regex("""^\s*alsa\.card\s*=\s*"([^"]*)"""")
-    private val propDevice = Regex("""^\s*alsa\.device\s*=\s*"([^"]*)"""")
-    private val hwPath = Regex("""\[(?:plug)?hw:(\d+),(\d+)\]\s*$""")
+    private val propPath = Regex("""^\s*api\.alsa\.path\s*=\s*"([^"]*)"""")
+    private val mixerPath = Regex("""\[(?:plug)?hw:([^\]]+)\]\s*$""")
 
     private val sinkCache: List<Node> by lazy { query("sinks") }
     private val sourceCache: List<Node> by lazy {
@@ -98,8 +107,8 @@ internal object NativeAudioNodes {
     /**
      * 把 javax.sound 的 mixer 名換成人話，依序試：
      * 1. `[default]`（ALSA 預設 pcm）→ 音訊服務的預設節點描述
-     * 2. `[plughw:C,D]` / `[hw:C,D]` → 卡/裝置號對得上的節點描述；同一個 (C,D)
-     *    常掛好幾個節點（UCM 的 Mic1/Mic2 都算 card1,dev0），這時取「目前預設
+     * 2. `[plughw:C,D]` / `[hw:C,D]` → ALSA 路徑對得上的節點描述；同一條路徑
+     *    常掛好幾個節點（UCM 的 Mic1/Mic2 都算同一張卡），這時取「目前預設
      *    的那個」，再不然取第一個——最不容易說錯的取捨。
      * 3. 音訊服務那邊查無此裝置（例：HDMI 口沒接、PipeWire 就不會建節點）→
      *    用 mixer 自己的描述（見 [alsaHint]），至少是「HD-Audio Generic · HDMI 0」
@@ -109,12 +118,33 @@ internal object NativeAudioNodes {
         if (mixerName.endsWith("[default]")) {
             return fallbackDefault?.description ?: alsaHint(mixerDescription) ?: mixerName
         }
-        val m = hwPath.find(mixerName) ?: return mixerName
-        val (card, device) = m.destructured
-        val hits = nodes.filter { it.card == card && it.device == device }
+        val m = mixerPath.find(mixerName)?.groupValues?.getOrNull(1) ?: return mixerName
+        val key = pathKey(m) ?: return mixerName
+        val hits = nodes.filter { pathKey(it.path) == key }
         val node = hits.firstOrNull { fallbackDefault != null && it.name == fallbackDefault.name }
             ?: hits.firstOrNull()
         return node?.description ?: alsaHint(mixerDescription) ?: mixerName
+    }
+
+    /**
+     * 把一條 ALSA 路徑拆成可比較的 (卡, 裝置)：去掉 `hw:`／`plug` 前綴、缺省
+     * 裝置號補 0，並把**數字卡號換成卡名**（`/proc/asound/card1/id`）。
+     * 兩邊都過這道手：mixer 一定給數字（`plughw:1,0`），PipeWire 節點多半給
+     * 卡名（`hw:Generic_1`）、但純 ALSA 或老版本也可能是數字——不比掉這個
+     * 差異就會全都落到 fallback。
+     */
+    private fun pathKey(raw: String?): Pair<String, String>? {
+        val body = raw?.trim()?.removePrefix("plug")?.removePrefix("hw:")?.takeIf { it.isNotEmpty() }
+            ?: return null
+        val parts = body.split(',')
+        return cardName(parts[0].trim()) to (parts.getOrNull(1)?.trim()?.ifBlank { null } ?: "0")
+    }
+
+    private fun cardName(token: String): String {
+        val index = token.toIntOrNull() ?: return token
+        return runCatching { java.io.File("/proc/asound/card$index/id").readText().trim() }
+            .getOrDefault(token)
+            .takeIf { it.isNotEmpty() } ?: token
     }
 
     /**
@@ -144,13 +174,12 @@ internal object NativeAudioNodes {
         val out = ArrayList<Node>()
         var name: String? = null
         var desc: String? = null
-        var card: String? = null
-        var device: String? = null
+        var path: String? = null
         fun flush() {
             val n = name
             val d = desc
-            if (n != null && !d.isNullOrBlank()) out += Node(n, d, card, device)
-            name = null; desc = null; card = null; device = null
+            if (n != null && !d.isNullOrBlank()) out += Node(n, d, path)
+            name = null; desc = null; path = null
         }
         for (line in text.lineSequence()) {
             when {
@@ -158,8 +187,7 @@ internal object NativeAudioNodes {
                 else -> {
                     sinkLine.find(line)?.let { name = it.groupValues[1] }
                     sinkDesc.find(line)?.let { desc = it.groupValues[1] }
-                    propCard.find(line)?.let { card = it.groupValues[1] }
-                    propDevice.find(line)?.let { device = it.groupValues[1] }
+                    propPath.find(line)?.let { path = it.groupValues[1] }
                 }
             }
         }
