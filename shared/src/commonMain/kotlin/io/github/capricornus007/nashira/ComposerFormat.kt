@@ -44,11 +44,15 @@ enum class ComposerFormat {
  * 文字工具列（TextToolbar）也走同一份清單，不用另外做入口。
  */
 @OptIn(ExperimentalFoundationApi::class)
-fun TextContextMenuBuilderScope.appendComposerFormatItems(strings: Strings, enabled: Boolean, onPick: (ComposerFormat) -> Unit) {
+fun TextContextMenuBuilderScope.appendComposerFormatItems(
+    strings: Strings,
+    onPick: (ComposerFormat) -> Unit,
+) {
     separator()
     ComposerFormat.entries.forEach { format ->
-        // 參數一律用位置傳：順序是 (key, label, enabled, leadingIcon, onClick)
-        item("nashira.format.${format.name}", format.label(strings), enabled, null) { onPick(format) }
+        // 真實簽名是 item(key, label, leadingIcon = 0, onClick)，沒有 enabled 這一欄
+        // （反編譯 foundation-desktop-1.12.0 核過）；「空時灰色」做不到，改成空時整組不出現。
+        item("nashira.format.${format.name}", format.label(strings)) { onPick(format) }
     }
 }
 

@@ -2299,14 +2299,13 @@ private fun TimelinePane(
                                 // 右鍵＝在文字欄自己的選單尾端追加格式化六項（同一個選單、
                                 // 同一套主題）。自己再開一個 DropdownMenu 會跟內建那層疊成
                                 // 兩層，2026-09-25 用戶截圖點名過。
-                                .appendTextContextMenuComponents {
-                                    appendComposerFormatItems(
-                                        strings = strings,
-                                        // 「空時灰色」：整欄是空的，插標記只會留一對空符號在框裡
-                                        enabled = draft.text.isNotEmpty(),
-                                        onPick = { format -> applyComposerFormat(draft, format) },
-                                    )
-                                }
+                                .appendComposerFormatMenu(
+                                    strings = strings,
+                                    // 草稿空的時候整組不出現：一是插標記只會留一對空符號在框裡，
+                                    // 二是 Compose 的 item() 沒有 enabled 參數，做不出「灰色但按不动」
+                                    enabled = draft.text.isNotEmpty(),
+                                    onPick = { format -> applyComposerFormat(draft, format) },
+                                )
                                 // 送出鍵：命中設定的組合就送並吃掉事件，其餘 Enter 交回去換行
                                 .onPreviewKeyEvent { event ->
                                     if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
