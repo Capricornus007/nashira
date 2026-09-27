@@ -697,7 +697,9 @@ class RoomRepository(val client: MatrixClient) {
         runCatching {
             client.room.sendMessage(roomId) {
                 reply(replyTo, null)
-                text(body)
+                // formattedBody 原本收了卻沒傳下去：回覆帶 **粗體**、``` 碼塊時
+                // 格式整條消失（送文字的 sendText 是正確寫法，這裡對齊它）。
+                text(body, formattedBody?.let { "org.matrix.custom.html" }, formattedBody)
             }
         }
 
@@ -953,8 +955,16 @@ class RoomRepository(val client: MatrixClient) {
     /**
      * 發送本地圖片（m.image）。加密房先 prepareUploadEncryptedMedia 取得
      * EncryptedFile（事件層再由 outbox 走 megolm）；明文房上傳取 mxc url。
+     *
+     * [caption] 是使用者打的說明文字：Matrix 的 m.image 用 `body` 當說明，
+     * 沒給說明的時候才退回檔名（否則房間裡會看到一則訊息寫著 `pasted-1739…png`）。
      */
-    suspend fun sendImage(roomId: RoomId, image: PickedImage): Result<String> = runCatching {
+    suspend fun sendImage(
+        roomId: RoomId,
+        image: PickedImage,
+        caption: String? = null,
+        replyTo: EventId? = null,
+    ): Result<String> = runCatching {
         val mediaService = client.di.get<de.connect2x.trixnity.client.media.MediaService>()
         val contentType = io.ktor.http.ContentType.parse(image.mimeType)
         val info = ImageInfo(
@@ -963,11 +973,12 @@ class RoomRepository(val client: MatrixClient) {
             height = image.height,
             size = image.bytes.size.toLong(),
         )
+        val body = caption?.trim()?.takeIf { it.isNotEmpty() } ?: image.fileName
         val encrypted = client.room.getState<EncryptionEventContent>(roomId).firstOrNull() != null
         val content = if (encrypted) {
             val file = mediaService.prepareUploadEncryptedMedia(image.bytes.toByteArrayFlow())
             RoomMessageEventContent.FileBased.Image(
-                body = image.fileName,
+                body = body,
                 file = file,
                 info = info,
             )
@@ -975,12 +986,13 @@ class RoomRepository(val client: MatrixClient) {
             val cacheUri = mediaService.prepareUploadMedia(image.bytes.toByteArrayFlow(), contentType)
             val mxc = mediaService.uploadMedia(cacheUri).getOrThrow()
             RoomMessageEventContent.FileBased.Image(
-                body = image.fileName,
+                body = body,
                 url = mxc,
                 info = info,
             )
         }
         client.room.sendMessage(roomId) {
+            if (replyTo != null) reply(replyTo, null)
             content(content)
         }
     }
