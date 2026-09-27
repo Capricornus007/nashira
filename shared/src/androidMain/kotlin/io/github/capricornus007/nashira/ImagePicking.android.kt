@@ -61,3 +61,11 @@ private fun readFile(context: android.content.Context, uri: Uri): PickedFile? = 
         fileName = name ?: uri.lastPathSegment ?: "file",
     )
 }.getOrNull()
+
+// 手機的圖片進輸入框走系統選擇器與「分享」，不做剪貼簿貼上：
+// Android 讀剪貼簿要前臺視窗與（10 以上）額外權限，而且長按選單那條路已經存在。
+actual val clipboardImagePasteSupported: Boolean = false
+
+actual suspend fun readClipboardImages(): List<PickedImage> = emptyList()
+
+actual fun clipboardHasImages(): Boolean = false

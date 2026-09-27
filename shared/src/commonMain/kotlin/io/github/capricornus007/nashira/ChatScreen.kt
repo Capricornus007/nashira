@@ -192,6 +192,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.insert
@@ -1603,12 +1606,16 @@ private fun TimelinePane(
 
     val recordingPermission = rememberRecordingPermission()
     var pendingEmoticons by remember(room.roomId) { mutableStateOf<List<StickerItem>>(emptyList()) }
+    // 待發圖片：桌面在輸入框按 Ctrl+V、剪貼簿有圖時落到這裡。
+    // 與 pendingEmoticons 同一套「先暫存、按送才發」的語意，縮圖列也沿用同一種 chip。
+    var pendingImages by remember(room.roomId) { mutableStateOf<List<PickedImage>>(emptyList()) }
 
     // 送出動作由按鈕與 Enter 鍵共用，兩邊行為必須一致
     val sendDraft: () -> Unit = {
         val text = draft.text.toString().trim()
         val emotes = pendingEmoticons
-        if ((text.isNotEmpty() || emotes.isNotEmpty()) && !sending) {
+        val images = pendingImages
+        if ((text.isNotEmpty() || emotes.isNotEmpty() || images.isNotEmpty()) && !sending) {
             draft.clearText()
             sending = true
             // P5-2：帶 custom emoji 時組 org.matrix.custom.html——文字跳脫＋img 標籤；
@@ -1637,6 +1644,30 @@ private fun TimelinePane(
             replyTo = null
             if (edit == null) editTarget = null
             scope.launch {
+                if (images.isNotEmpty()) {
+                    // 有圖時文字變成第一張圖的說明（Matrix 的 m.image 就拿 body 當 caption），
+                    // 不再另外發一則純文字——否則房間裡會變成「一段話＋一張不相干的圖」兩條訊息。
+                    // 多張只有第一張帶說明：同一段話重複標在每張圖上更怪。
+                    var failure: Throwable? = null
+                    images.forEachIndexed { index, image ->
+                        roomRepository.sendImage(
+                            room.roomId,
+                            image,
+                            caption = if (index == 0) body else null,
+                            replyTo = if (index == 0) target else null,
+                        ).onFailure { failure = it }
+                    }
+                    if (failure == null) {
+                        pendingImages = emptyList()
+                        pendingEmoticons = emptyList()
+                    } else {
+                        // 發不出去就把說明還回輸入框，別讓使用者打的字憑空消失
+                        draft.setTextAndPlaceCursorAtEnd(body)
+                        sendError = io.github.capricornus007.nashira.i18n.friendlyError(failure!!)
+                    }
+                    sending = false
+                    return@launch
+                }
                 val result = if (edit != null) {
                     roomRepository.editText(room.roomId, edit, body, formatted)
                 } else if (target != null) {
@@ -2072,6 +2103,38 @@ private fun TimelinePane(
                         }
                     }
                 }
+                // 待發圖片的縮圖列（桌面 Ctrl+V 貼上後出現在這裡）。點一下縮圖＝移除那張，
+                // 與上面 emoji chip 同一套互動，不另設「確認／取消」按鈕。
+                if (pendingImages.isNotEmpty() && voiceRecorder == null && recordedPreview == null) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(start = 8.dp, end = 8.dp, top = 6.dp)
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        pendingImages.forEach { image ->
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable {
+                                    pendingImages = pendingImages - image
+                                },
+                            ) {
+                                Box(contentAlignment = Alignment.TopEnd) {
+                                    PickedImageThumb(image)
+                                    Icon(
+                                        Icons.Filled.Close,
+                                        contentDescription = strings.cancel,
+                                        modifier = Modifier.size(14.dp).padding(2.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
                 // P5-1 錄音列：錄音中／待確認時整條替換輸入列（Telegram 式）。
                 if (voiceRecorder != null || recordedPreview != null) {
                     Row(
@@ -2309,6 +2372,18 @@ private fun TimelinePane(
                                 // 送出鍵：命中設定的組合就送並吃掉事件，其餘 Enter 交回去換行
                                 .onPreviewKeyEvent { event ->
                                     if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                    // 桌面 Ctrl+V：剪貼簿有圖就暫存成待發圖片，並吃掉這次按鍵。
+                                    // 「有沒有圖」一定要**同步**問：先吃掉再非同步讀的話，
+                                    // 貼純文字會被靜默弄壞（按了沒反應、也查不出原因）。
+                                    // 只認 Ctrl：這個 Compose 版本的 KeyEvent 沒有 meta 欄位，
+                                    // 僞造 Cmd+V 反而會誤吃按鍵。
+                                    if (clipboardImagePasteSupported && event.key == Key.V &&
+                                        event.isCtrlPressed && !event.isAltPressed && !event.isShiftPressed &&
+                                        clipboardHasImages()
+                                    ) {
+                                        scope.launch { pendingImages = pendingImages + readClipboardImages() }
+                                        return@onPreviewKeyEvent true
+                                    }
                                     if (event.key != Key.Enter && event.key != Key.NumPadEnter) {
                                         return@onPreviewKeyEvent false
                                     }
@@ -4025,6 +4100,41 @@ fun UrlPreviewInline(url: String, modifier: Modifier = Modifier) {
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+        }
+    }
+}
+
+/**
+ * 待發圖片的縮圖。
+ *
+ * 解碼丟到 Default 執行緒：貼上的常是整張螢幕截圖，在主執行緒解碼會明顯卡一下
+ * （長邊壓到 128 只是為了畫這顆小方塊，上傳用的還是原位元組）。
+ * 解不出來的格式（例如平台沒有 webp 解碼器）退回顯示檔名首字，不留空白方塊。
+ */
+@Composable
+private fun PickedImageThumb(image: PickedImage) {
+    var bitmap by remember(image) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(image) {
+        bitmap = withContext(Dispatchers.Default) { decodeImageBitmap(image.bytes, 128) }
+    }
+    val shown = bitmap
+    if (shown != null) {
+        Image(
+            bitmap = shown,
+            contentDescription = image.fileName,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.size(44.dp),
+        )
+    } else {
+        Box(
+            Modifier.size(44.dp).background(MaterialTheme.colorScheme.surfaceContainerHighest),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                image.fileName.take(1).uppercase(),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
