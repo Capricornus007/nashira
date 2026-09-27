@@ -167,6 +167,19 @@ fun main(args: Array<String>) {
                 val menuW = 200.dp
                 val menuH = 118.dp
                 val density = LocalDensity.current
+                // 平鋪式 WM（i3／bspwm／xmonad）會無視 setLocation，所以這個選單在那類環境下
+                // 位置由 WM 說、不由我們說。試過兩條路都走不通，證據留在這裡別再試同一遍：
+                //   1) 在 LaunchedEffect 裡 `window.type = POPUP` → AWT 不允許改「已 displayable」
+                //      視窗的型別，異常被吞掉，選單照樣被搬走（用戶 2026-09-27 實測仍錯位）。
+                //   2) 先 `visible=false`、降完型別再顯示 → 也無效：Compose 一建立視窗就已經
+                //      displayable（實測印出 displayable=true，型別改不了）。
+                // 根因：Compose 1.12.0 的 `Window()` 沒有傳入自建 ComposeWindow 的參數
+                // （javap 過全部多載：state/visible/title/icon/undecorated/transparent/resizable/
+                // enabled/focusable/alwaysOnTop/鍵事件/content），拿不到「顯示之前」那個時機，
+                // 就沒辦法讓 X11 用 override-redirect 建這個視窗。
+                // 剩下兩條可行：給這個視窗固定標題請 WM 加 float＋move position mouse 規則；
+                // 或等上游開出自建 window 參數。不改成 AWT PopupMenu 是因為它走自己的字型
+                // 渲染管線、中文缺筆畫（2026-09-14 用戶拿 fcitx5 截圖對比過）。
                 Window(
                     onCloseRequest = { trayMenuOpen = false },
                     undecorated = true,
