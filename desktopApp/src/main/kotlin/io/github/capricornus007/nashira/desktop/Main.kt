@@ -5,7 +5,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.awt.ComposeWindow
+import androidx.compose.ui.awt.SwingWindow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.DpSize
@@ -15,16 +18,9 @@ import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import androidx.compose.ui.window.Tray
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupProperties
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -40,6 +36,7 @@ import io.github.capricornus007.nashira.AppNotifications
 import io.github.capricornus007.nashira.DesktopNotifications
 import io.github.capricornus007.nashira.DesktopSingleInstance
 
+@OptIn(ExperimentalComposeUiApi::class)
 fun main(args: Array<String>) {
     // AWT 字體渲染優化：LCD 子像素抗鋸齒（預設灰階在深色主題下像「關閉優化的 Windows」）
     // 必須在 AWT 初始化前設定。
@@ -160,51 +157,50 @@ fun main(args: Array<String>) {
                 }
             }
 
-            // Compose 托盤菜單（右鍵彈出）：獨立 Window，不掛主窗口——
-            // Popup 在 application{} 裡沒有 LocalHostDefaultProvider 會崩
-            // （2026-09-14 實測：右鍵托盤圖標直接炸）。
+            // 平鋪式 WM（i3／bspwm）會無視 setLocation，選單位置由 WM 說、不由我們說。
+            // 解法是讓 X11 以 override-redirect 建這個窗口——WM 根本不會接管它：
+            // `Window()` 有個 `create:` 多載（實驗性 API），把「顯示之前」那個時機
+            // 交出來，才能在窗口還沒 displayable 時改 `type = POPUP`。
+            // 2026-09-28 實測（i3、無合成器）：探針窗口 `WM_STATE: not found`、
+            // 不在 `_NET_CLIENT_LIST`、i3 樹查無，`setLocation(700,480)` 原地不動。
+            // 教訓：`type` 只能在尚未 displayable 時改——先前在 LaunchedEffect 裡改
+            // （那時窗口早已 displayable）異常會被吞掉，位置照舊錯。POPUP 也要和
+            // undecorated 同時設定，X11 後端才給 override-redirect。
             if (trayMenuOpen) {
-                val menuW = 200.dp
-                val menuH = 118.dp
-                val density = LocalDensity.current
-                // 平鋪式 WM（i3／bspwm／xmonad）會無視 setLocation，所以這個選單在那類環境下
-                // 位置由 WM 說、不由我們說。試過兩條路都走不通，證據留在這裡別再試同一遍：
-                //   1) 在 LaunchedEffect 裡 `window.type = POPUP` → AWT 不允許改「已 displayable」
-                //      視窗的型別，異常被吞掉，選單照樣被搬走（用戶 2026-09-27 實測仍錯位）。
-                //   2) 先 `visible=false`、降完型別再顯示 → 也無效：Compose 一建立視窗就已經
-                //      displayable（實測印出 displayable=true，型別改不了）。
-                // 根因：Compose 1.12.0 的 `Window()` 沒有傳入自建 ComposeWindow 的參數
-                // （javap 過全部多載：state/visible/title/icon/undecorated/transparent/resizable/
-                // enabled/focusable/alwaysOnTop/鍵事件/content），拿不到「顯示之前」那個時機，
-                // 就沒辦法讓 X11 用 override-redirect 建這個視窗。
-                // 剩下兩條可行：給這個視窗固定標題請 WM 加 float＋move position mouse 規則；
-                // 或等上游開出自建 window 參數。不改成 AWT PopupMenu 是因為它走自己的字型
-                // 渲染管線、中文缺筆畫（2026-09-14 用戶拿 fcitx5 截圖對比過）。
-                Window(
-                    onCloseRequest = { trayMenuOpen = false },
-                    undecorated = true,
-                    transparent = true,
-                    resizable = false,
-                    alwaysOnTop = true,
-                    state = rememberWindowState(size = DpSize(menuW, menuH)),
+                // AWT 座標系是「使用者空間」而非實體像素：本機 uiScale=2 時
+                // `Toolkit.screenSize` 回報 1120x700（實體 2240x1400），`MouseInfo` 的滑標位置、
+                // `setBounds` 吃的都是這套單位。實測教訓（2026-09-28）：拿 `200.dp.toPx()`
+                // （=400 實體像素）去 setBounds，選單直接大两倍。
+                // 而 Compose 的邏輯 dp 與 AWT 使用者空間在本機是同一個尺度（都 = 實體/2），
+                // 所以 dp 數字原樣傳給 AWT 就對了。
+                val menuW = 200
+                val menuH = 118
+                val scr = java.awt.Toolkit.getDefaultToolkit().screenSize
+                val menuX = (trayMenuScreenPos.x - menuW + 8).coerceIn(0, (scr.width - menuW).coerceAtLeast(0))
+                // 托盤在螢幕上半部 → 選單往下長；在下半部才往上長
+                val menuY = (
+                    if (trayMenuScreenPos.y < scr.height / 2) trayMenuScreenPos.y + 6
+                    else trayMenuScreenPos.y - menuH - 6
+                ).coerceIn(0, (scr.height - menuH).coerceAtLeast(0))
+                SwingWindow(
+                    create = {
+                        // ComposeWindow 是 final，繼承不了；但 `create` 給的就是
+                        // 「建立後、顯示前」那一段，apply 裡改 type 還趕得上。
+                        ComposeWindow(
+                            java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment()
+                                .defaultScreenDevice.defaultConfiguration,
+                        ).apply {
+                            isUndecorated = true
+                            type = java.awt.Window.Type.POPUP
+                            isResizable = false
+                            setBounds(menuX, menuY, menuW, menuH)
+                        }
+                    },
+                    dispose = { it.dispose() },
                 ) {
-                    // 位置改用 AWT 的物理像素直接擺。原本那套 `scr.width / 2240f` 是把邏輯
-                    // dp 硬換算成螢幕座標、而且寫死一台機器的解析度，換螢幕或縮放就整個飄走
-                    // （用戶 2026-09-25 照片：托盤在右上角，選單卻出現在螢幕左側）。
-                    LaunchedEffect(window, trayMenuScreenPos) {
-                        val scr = java.awt.Toolkit.getDefaultToolkit().screenSize
-                        val w = window.width.takeIf { it > 1 } ?: with(density) { menuW.toPx() }.toInt()
-                        val h = window.height.takeIf { it > 1 } ?: with(density) { menuH.toPx() }.toInt()
-                        val x = (trayMenuScreenPos.x - w + 8).coerceIn(0, (scr.width - w).coerceAtLeast(0))
-                        // 托盤在螢幕上半部 → 選單往下長；在下半部才往上長
-                        val y = (
-                            if (trayMenuScreenPos.y < scr.height / 2) trayMenuScreenPos.y + 6
-                            else trayMenuScreenPos.y - h - 6
-                        ).coerceIn(0, (scr.height - h).coerceAtLeast(0))
-                        window.setLocation(x, y)
-                    }
-                    // undecorated Window 不會因點擊外部而關閉（onCloseRequest 只
-                    // 響應 WM 關閉）——焦點丟失＝點了別處＝收起菜單。
+                    // override-redirect 窗口 WM 不會給焦點，要自己討；討不到也不影響點擊。
+                    LaunchedEffect(window) { window.requestFocus() }
+                    // 焦點丟失＝點了別處＝收起菜單。
                     LaunchedEffect(window) {
                         window.addWindowFocusListener(object : java.awt.event.WindowAdapter() {
                             override fun windowLostFocus(e: java.awt.event.WindowEvent?) {
@@ -212,43 +208,39 @@ fun main(args: Array<String>) {
                             }
                         })
                     }
-                    // 窗口比 Surface 大一圈：陰影/ripple 不被窗口邊界裁掉
-                    //（2026-09-14 用戶截圖：hover 時文字/高亮不完整）。
-                    Box(Modifier.fillMaxSize().padding(10.dp), contentAlignment = Alignment.Center) {
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            shadowElevation = 6.dp,
-                        ) {
-                            Column {
-                                Text(
-                                    strings.trayOpen,
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            trayMenuOpen = false
-                                            // 先收菜單再喚主窗：alwaysOnTop 菜單
-                                            // 若還在，會搶走喚起後的焦點
-                                            //（「開啟 Nashira 沒那麼好用」的根因）。
-                                            java.awt.EventQueue.invokeLater { showMainWindow() }
-                                        }
-                                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                )
-                                Text(
-                                    strings.trayQuit,
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            trayMenuOpen = false
-                                            java.awt.EventQueue.invokeLater { exitApplication() }
-                                        }
-                                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                )
-                            }
+                    // 實心、窗口與選單同尺寸：這台機器沒有合成器（`_NET_WM_CM_S0` 查無），
+                    // 透明圓角與窗外陰影畫不出來，留著只會黑一片。
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    ) {
+                        Column {
+                            Text(
+                                strings.trayOpen,
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        trayMenuOpen = false
+                                        // 先收菜單再喚主窗：選單若還在，會搶走喚起後的焦點
+                                        //（「開啟 Nashira 沒那麼好用」的根因）。
+                                        java.awt.EventQueue.invokeLater { showMainWindow() }
+                                    }
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Text(
+                                strings.trayQuit,
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        trayMenuOpen = false
+                                        java.awt.EventQueue.invokeLater { exitApplication() }
+                                    }
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
                         }
                     }
                 }
