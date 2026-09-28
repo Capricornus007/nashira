@@ -31,9 +31,26 @@ internal fun splitHtmlCodeBlocks(html: String): List<HtmlChunk> {
     return out
 }
 
-/** `<pre>` 裡頭通常還包一層 `<code>`；標籤先剝、實體後解，順序不能反。 */
-internal fun codeTextOf(innerHTML: String): String =
-    decodeHtmlEntities(HTML_TAG_REGEX.replace(innerHTML, "")).removeSuffix("\n")
+/**
+ * `<pre>` 裡頭通常還包一層 `<code>`；標籤先剝、實體後解，順序不能反。
+ *
+ * 兩件 markdown 柵欄的慣例一起補上（用戶 2026-09-28：程式碼塊左側一道沒意義的空槽、
+ * 上面還多一行空白）：
+ * ① 去掉首尾各一個換行——橋接器送來的 `<pre><code>` 內容多半以 `\n` 開頭；
+ * ② 去掉「整段共同」的前導縮排，例如 systemd NEWS 每行前面都掛兩個空格，
+ *    原樣輸出就會讓區塊內容整體往右擠。只縮「每一行都有」的那個量，
+ *    行與行之間的相對縮排（程式碼的層級）保持不變。
+ */
+internal fun codeTextOf(innerHTML: String): String {
+    val raw = decodeHtmlEntities(HTML_TAG_REGEX.replace(innerHTML, ""))
+        .removePrefix("\n")
+        .removeSuffix("\n")
+    val commonIndent = raw.lineSequence()
+        .filter { it.isNotBlank() }
+        .map { it.length - it.trimStart().length }
+        .minOrNull() ?: 0
+    return if (commonIndent > 0) raw.lines().joinToString("\n") { it.drop(commonIndent) } else raw
+}
 
 /**
  * 回覆的引用塊：Matrix 把它包在 `<mx-reply>…</mx-reply>` 裡，內容是「被回覆那則」的

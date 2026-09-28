@@ -3973,12 +3973,20 @@ private fun MessageBodyContent(
 @Composable
 private fun CodeBlockBubble(code: String, copyLabel: String) {
     val clipboard = LocalClipboardManager.current
+    val hoverSource = remember { MutableInteractionSource() }
+    val hovered by hoverSource.collectIsHoveredAsState()
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
         shape = RoundedCornerShape(8.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Box(Modifier.padding(10.dp)) {
+        // 複製鈕改成懸停才出現（Element 就是這樣）。之前是「永久讓出 26dp」，
+        // 結果每一行右側都掛一道沒意義的空白（用戶 2026-09-28 點名）。
+        Box(
+            Modifier
+                .padding(10.dp)
+                .hoverable(hoverSource),
+        ) {
             Text(
                 code,
                 style = TextStyle(
@@ -3987,21 +3995,26 @@ private fun CodeBlockBubble(code: String, copyLabel: String) {
                     lineHeight = 18.sp,
                     color = MaterialTheme.colorScheme.onSurface,
                 ),
-                modifier = Modifier
-                    .horizontalScroll(rememberScrollState())
-                    // 首行讓開複製鈕，否則第一個字會被蓋在鈕下面
-                    .padding(end = 26.dp),
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
             )
-            IconButton(
-                onClick = { clipboard.setText(AnnotatedString(code)) },
-                modifier = Modifier.align(Alignment.TopEnd).size(26.dp),
-            ) {
-                Icon(
-                    BarIcons.ContentCopy,
-                    contentDescription = copyLabel,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(15.dp),
-                )
+            if (hovered) {
+                IconButton(
+                    onClick = { clipboard.setText(AnnotatedString(code)) },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .size(26.dp)
+                        .background(
+                            MaterialTheme.colorScheme.surfaceContainerHighest,
+                            RoundedCornerShape(6.dp),
+                        ),
+                ) {
+                    Icon(
+                        BarIcons.ContentCopy,
+                        contentDescription = copyLabel,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(15.dp),
+                    )
+                }
             }
         }
     }
