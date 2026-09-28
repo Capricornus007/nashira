@@ -74,6 +74,26 @@ fun urlsInMessage(formattedBody: String?, plainBody: String): List<String> {
         .toList()
 }
 
+/**
+ * 「抓得對、但對聊天沒意義」的標題，一律不顯示卡片（連結照樣可點）。
+ *
+ * 用戶 2026-09-28 截圖：Gentoo 那則訊息掛出三張卡，兩張寫「Log in to Gentoo's Bugzilla」
+ * （bugzilla 的查詢頁未登入時標題就是這個），另一張只有 `build"`（從 query 字串漏出來的碎片）。
+ * 標題本身沒抓錯，是這種頁面根本沒有可讀的標題。
+ */
+private val JUNK_TITLE_REGEX = Regex(
+    """^\s*(log\s?in|login|sign\s?in|sign\s?up|register|registration|just a moment|access denied""" +
+        """|forbidden|not found|page not found|unauthorized|error|redirecting|40[0-9]|50[0-9])\b""" +
+        """|^(登入|登陸|登錄|註冊|驗證|錯誤|找不到|頁面不存在|訪問被拒|重新導向)""",
+    RegexOption.IGNORE_CASE,
+)
+
+private fun isJunkTitle(title: String): Boolean =
+    title.length < 4 ||
+        JUNK_TITLE_REGEX.containsMatchIn(title) ||
+        // 引號不成對 → 標題是 query 字串的殘片，不是真的網頁標題
+        title.count { it == '"' } % 2 == 1
+
 /** 抓取並解析 og meta。任何失敗都回 null（呼叫端只顯示空白，不打擾）。 */
 suspend fun fetchUrlPreview(url: String): UrlPreviewData? = withContext(Dispatchers.Default) {
     try {
