@@ -45,9 +45,13 @@ internal fun codeTextOf(innerHTML: String): String {
     val raw = decodeHtmlEntities(HTML_TAG_REGEX.replace(innerHTML, ""))
         .removePrefix("\n")
         .removeSuffix("\n")
+    // 注意：橋接器（Telegram→Matrix 這類）為了防 HTML 摺疊空白字元，會把行首的
+    // 縮排寫成 `&nbsp;`；解完實體就是 U+00A0，而 `trimStart()` 只認 isWhitespace，
+    // U+00A0 不算 → 共同縮排永遠算成 0、去不掉（用戶 2026-09-28：程式碼塊依舊）。
+    val indentOf = { line: String -> line.takeWhile { it.isWhitespace() || it == '\u00A0' || it == '\u3000' }.length }
     val commonIndent = raw.lineSequence()
-        .filter { it.isNotBlank() }
-        .map { it.length - it.trimStart().length }
+        .filter { it.any { c -> !c.isWhitespace() && c != '\u00A0' && c != '\u3000' } }
+        .map(indentOf)
         .minOrNull() ?: 0
     return if (commonIndent > 0) raw.lines().joinToString("\n") { it.drop(commonIndent) } else raw
 }
