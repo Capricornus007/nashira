@@ -73,7 +73,15 @@ fun main(args: Array<String>) {
         // nashira:// 連結喚不回的實測根因（2026-09-14，X 層 windowmap 可救
         // 證明窗口沒死、是 Compose 層沒跑）。
         val ui = LocalUiState.current
-        val trayAvailable = java.awt.SystemTray.isSupported()
+        // 托盤圖標直接用 app 圖標本體：這裡原本是手畫一顆 Arcaea 金星，跟主窗圖示
+        // （nashira-icon.png）完全是兩個東西（用戶 2026-09-28：後台圖標要跟應用程式圖標統一）。
+        val trayImage = remember {
+            // 檔內拿不到「MainKt」這個類名，改用執行緒的 class loader 找 classpath 根目錄的圖
+            val url = Thread.currentThread().contextClassLoader?.getResource("nashira-icon.png")
+            runCatching { url?.let { javax.imageio.ImageIO.read(it) } }.getOrNull()
+        }
+        // 載不到圖就當作沒有托盤：寧可關窗即退，也不要收進去之後沒有圖示能召回。
+        val trayAvailable = java.awt.SystemTray.isSupported() && trayImage != null
         val strings = stringsFor(ui.language)
         var mainWindow by remember { mutableStateOf<java.awt.Window?>(null) }
 
@@ -98,36 +106,12 @@ fun main(args: Array<String>) {
             if (!ok) println("NASHIRA_HOTKEY: global hotkey unavailable (X11 grab failed)")
         }
 
-        if (trayAvailable) {
-            // 直接 AWT TrayIcon：Compose 的 Tray 用預設 AWT 字體（醜）且圖標
-            // 只能傳 Painter（純色）；這裡用 BufferedImage 圖標＋自訂字體。
-            // 2026-09-14 用戶回報：右鍵菜單字體醜＋圖標太純色。
-            val trayIcon = java.awt.image.BufferedImage(16, 16, java.awt.image.BufferedImage.TYPE_INT_ARGB).apply {
-                val g = createGraphics()
-                g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON)
-                // Arcaea 金星：五角星路徑
-                val gold = java.awt.Color(0xF2, 0xB6, 0x3C)
-                val navy = java.awt.Color(0x1F, 0x1E, 0x33)
-                g.color = navy
-                g.fillRoundRect(0, 0, 16, 16, 4, 4)
-                g.color = gold
-                val cx = 8f; val cy = 8f; val r1 = 6f; val r2 = 2.5f
-                val star = java.awt.geom.Path2D.Float()
-                for (i in 0 until 10) {
-                    val angle = Math.PI / 2 + i * Math.PI / 5
-                    val r = if (i % 2 == 0) r1 else r2
-                    val x = cx + r * kotlin.math.cos(angle).toFloat()
-                    val y = cy - r * kotlin.math.sin(angle).toFloat()
-                    if (i == 0) star.moveTo(x, y) else star.lineTo(x, y)
-                }
-                star.closePath()
-                g.fill(star)
-                g.dispose()
-            }
+        if (trayAvailable && trayImage != null) {
+            // 也不設 tooltip：懸浮跳出白底「Nashira」那一塊，用戶 2026-09-28 點名要拿掉。
             // remember：TrayIcon 必須全程同一個實例——下面只 add 一次，若每次重組都 new
             // 一顆，托盤就會被疊成一排（用戶 2026-09-25 照片：右鍵一次多一顆）。
-            val trayIconAwt = remember {
-                java.awt.TrayIcon(trayIcon, "Nashira").apply { isImageAutoSize = true }
+            val trayIconAwt = remember(trayImage) {
+                java.awt.TrayIcon(trayImage).apply { isImageAutoSize = true }
             }
             // AWT 字體渲染：系統屬性在 JVM 啟動時設定（main() 最前面），
             // 這裡只設字體本身。抗鋸齒/LCD 子像素由 awt.useSystemAAFontSettings 控制。
@@ -246,7 +230,7 @@ fun main(args: Array<String>) {
                                             //（「開啟 Nashira 沒那麼好用」的根因）。
                                             java.awt.EventQueue.invokeLater { showMainWindow() }
                                         }
-                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                        .padding(horizontal = 14.dp, vertical = 8.dp),
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurface,
                                 )
@@ -258,7 +242,7 @@ fun main(args: Array<String>) {
                                             trayMenuOpen = false
                                             java.awt.EventQueue.invokeLater { exitApplication() }
                                         }
-                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                        .padding(horizontal = 14.dp, vertical = 8.dp),
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurface,
                                 )
