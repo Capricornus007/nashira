@@ -1,4 +1,5 @@
 package io.github.capricornus007.nashira
+import androidx.compose.material3.ColorScheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -224,8 +225,14 @@ private inline fun <reified E : Enum<E>> Map<String, String>.enumOr(key: String,
 
 val LocalUiState = staticCompositionLocalOf { UiState() }
 
+/**
+ * 目前該用的配色：深淺、色票/動態取色種子全部從 LocalUiState 讀。
+ *
+ * 抽成獨立函式是因為托盤選單是**另一個 Window**，拿不到 App() 內部算的主題；
+ * 不共用這段就會出現「主窗深色、選單淺色」（2026-09-28 用戶截圖）。
+ */
 @Composable
-fun App(defaultDark: Boolean? = null) {
+fun rememberNashiraColorScheme(defaultDark: Boolean? = null): ColorScheme {
     val ui = LocalUiState.current
     val systemDark = defaultDark ?: isSystemInDarkTheme()
     val dark = when (ui.themeMode) {
@@ -233,9 +240,6 @@ fun App(defaultDark: Boolean? = null) {
         ThemeMode.DARK -> true
         ThemeMode.LIGHT -> false
     }
-    // 任一設定變更就寫回磁碟（persist 內部比對快照，值沒變不落盤）
-    ui.persist()
-
     // 種子來源（對齊 InstallerX Revived）：
     //   動態顏色 ON  → 一律桌布取色（手選色票在這個模式下不參與）
     //   動態顏色 OFF → 手選色票；沒選就是 null，落回品牌 Arcaea 色板（＝色票裡的「預設」）
@@ -254,13 +258,22 @@ fun App(defaultDark: Boolean? = null) {
             if (ui.pureBlack) NashiraPureBlackColors else NashiraDarkColors
         } else NashiraLightColors
     // 配色補間（照 InstallerX：每槽 animateColorAsState(spring()) 物理彈簧曲線）
+    return target.animateAsState()
+}
+
+@Composable
+fun App(defaultDark: Boolean? = null) {
+    val ui = LocalUiState.current
+    // 任一設定變更就寫回磁碟（persist 內部比對快照，值沒變不落盤）
+    ui.persist()
+
     val session by MatrixEngine.session.collectAsState()
     val restoring by MatrixEngine.restoring.collectAsState()
     val restoreFailed by MatrixEngine.restoreFailed.collectAsState()
     val loggingIn by MatrixEngine.loggingIn.collectAsState()
     val strings = stringsFor(LocalUiState.current.language)
     androidx.compose.runtime.LaunchedEffect(Unit) { MatrixEngine.restoreFromDisk() }
-    val animatedScheme = target.animateAsState()
+    val animatedScheme = rememberNashiraColorScheme(defaultDark)
 
     NashiraTheme(colorScheme = animatedScheme) {
         val current = session

@@ -9,6 +9,8 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.awt.ComposeWindow
 import androidx.compose.ui.awt.SwingWindow
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.DpSize
@@ -22,19 +24,22 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.clickable
 import io.github.capricornus007.nashira.LocalUiState
 import io.github.capricornus007.nashira.i18n.stringsFor
 import io.github.capricornus007.nashira.App
+import io.github.capricornus007.nashira.rememberNashiraColorScheme
+import io.github.capricornus007.nashira.theme.NashiraTheme
 import io.github.capricornus007.nashira.theme.readXdgColorSchemeDark
 import io.github.capricornus007.nashira.theme.xdgColorSchemeDarkFlow
 import androidx.compose.runtime.snapshotFlow
 import io.github.capricornus007.nashira.AppNotifications
 import io.github.capricornus007.nashira.DesktopNotifications
 import io.github.capricornus007.nashira.DesktopSingleInstance
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalComposeUiApi::class)
 fun main(args: Array<String>) {
@@ -208,39 +213,56 @@ fun main(args: Array<String>) {
                             }
                         })
                     }
-                    // 實心、窗口與選單同尺寸：這台機器沒有合成器（`_NET_WM_CM_S0` 查無），
-                    // 透明圓角與窗外陰影畫不出來，留著只會黑一片。
-                    Surface(
-                        modifier = Modifier.fillMaxSize(),
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    ) {
-                        Column {
-                            Text(
-                                strings.trayOpen,
-                                Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        trayMenuOpen = false
-                                        // 先收菜單再喚主窗：選單若還在，會搶走喚起後的焦點
-                                        //（「開啟 Nashira 沒那麼好用」的根因）。
-                                        java.awt.EventQueue.invokeLater { showMainWindow() }
-                                    }
-                                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
-                            Text(
-                                strings.trayQuit,
-                                Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        trayMenuOpen = false
-                                        java.awt.EventQueue.invokeLater { exitApplication() }
-                                    }
-                                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
+                    // 選單是另一個 Window，吃不到 App() 裡算好的主題；不自己套同一套
+                    // 配色就會「主窗深色、選單淺色」（2026-09-28 用戶截圖）。
+                    NashiraTheme(colorScheme = rememberNashiraColorScheme(systemDark)) {
+                        val density = LocalDensity.current
+                        var contentSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+                        // 窗口高度跟著內容收：create 時那個 118 是含舊版 10dp 外距的數字，
+                        // 現在實心同尺寸就用不完了（用戶：選單還是偏大）。
+                        // Compose 量到的 px 是實體像素，AWT 吃使用者空間（= 實體 / density），
+                        // 不換算就會差一倍。
+                        LaunchedEffect(contentSize) {
+                            val w = (contentSize.width / density.density).roundToInt()
+                            val h = (contentSize.height / density.density).roundToInt()
+                            if (w > 0 && h > 0 && (w != window.width || h != window.height)) {
+                                window.setSize(w, h)
+                            }
+                        }
+                        Surface(
+                            modifier = Modifier
+                                .wrapContentSize()
+                                .onSizeChanged { contentSize = it },
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        ) {
+                            Column {
+                                Text(
+                                    strings.trayOpen,
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            trayMenuOpen = false
+                                            // 先收菜單再喚主窗：選單若還在，會搶走喚起後的焦點
+                                            //（「開啟 Nashira 沒那麼好用」的根因）。
+                                            java.awt.EventQueue.invokeLater { showMainWindow() }
+                                        }
+                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                                Text(
+                                    strings.trayQuit,
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            trayMenuOpen = false
+                                            java.awt.EventQueue.invokeLater { exitApplication() }
+                                        }
+                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
                         }
                     }
                 }
