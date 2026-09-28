@@ -1,5 +1,6 @@
 package io.github.capricornus007.nashira
 
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import io.github.capricornus007.nashira.i18n.Strings
 
@@ -9,3 +10,7 @@ actual fun Modifier.appendComposerFormatMenu(
     enabled: Boolean,
     onPick: (ComposerFormat) -> Unit,
 ): Modifier = this
+
+/** Android 的右鍵選單是系統原生那層，沒有可換的 representation，原樣渲染。 */
+@Composable
+actual fun ProvideComposerContextMenu(content: @Composable () -> Unit) = content()

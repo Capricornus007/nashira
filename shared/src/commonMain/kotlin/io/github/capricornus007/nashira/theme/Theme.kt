@@ -1,6 +1,7 @@
 package io.github.capricornus007.nashira.theme
 
 import androidx.compose.material3.ColorScheme
+import io.github.capricornus007.nashira.ProvideComposerContextMenu
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MotionScheme
@@ -120,7 +121,11 @@ fun NashiraTheme(
     ) {
         // MaterialTheme 不設 LocalContentColor（預設黑）。包一層 Surface 讓沒有顯式
         // 指定顏色的 Text/Icon 拿到 onBackground，深色主題下才不會變成黑字。
-        Surface(color = colorScheme.background, contentColor = colorScheme.onBackground, content = content)
+        // 外面再包一層：輸入框的右鍵選單在桌面端預設是 Swing 画的（不吃主題），
+        // 換成 Compose 画的那層後才跟著配色走（見 ProvideComposerContextMenu）。
+        ProvideComposerContextMenu {
+            Surface(color = colorScheme.background, contentColor = colorScheme.onBackground, content = content)
+        }
     }
 }
 

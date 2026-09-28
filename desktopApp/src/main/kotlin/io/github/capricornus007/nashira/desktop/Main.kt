@@ -24,7 +24,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.clickable
@@ -78,7 +80,36 @@ fun main(args: Array<String>) {
         val trayImage = remember {
             // 檔內拿不到「MainKt」這個類名，改用執行緒的 class loader 找 classpath 根目錄的圖
             val url = Thread.currentThread().contextClassLoader?.getResource("nashira-icon.png")
-            runCatching { url?.let { javax.imageio.ImageIO.read(it) } }.getOrNull()
+            runCatching { url?.let { javax.imageio.ImageIO.read(it) } }.getOrNull()?.let { src ->
+                // 原圖是 512x512。直接丟給 TrayIcon 的話，AWT 的 isImageAutoSize 只會
+                // 一次性雙線性縮到托盤那格（十幾個像素），結果就是糊成一團
+                // （用戶 2026-09-28：後台圖標沒修 —— 前一版 commit 訊息寫了縮 44x44，
+                // 但原始碼裡那段根本沒進去，這次是真的做）。
+                // 逐次減半縮到 44，每一步放大倍率都 ≤1/2，品質才留得住；
+                // 面板若要更小再自己收，那一步已經很小不會糊。
+                var cur = src
+                while (cur.width > 44) {
+                    val nextSide = (cur.width / 2).coerceAtLeast(44)
+                    val next = java.awt.image.BufferedImage(
+                        nextSide,
+                        nextSide,
+                        java.awt.image.BufferedImage.TYPE_INT_ARGB,
+                    )
+                    val g = next.createGraphics()
+                    g.setRenderingHint(
+                        java.awt.RenderingHints.KEY_INTERPOLATION,
+                        java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR,
+                    )
+                    g.setRenderingHint(
+                        java.awt.RenderingHints.KEY_RENDERING,
+                        java.awt.RenderingHints.VALUE_RENDER_QUALITY,
+                    )
+                    g.drawImage(cur, 0, 0, nextSide, nextSide, null)
+                    g.dispose()
+                    cur = next
+                }
+                cur
+            }
         }
         // 載不到圖就當作沒有托盤：寧可關窗即退，也不要收進去之後沒有圖示能召回。
         val trayAvailable = java.awt.SystemTray.isSupported() && trayImage != null
@@ -219,7 +250,9 @@ fun main(args: Array<String>) {
                                 .onSizeChanged { contentSize = it },
                             color = MaterialTheme.colorScheme.surfaceContainerHigh,
                         ) {
-                            Column {
+                            // 條目用 fillMaxWidth 填的是「窗口寬」（200），所以右側永遠掛一片
+                            // 空白。Column 先按最長那條文字收緊，fillMaxWidth 填的才是內容寬。
+                            Column(modifier = Modifier.width(IntrinsicSize.Min)) {
                                 Text(
                                     strings.trayOpen,
                                     Modifier

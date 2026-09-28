@@ -1,5 +1,6 @@
 package io.github.capricornus007.nashira
 
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import io.github.capricornus007.nashira.i18n.Strings
 
@@ -15,3 +16,13 @@ expect fun Modifier.appendComposerFormatMenu(
     enabled: Boolean,
     onPick: (ComposerFormat) -> Unit,
 ): Modifier
+
+/**
+ * 換掉輸入框右鍵選單的「画法」。
+ *
+ * 桌面端預設那層是 Swing 的 JPopupMenu：它不看 Material 主題，深色底下就是白底白字
+ * （用戶 2026-09-28 點名）。Compose 1.12 起可以用 LocalTextContextMenuDropdownProvider
+ * 換成自己畫的選單，這裡把整個 App 包一層，讓所有輸入框（含登入、搜尋）共用同一套配色。
+ * Android 沒有這層（右鍵選單是系統原生），actual 原樣渲染。
+ */
+expect @Composable fun ProvideComposerContextMenu(content: @Composable () -> Unit)
