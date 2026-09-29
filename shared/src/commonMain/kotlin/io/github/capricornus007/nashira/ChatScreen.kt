@@ -469,6 +469,16 @@ private fun PublicRoomDirectory(
                     items(rooms, key = { it.roomId.full }) { room ->
                         Surface(Modifier.fillMaxWidth(), tonalElevation = 2.dp, shape = RoundedCornerShape(10.dp)) {
                             Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                // 公開房間清單要有圖示：目錄列的 `avatar_url` 本來就在資料裡
+                                // （RoomRepository 的 PublicRoom 有帶），只是這裡沒畫，
+                                // 整頁看起來像「無圖模式」（用戶 2026-09-29 點名）。
+                                AvatarImage(
+                                    roomRepository.client,
+                                    room.avatarUrl,
+                                    room.name,
+                                    Modifier.size(44.dp).clip(CircleShape),
+                                )
+                                Spacer(Modifier.width(12.dp))
                                 Column(Modifier.weight(1f)) {
                                     Text(room.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     Text(room.alias ?: room.roomId.full, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -2361,19 +2371,21 @@ private fun TimelinePane(
                         // 舊版在 Linux 不會把游標矩形回報給輸入法，fcitx5 的候選詞窗只能
                         // 退回視窗原點，於是跑到畫面左下角。BTF2 走新的文字輸入會話，
                         // 會回報 composition/cursor 位置。
+                        // ComposerMenuHost：桌面端把這個欄位的右鍵選單整個接手（Telegram 樣式：
+                        // 左標籤、右快捷鍵、分隔線、「文字格式」子選單）。换掉的不是「画法」
+                        // 而是「誰來開選單」，所以內建那層不會再疊一層在上面（2026-09-25 點名過）。
+                        ComposerMenuHost(state = draft, strings = strings) {
                         BasicTextField(
                             state = draft,
                             modifier = Modifier.fillMaxWidth()
                                 .focusRequester(composerFocus)
                                 .heightIn(min = 44.dp)
                                 .onFocusChanged { composerFocused = it.isFocused }
-                                // 右鍵＝在文字欄自己的選單尾端追加格式化六項（同一個選單、
-                                // 同一套主題）。自己再開一個 DropdownMenu 會跟內建那層疊成
-                                // 兩層，2026-09-25 用戶截圖點名過。
+                                // 手機端：把格式化六項掛進系統的文字選取工具列（ActionMode）。
+                                // 桌面端这条是空的，格式化項在 ComposerMenuHost 那份選單裡。
                                 .appendComposerFormatMenu(
                                     strings = strings,
-                                    // 草稿空的時候整組不出現：一是插標記只會留一對空符號在框裡，
-                                    // 二是 Compose 的 item() 沒有 enabled 參數，做不出「灰色但按不动」
+                                    // 草稿空的時候整組不出現：插標記只會留一對空符號在框裡
                                     enabled = draft.text.isNotEmpty(),
                                     onPick = { format -> applyComposerFormat(draft, format) },
                                 )
@@ -2390,6 +2402,17 @@ private fun TimelinePane(
                                         clipboardHasImages()
                                     ) {
                                         scope.launch { pendingImages = pendingImages + readClipboardImages() }
+                                        return@onPreviewKeyEvent true
+                                    }
+                                    // 桌面：選單右邊寫的快捷鍵就是這裡實作的，兩邊讀同一份綁定表
+                                    // （ComposerMenuModel）。剪下／複製／貼上／全選不在這裡，
+                                    // 那四個文字欄自己吃著，再接一次會重複動作。
+                                    if (handleComposerKeyEvent(
+                                            event = event,
+                                            state = draft,
+                                            onFormat = { format -> applyComposerFormat(draft, format) },
+                                        )
+                                    ) {
                                         return@onPreviewKeyEvent true
                                     }
                                     if (event.key != Key.Enter && event.key != Key.NumPadEnter) {
@@ -2426,6 +2449,7 @@ private fun TimelinePane(
                                 inner()
                             },
                         )
+                        }
                     }
                     // 尾端只有一顆鍵，內容隨草稿切換（實機對照：微信空白時是「＋」、
                     // 有字就換成「傳送」；Telegram 空白時是麥克風＋迴紋針，有字就變紙飛機）。

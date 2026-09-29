@@ -1,8 +1,9 @@
 package io.github.capricornus007.nashira.desktop
 
-import com.sun.jna.Library
-import com.sun.jna.Native
 import com.sun.jna.Pointer
+import com.sun.jna.ptr.IntByReference
+import com.sun.jna.ptr.LongByReference
+import com.sun.jna.ptr.PointerByReference
 
 /**
  * X11 層監看「系統托盤擁有者」（`_NET_SYSTEM_TRAY_S0` 這個 selection 的擁有者視窗）。
@@ -16,7 +17,7 @@ import com.sun.jna.Pointer
  * 判斷與重掛由呼叫端做。
  */
 internal class TrayOwnerWatch {
-    private val x11: X11 = runCatching { Native.load("X11", X11::class.java) }.getOrNull() ?: unavailable
+    private val x11: X11Lib = loadX11() ?: unavailable
     private val display: Pointer? = runCatching { x11.XOpenDisplay(null) }.getOrNull()
     private val atom: Long = display?.let { runCatching { x11.XInternAtom(it, "_NET_SYSTEM_TRAY_S0", false) }.getOrDefault(0L) }
         ?: 0L
@@ -32,20 +33,49 @@ internal class TrayOwnerWatch {
         display?.let { runCatching { x11.XCloseDisplay(it) } }
     }
 
-    private interface X11 : Library {
-        fun XOpenDisplay(name: String?): Pointer?
-        fun XCloseDisplay(display: Pointer?): Int
-        fun XInternAtom(display: Pointer?, name: String, onlyIfExists: Boolean): Long
-        fun XGetSelectionOwner(display: Pointer?, selection: Long): Long
-    }
-
     private companion object {
         /** 載不到 libX11 時的佔位：所有查詢都會回 -1，呼叫端據此放弃自癒、不影響主流程。 */
-        val unavailable = object : X11 {
+        val unavailable = object : X11Lib {
             override fun XOpenDisplay(name: String?): Pointer? = null
             override fun XCloseDisplay(display: Pointer?): Int = 0
             override fun XInternAtom(display: Pointer?, name: String, onlyIfExists: Boolean): Long = 0
             override fun XGetSelectionOwner(display: Pointer?, selection: Long): Long = 0
+            override fun XQueryTree(
+                display: Pointer?,
+                window: Long,
+                rootReturn: LongByReference?,
+                parentReturn: LongByReference?,
+                childrenReturn: PointerByReference?,
+                nChildrenReturn: IntByReference?,
+            ): Int = 0
+
+            override fun XGetGeometry(
+                display: Pointer?,
+                drawable: Long,
+                rootReturn: LongByReference?,
+                xReturn: IntByReference?,
+                yReturn: IntByReference?,
+                widthReturn: IntByReference?,
+                heightReturn: IntByReference?,
+                borderWidthReturn: IntByReference?,
+                depthReturn: IntByReference?,
+            ): Int = 0
+
+            override fun XGetClassHint(display: Pointer?, window: Long, hint: X11ClassHint): Int = 0
+            override fun XFree(data: Pointer?): Int = 0
+            override fun XDefaultRootWindow(display: Pointer?): Long = 0
+
+            override fun XQueryPointer(
+                display: Pointer?,
+                window: Long,
+                rootReturn: LongByReference?,
+                childReturn: LongByReference?,
+                rootXReturn: IntByReference?,
+                rootYReturn: IntByReference?,
+                winXReturn: IntByReference?,
+                winYReturn: IntByReference?,
+                maskReturn: IntByReference?,
+            ): Int = 0
         }
     }
 }

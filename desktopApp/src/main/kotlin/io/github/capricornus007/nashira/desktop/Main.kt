@@ -48,18 +48,15 @@ import kotlin.math.roundToInt
 private const val TRAY_MENU_EST_W = 200
 private const val TRAY_MENU_EST_H = 118
 
-// 選單右緣對到滑標右邊一點。錨點必須是右緣：托盤圖示在螢幕最右，
-// 用「滑標 - 估計寬」算 x、之後再把窗口收成真實寬，就會整塊偏到圖示左邊
-//（用戶 2026-09-29 照片：選單開在後臺圖示左側很遠處）。
-private const val TRAY_MENU_RIGHT_PAD = 8
+// 選單左緣對到滑標左邊一點（≈圖示那一格的左沿），選單往右長——
+// 跟 fcitx5／微信一樣是「向右展開」。用戶 2026-09-29 明確否決了往左長的寫法：
+// 「我並沒有讓你把窗口新建方向從向右變成向左吧？」。太靠螢幕右緣時才夾回來。
+private const val TRAY_MENU_LEFT_PAD = 10
 private const val TRAY_MENU_GAP = 6
 
-/** 選單 x：右緣貼滑標，並夾在螢幕內。單位是 AWT 使用者空間（本機 = 實體 / 2）。 */
+/** 選單 x：左緣貼滑標左邊一點，並夾在螢幕內。單位是 AWT 使用者空間（本機 = 實體 / uiScale）。 */
 private fun trayMenuX(pointerX: Int, menuWidth: Int, screenWidth: Int): Int =
-    (pointerX + TRAY_MENU_RIGHT_PAD - menuWidth).coerceIn(
-        0,
-        (screenWidth - menuWidth).coerceAtLeast(0),
-    )
+    (pointerX - TRAY_MENU_LEFT_PAD).coerceIn(0, (screenWidth - menuWidth).coerceAtLeast(0))
 
 /** 選單 y：托盤在螢幕上半部就往下長，在下半部才往上長。 */
 private fun trayMenuY(pointerY: Int, menuHeight: Int, screenHeight: Int): Int {
@@ -67,6 +64,112 @@ private fun trayMenuY(pointerY: Int, menuHeight: Int, screenHeight: Int): Int {
     val y = if (below) pointerY + TRAY_MENU_GAP else pointerY - menuHeight - TRAY_MENU_GAP
     return y.coerceIn(0, (screenHeight - menuHeight).coerceAtLeast(0))
 }
+
+/** 問不到托盤那一格多大時退回的邊長：AWT 自己假設的托盤尺寸就是 24。 */
+private const val TRAY_ICON_FALLBACK_PX = 24
+
+/**
+ * 逐次減半縮到目標邊長。512→16 一步到位的雙線性會糊（用戶 2026-09-28 點名
+ * 「後台圖標沒修」），每一步倍率 ≤1/2 才保得住細節。
+ */
+private fun scaleTrayIcon(src: java.awt.image.BufferedImage, side: Int): java.awt.image.BufferedImage {
+    var cur = src
+    while (cur.width > side) {
+        val nextSide = (cur.width / 2).coerceAtLeast(side)
+        val next = java.awt.image.BufferedImage(
+            nextSide,
+            nextSide,
+            java.awt.image.BufferedImage.TYPE_INT_ARGB,
+        )
+        val g = next.createGraphics()
+        g.setRenderingHint(
+            java.awt.RenderingHints.KEY_INTERPOLATION,
+            java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR,
+        )
+        g.setRenderingHint(
+            java.awt.RenderingHints.KEY_RENDERING,
+            java.awt.RenderingHints.VALUE_RENDER_QUALITY,
+        )
+        g.drawImage(cur, 0, 0, nextSide, nextSide, null)
+        g.dispose()
+        cur = next
+    }
+    return cur
+}
+
+
+
+/**
+ * 把圖示收成托盤那一格「真的」尺寸。
+ *
+ * AWT 畫 TrayIcon 時還要再乘一次 uiScale，所以目標邊長 = X 量到的實體尺寸 ÷ uiScale
+ * （本機 33 ÷ 2 → 16）。舊寫法固定餵 44px 又開著 isImageAutoSize，AWT 拿它自己假設的
+ * 24 去算，圖被放大兩倍、只畫出左上角那一塊，看上去就是圖標跑到右下角
+ * （用戶 2026-09-29 點名；64Gram／fcitx5／微信照格子實際尺寸畫，所以不錯位）。
+ *
+ * 問不到尺寸就維持原樣，不因為探測失敗把圖示弄不見。
+ */
+private fun fitTrayIcon(icon: java.awt.TrayIcon, src: java.awt.image.BufferedImage) {
+    val slotPx = traySlotSizePx() ?: return
+    val scale = System.getProperty("sun.java2d.uiScale")?.toFloatOrNull() ?: 1f
+    val side = (slotPx / scale).roundToInt().coerceIn(8, 64)
+    println("NASHIRA_TRAY: 那一格 ${slotPx}px、uiScale=$scale → 圖示出 $side px")
+    java.awt.EventQueue.invokeLater {
+        icon.isImageAutoSize = false
+        icon.setImage(trayIconImage(src, side))
+    }
+}
+
+/**
+ * 出圖：先把「亮部質心」搬到畫面正中，再縮到那一格的大小。
+ *
+ * 用戶 2026-09-29 三輪點名「後臺圖標偏右下角」。中間試過「留透明邊距」的做法，
+ * 結果多出一條白線——實測證明 AWT 那塊托盤畫布的底色是**白**的，
+ * 任何透明邊（邊距、平移後的缺口）都會畫成一條白線。所以只能「不透明地搬」：
+ * 以亮部質心為中心裁一個正方形再縮，圖仍是滿版、不露底色，視覺重心也就正了。
+ */
+private fun trayIconImage(src: java.awt.image.BufferedImage, side: Int): java.awt.image.BufferedImage =
+    scaleTrayIcon(centerOnBrightContent(src), side)
+
+/** 以亮部（圖標裡那顆 N 與那顆星）的質心為中心裁一方塊；本來就居中就不動。 */
+private fun centerOnBrightContent(src: java.awt.image.BufferedImage): java.awt.image.BufferedImage {
+    val w = src.width
+    val h = src.height
+    var sumX = 0L
+    var sumY = 0L
+    var count = 0L
+    val step = (w / 128).coerceAtLeast(1)
+    var y = 0
+    while (y < h) {
+        var x = 0
+        while (x < w) {
+            val rgb = src.getRGB(x, y)
+            val lum = (((rgb shr 16) and 0xFF) * 75 + ((rgb shr 8) and 0xFF) * 150 + (rgb and 0xFF) * 29) / 256
+            if (lum > BrightPixelLuma) {
+                sumX += x
+                sumY += y
+                count++
+            }
+            x += step
+        }
+        y += step
+    }
+    if (count < 16) return src
+    val cx = (sumX / count).toInt()
+    val cy = (sumY / count).toInt()
+    val dx = cx - w / 2
+    val dy = cy - h / 2
+    // 本來就差不多居中（偏移不到 2%）就別亂動圖
+    if (kotlin.math.abs(dx) < w * 0.02f && kotlin.math.abs(dy) < h * 0.02f) return src
+    // 要把質心搬到正中，裁切窗口至少得比原圖小 2*偏移，否則窗口頂到邊、搬不動
+    val shift = maxOf(kotlin.math.abs(dx), kotlin.math.abs(dy))
+    val crop = (minOf(w, h) - 2 * shift - 8).coerceAtLeast((minOf(w, h) * 0.6f).toInt())
+    val x0 = (cx - crop / 2).coerceIn(0, w - crop)
+    val y0 = (cy - crop / 2).coerceIn(0, h - crop)
+    return src.getSubimage(x0, y0, crop, crop)
+}
+
+private const val BrightPixelLuma = 105
 
 
 @OptIn(ExperimentalComposeUiApi::class)
@@ -103,42 +206,16 @@ fun main(args: Array<String>) {
         val ui = LocalUiState.current
         // 托盤圖標直接用 app 圖標本體：這裡原本是手畫一顆 Arcaea 金星，跟主窗圖示
         // （nashira-icon.png）完全是兩個東西（用戶 2026-09-28：後台圖標要跟應用程式圖標統一）。
-        val trayImage = remember {
+        // 原圖 512x512；要縮到多大不寫死，由 X 那一格的實際尺寸算出來（見 fitTrayIcon）。
+        val traySource = remember {
             // 檔內拿不到「MainKt」這個類名，改用執行緒的 class loader 找 classpath 根目錄的圖
-            val url = Thread.currentThread().contextClassLoader?.getResource("nashira-icon.png")
-            runCatching { url?.let { javax.imageio.ImageIO.read(it) } }.getOrNull()?.let { src ->
-                // 原圖是 512x512。直接丟給 TrayIcon 的話，AWT 的 isImageAutoSize 只會
-                // 一次性雙線性縮到托盤那格（十幾個像素），結果就是糊成一團
-                // （用戶 2026-09-28：後台圖標沒修 —— 前一版 commit 訊息寫了縮 44x44，
-                // 但原始碼裡那段根本沒進去，這次是真的做）。
-                // 逐次減半縮到 44，每一步放大倍率都 ≤1/2，品質才留得住；
-                // 面板若要更小再自己收，那一步已經很小不會糊。
-                var cur = src
-                while (cur.width > 44) {
-                    val nextSide = (cur.width / 2).coerceAtLeast(44)
-                    val next = java.awt.image.BufferedImage(
-                        nextSide,
-                        nextSide,
-                        java.awt.image.BufferedImage.TYPE_INT_ARGB,
-                    )
-                    val g = next.createGraphics()
-                    g.setRenderingHint(
-                        java.awt.RenderingHints.KEY_INTERPOLATION,
-                        java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR,
-                    )
-                    g.setRenderingHint(
-                        java.awt.RenderingHints.KEY_RENDERING,
-                        java.awt.RenderingHints.VALUE_RENDER_QUALITY,
-                    )
-                    g.drawImage(cur, 0, 0, nextSide, nextSide, null)
-                    g.dispose()
-                    cur = next
-                }
-                cur
-            }
+            runCatching {
+                val url = Thread.currentThread().contextClassLoader?.getResource("nashira-icon.png")
+                url?.let { javax.imageio.ImageIO.read(it) }
+            }.getOrNull()
         }
         // 載不到圖就當作沒有托盤：寧可關窗即退，也不要收進去之後沒有圖示能召回。
-        val trayAvailable = java.awt.SystemTray.isSupported() && trayImage != null
+        val trayAvailable = java.awt.SystemTray.isSupported() && traySource != null
         // 圖示「真的掛上去了」才算數：bar 正在重建時 tray.add() 會丟例外，掛不上卻以為掛上了，
         // 關窗就會藏進一個不存在的托盤、叫不回來（用戶 2026-09-29：後臺圖示不見）。
         var trayAttached by remember { mutableStateOf(false) }
@@ -146,11 +223,21 @@ fun main(args: Array<String>) {
         var mainWindow by remember { mutableStateOf<java.awt.Window?>(null) }
 
         fun showMainWindow() {
-            val w = mainWindow ?: return
-            w.isVisible = true
-            w.toFront()
-            w.requestFocus()
-            activateWindow()
+            // 可見性一定要排回 EDT 做：這裡同時被托盤監聽器（EDT）與 nashira:// 的協程
+            // （非 EDT）呼叫，直接改 isVisible 在兩條線上程之間會打架。
+            java.awt.EventQueue.invokeLater {
+                val w = mainWindow ?: return@invokeLater
+                if (!w.isVisible) w.isVisible = true
+                w.toFront()
+                w.requestFocus()
+                // 喚起是「另外開行程問 WM」，絕不能留在 EDT 上等：
+                // 2026-09-29 用戶點名「一按打開 nashira 電腦就卡住、窗口消失但依舊佔位」——
+                // 舊寫法 `xdotool search --class … windowactivate --sync` 在這裡同步等，
+                // 而 --class 同時命中那顆 1x1 的工具窗口（它永遠不會被激活），
+                // --sync 就永遠不返回；EDT 一凍結，窗口已經 map 但不再重繪，
+                // 看起來就是「人不见了、位子還佔著」。
+                activateWindowAsync(w)
+            }
         }
 
         fun toggleMainWindow() {
@@ -166,12 +253,14 @@ fun main(args: Array<String>) {
             if (!ok) println("NASHIRA_HOTKEY: global hotkey unavailable (X11 grab failed)")
         }
 
-        if (trayAvailable && trayImage != null) {
+        if (trayAvailable && traySource != null) {
             // 也不設 tooltip：懸浮跳出白底「Nashira」那一塊，用戶 2026-09-28 點名要拿掉。
             // remember：TrayIcon 必須全程同一個實例——下面只 add 一次，若每次重組都 new
             // 一顆，托盤就會被疊成一排（用戶 2026-09-25 照片：右鍵一次多一顆）。
-            val trayIconAwt = remember(trayImage) {
-                java.awt.TrayIcon(trayImage).apply { isImageAutoSize = true }
+            val trayIconAwt = remember(traySource) {
+                java.awt.TrayIcon(trayIconImage(traySource, TRAY_ICON_FALLBACK_PX)).apply {
+                    isImageAutoSize = true
+                }
             }
             // AWT 字體渲染：系統屬性在 JVM 啟動時設定（main() 最前面），
             // 這裡只設字體本身。抗鋸齒/LCD 子像素由 awt.useSystemAAFontSettings 控制。
@@ -230,6 +319,8 @@ fun main(args: Array<String>) {
                             if (attached) {
                                 trayAttached = true
                                 owner = watch.owner()
+                                // 掛上去之後才問得到那一格多大（socket 這時才存在）
+                                fitTrayIcon(trayIconAwt, traySource)
                             }
                         } else {
                             val now = watch.owner()
@@ -285,13 +376,42 @@ fun main(args: Array<String>) {
                 ) {
                     // override-redirect 窗口 WM 不會給焦點，要自己討；討不到也不影響點擊。
                     LaunchedEffect(window) { window.requestFocus() }
-                    // 焦點丟失＝點了別處＝收起菜單。
+                    // 焦點丟失＝點了別處＝收起菜單（有 WM 管的時候才有效）。
                     LaunchedEffect(window) {
                         window.addWindowFocusListener(object : java.awt.event.WindowAdapter() {
                             override fun windowLostFocus(e: java.awt.event.WindowEvent?) {
                                 trayMenuOpen = false
                             }
                         })
+                    }
+                    // 但 override-redirect 的窗口 WM 根本不接管，i3／bspwm 上「丟焦點」永遠不會
+                    // 發生，於是點外面選單不收（用戶 2026-09-29 點名）。改成自己盯滑鼠：
+                    // 指標在窗口外、而且是「新按下」任何鍵 → 收起。
+                    // 按鍵狀態只能問 X（這臺 JDK 的 PointerInfo 沒有 getMouseButtons()），
+                    // 位置則用 AWT 的：窗口邊界也是 AWT 使用者空間，兩邊同一把尺才比得準。
+                    // 只認放開→按下這條上升緣：右鍵按下去開選單的那一下還沒放，
+                    // 不這樣判會在剛打開的瞬間被自己關掉。
+                    LaunchedEffect(window) {
+                        val buttons = PointerButtonWatch()
+                        try {
+                            var pressedBefore = buttons.pressed()
+                            while (true) {
+                                delay(40L)
+                                val location = runCatching {
+                                    java.awt.MouseInfo.getPointerInfo()?.location
+                                }.getOrNull() ?: continue
+                                val pressed = buttons.pressed()
+                                val inside = location.x >= window.x && location.x < window.x + window.width &&
+                                    location.y >= window.y && location.y < window.y + window.height
+                                if (pressed && !pressedBefore && !inside) {
+                                    trayMenuOpen = false
+                                    break
+                                }
+                                pressedBefore = pressed
+                            }
+                        } finally {
+                            buttons.close()
+                        }
                     }
                     // 選單是另一個 Window，吃不到 App() 裡算好的主題；不自己套同一套
                     // 配色就會「主窗深色、選單淺色」（2026-09-28 用戶截圖）。
@@ -322,7 +442,9 @@ fun main(args: Array<String>) {
                         ) {
                             // 條目用 fillMaxWidth 填的是「窗口寬」（200），所以右側永遠掛一片
                             // 空白。Column 先按最長那條文字收緊，fillMaxWidth 填的才是內容寬。
-                            Column(modifier = Modifier.width(IntrinsicSize.Min)) {
+                            // 注意要用 IntrinsicSize.**Max**：Min 會收到「最長那個詞」，
+                            //「開啟 Nashira」就被掰成兩行（用戶 2026-09-29 照片）。
+                            Column(modifier = Modifier.width(IntrinsicSize.Max)) {
                                 Text(
                                     strings.trayOpen,
                                     Modifier
@@ -389,20 +511,31 @@ fun main(args: Array<String>) {
 }
 
 /**
- * 喚起主視窗。平鋪式 WM（bspwm/i3）對 AWT toFront() 的 XRaiseWindow 無感、
- * 更不會切工作區；EWMH 的 _NET_ACTIVE_WINDOW 才會（xdotool windowactivate
- * 走的就是它，2026-09-14 bspwm 實測會正確跳工作區）。xdotool 不在時回退
- * toFront()（浮動 WM 夠用）。用 WM_CLASS 定位（比標題精確，不會誤中瀏覽器
- * 分頁等同名視窗）。
+ * 喚起主視窗。平鋪式 WM（i3／bspwm）對 AWT 的 toFront() 無感，要發 EWMH 的
+ * `_NET_ACTIVE_WINDOW` 才會連工作區一起跳過去（xdotool windowactivate 走的就是它）。
+ *
+ * 兩條硬規則（2026-09-29 卡死實測換來的）：
+ * 1. 只能在背景線程跑。等外部行程是「會不回來」的事，放在 EDT 上就是整個界面凍住。
+ * 2. 不帶 `--sync`，而且要點名到那個能顯示的窗口：只給 `--class` 會連 AWT 那顆 1x1 的
+ *    工具窗口一起命中，對它做 windowactivate 是等不到結果的（舊版就卡在這裡）。
  */
-private fun activateWindow() {
-    val activated = runCatching {
-        val process = ProcessBuilder(
-            "xdotool", "search", "--class", "io-github-capricornus007-nashira",
-            "windowactivate", "--sync",
-        ).redirectErrorStream(true).start()
-        val output = process.inputStream.bufferedReader().readText()
-        process.waitFor() == 0 && output.isNotBlank()
-    }.getOrDefault(false)
-    if (!activated) runCatching { java.awt.Window.getWindows().forEach { it.toFront() } }
+private fun activateWindowAsync(target: java.awt.Window) {
+    Thread {
+        val ok = runCatching {
+            val process = ProcessBuilder(
+                "xdotool", "search", "--class", "io-github-capricornus007-nashira",
+                "--name", "^Nashira$", "windowactivate",
+            ).redirectErrorStream(true).start()
+            val finished = process.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)
+            if (!finished) process.destroyForcibly()
+            finished && process.exitValue() == 0
+        }.getOrDefault(false)
+        if (!ok) {
+            // xdotool 不在、或沒命中：退回 AWT 自己的 toFront（浮動 WM 夠用）
+            java.awt.EventQueue.invokeLater { if (target.isDisplayable) target.toFront() }
+        }
+    }.apply {
+        isDaemon = true
+        name = "nashira-activate"
+    }.start()
 }

@@ -55,3 +55,16 @@ actual fun Modifier.appendComposerFormatMenu(
 /** Android 的右鍵選單是系統原生那層，沒有可換的 representation，原樣渲染。 */
 @Composable
 actual fun ProvideComposerContextMenu(content: @Composable () -> Unit) = content()
+
+/**
+ * 手機沒有「包住輸入框換掉右鍵選單」這層：選取工具列是系統畫的，格式化項
+ * 已經由上面的 MenuProvider 掛進去了，這裡原樣渲染。
+ * （桌面那份 TG 樣式的選單見 ComposerMenu.desktop.kt。）
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+actual fun ComposerMenuHost(
+    state: androidx.compose.foundation.text.input.TextFieldState,
+    strings: Strings,
+    content: @Composable () -> Unit,
+) = content()

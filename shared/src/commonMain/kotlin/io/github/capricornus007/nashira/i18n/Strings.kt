@@ -52,6 +52,19 @@ interface Strings {
     val formatCodeBlock: String
     val formatQuote: String
     val formatLink: String
+    /**
+     * 輸入框右鍵選單的編輯動作（桌面）。清單與順序照 Telegram 桌面版那一組；
+     * 右邊顯示的快捷鍵不在這裡寫字面，由 `ComposerKeyBinding` 給，兩邊才會一致。
+     */
+    val menuUndo: String
+    val menuRedo: String
+    val menuCut: String
+    val menuCopy: String
+    val menuPaste: String
+    val menuDelete: String
+    val menuSelectAll: String
+    /** 「文字格式」那個子選單的列名。 */
+    val menuFormat: String
     /** 表情分頁：搜尋提示、查無結果、最近使用區標題。 */
     val emojiSearchHint: String
     val emojiNoResults: String
