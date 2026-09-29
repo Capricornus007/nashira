@@ -26,8 +26,10 @@ actual fun rememberImagePickerLauncher(
     return remember(onPicked) {
         {
             scope.launch {
-                val picked = withContext(Dispatchers.IO) { chooseImage() }
-                if (picked != null) onPicked(picked)
+                // 對話框是多選的：一次圈幾張就逐張回調。原本寫死 isMultiSelectionEnabled=false，
+                // 「一次發多張圖」在這臺機器上根本選不出來（用戶 2026-09-29 問「多圖訊息傳不出去」）。
+                val picked = withContext(Dispatchers.IO) { chooseImages() }
+                picked.forEach(onPicked)
             }
             Unit
         }
@@ -51,12 +53,12 @@ actual fun rememberFilePickerLauncher(
 }
 
 private fun chooseFile(): PickedFile? {
-    val file = chooseWithDialog {
+    val file = chooseFilesWithDialog {
         JFileChooser().apply {
             dialogTitle = "選擇檔案"
             isMultiSelectionEnabled = false
         }
-    } ?: return null
+    }.firstOrNull() ?: return null
     val bytes = runCatching { file.readBytes() }.getOrNull() ?: return null
     return PickedFile(
         bytes = bytes,
@@ -66,31 +68,34 @@ private fun chooseFile(): PickedFile? {
     )
 }
 
-private fun chooseImage(): PickedImage? {
-    val file = chooseWithDialog {
+private fun chooseImages(): List<PickedImage> {
+    val files = chooseFilesWithDialog {
         JFileChooser().apply {
             dialogTitle = "選擇圖片"
-            isMultiSelectionEnabled = false
+            isMultiSelectionEnabled = true
             fileFilter = FileNameExtensionFilter("圖片 (png, jpg, jpeg, gif, webp)", "png", "jpg", "jpeg", "gif", "webp")
         }
-    } ?: return null
-    val bytes = runCatching { file.readBytes() }.getOrNull() ?: return null
-    val size = runCatching { ImageIO.read(file) }.getOrNull()
-    return PickedImage(
-        bytes = bytes,
-        mimeType = mimeTypeOf(file),
-        fileName = file.name,
-        width = size?.width,
-        height = size?.height,
-    )
+    }
+    return files.mapNotNull { file ->
+        val bytes = runCatching { file.readBytes() }.getOrNull() ?: return@mapNotNull null
+        val size = runCatching { ImageIO.read(file) }.getOrNull()
+        PickedImage(
+            bytes = bytes,
+            mimeType = mimeTypeOf(file),
+            fileName = file.name,
+            width = size?.width,
+            height = size?.height,
+        )
+    }
 }
 
-private fun chooseWithDialog(factory: () -> JFileChooser): File? {
-    var selected: File? = null
+private fun chooseFilesWithDialog(factory: () -> JFileChooser): List<File> {
+    var selected: List<File> = emptyList()
     val show = {
         val chooser = factory()
         if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) {
-            selected = chooser.selectedFile
+            // 單選對話框 selectedFiles 只有一個；開多選時這裡拿到的就是全選的那幾張
+            selected = chooser.selectedFiles.toList()
         }
     }
     if (EventQueue.isDispatchThread()) show() else EventQueue.invokeAndWait(show)

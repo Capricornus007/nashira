@@ -1649,19 +1649,27 @@ private fun TimelinePane(
                     // 不再另外發一則純文字——否則房間裡會變成「一段話＋一張不相干的圖」兩條訊息。
                     // 多張只有第一張帶說明：同一段話重複標在每張圖上更怪。
                     var failure: Throwable? = null
+                    // 逐張各自結算。原本只有一個 failure 變數：第二張失敗時第一張其實
+                    // 已經送出去，界面卻把整批退回待發區，看起來就是「多圖傳不出去」
+                    //（用戶 2026-09-29 點名）。
+                    val failed = mutableListOf<PickedImage>()
                     images.forEachIndexed { index, image ->
                         roomRepository.sendImage(
                             room.roomId,
                             image,
                             caption = if (index == 0) body else null,
                             replyTo = if (index == 0) target else null,
-                        ).onFailure { failure = it }
+                        ).onFailure {
+                            failure = it
+                            failed += image
+                        }
                     }
-                    if (failure == null) {
+                    if (failed.isEmpty()) {
                         pendingImages = emptyList()
                         pendingEmoticons = emptyList()
                     } else {
-                        // 發不出去就把說明還回輸入框，別讓使用者打的字憑空消失
+                        // 只留失敗的那幾張重試；說明文字還回輸入框，別讓打的字消失
+                        pendingImages = failed
                         draft.setTextAndPlaceCursorAtEnd(body)
                         sendError = io.github.capricornus007.nashira.i18n.friendlyError(failure!!)
                     }
