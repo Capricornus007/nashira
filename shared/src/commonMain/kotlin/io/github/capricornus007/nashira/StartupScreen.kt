@@ -52,7 +52,9 @@ fun StartupScreen(message: String? = null) {
             CircularProgressIndicator(
                 modifier = Modifier.size(28.dp),
                 strokeWidth = 3.dp,
-                color = NashiraGold,
+                // 跟著強調色走，不要寫死金色：上面的 NashiraMark 是商標（那顆金星是識別），
+                // 但轉圈是介面元素，主題換了它還金著就很突兀（用戶 2026-09-29 點名）
+                color = MaterialTheme.colorScheme.primary,
             )
             Text(
                 message ?: strings.restoringSession,

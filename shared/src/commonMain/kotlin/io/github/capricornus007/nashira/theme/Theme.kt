@@ -20,15 +20,15 @@ import androidx.compose.ui.graphics.Color
  * 誤當成「對齊 Discord」引入，破壞了品牌共識，已回歸）。
  */
 internal val NashiraDarkColors = darkColorScheme(
-    primary = NashiraGold,
+    primary = NashiraStarBlue,
     onPrimary = NashiraIndigo,
-    primaryContainer = NashiraGoldContainer,
-    onPrimaryContainer = NashiraGoldLight,
+    primaryContainer = NashiraStarBlueContainer,
+    onPrimaryContainer = NashiraStarBlueLight,
     secondary = Color(0xFFC6C4E8),
     onSecondary = Color(0xFF2E2C4C),
     secondaryContainer = Color(0xFF45436E),
     onSecondaryContainer = Color(0xFFE2E0FF),
-    tertiary = Color(0xFF949CF7),
+    tertiary = NashiraSkyBlue,
     onTertiary = Color(0xFF252A55),
     tertiaryContainer = Color(0xFF3A3F63),
     onTertiaryContainer = Color(0xFFE2E5FF),
@@ -57,6 +57,9 @@ internal val NashiraDarkColors = darkColorScheme(
 
 /** 品牌淺色板。基底是協商定案的 Arcaea 曲目色 #E0E1CC（米綠）。 */
 internal val NashiraLightColors = lightColorScheme(
+    // 淺色主題留金色：米綠底 #E0E1CC 是暖色，配藍紫系（星群藍那族）實測很髒
+    // （用戶 2026-09-29：「好醜，e0e1cc 背景配上黑字要的這麼醜麼」）。
+    // 星群藍只用在深色與純黑兩套上——那兩邊的背景是冷色／中性，藍才站得住。
     primary = NashiraGoldDeep,
     onPrimary = NashiraLightBackground,
     primaryContainer = NashiraGold,

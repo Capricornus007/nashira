@@ -96,6 +96,8 @@ fun SecurityAndAccountScreen(
         .collectAsState(initial = emptySet())
 
     var sessions by remember(session) { mutableStateOf<List<DeviceSession>>(emptyList()) }
+    // 這一輪有沒有已經把帳戶管理頁丟給瀏覽器過（避免每點一次「登出」就多開一個分頁）
+    var accountPageOpened by remember(session) { mutableStateOf(false) }
     var sessionsError by remember { mutableStateOf<String?>(null) }
     var sessionsRefreshing by remember { mutableStateOf(false) }
     var secretPrompt by remember { mutableStateOf<SelfVerificationOption?>(null) }
@@ -285,7 +287,13 @@ fun SecurityAndAccountScreen(
                             when (outcome) {
                                 SessionLogout.Done -> reloadSessions()
                                 is SessionLogout.OpenAccountManagement -> {
-                                    openLink(outcome.url)
+                                    // 這種伺服器（matrix.org 等）登出別的裝置要 UIA 密碼驗證，我們做不了
+                                    // in-app，只能丟給瀏覽器。但**同一個網址只開一次**：之前每點一次
+                                    // 「登出」就多開一個分頁（用戶 2026-09-29 點名）。
+                                    if (!accountPageOpened) {
+                                        accountPageOpened = true
+                                        openLink(outcome.url)
+                                    }
                                     busyMessage = strings.sessionLogoutViaAccountPage
                                 }
                             }

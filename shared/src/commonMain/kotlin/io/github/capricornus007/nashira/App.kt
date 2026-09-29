@@ -257,10 +257,15 @@ fun rememberNashiraColorScheme(defaultDark: Boolean? = null): ColorScheme {
     // 桌面沒有桌布取色（dynamicColorSupported=false），一律走色票這條。
     val dynamic = dynamicColorSupported && ui.dynamicColor
     val seed = if (dynamic) wallpaperSeedColor(enabled = true) else ui.accentHex?.let { parseAccentHex(it) }
+    // 手選的顏色一律用「保留色相」的 TonalSpot 生成：Expressive 這套會把色相轉掉，
+    // 實測拿純藍 #2196F3 當種子生出**綠色** UI、Space 頭像圈變粉紅
+    // （用戶 2026-09-29 連兩輪點名「選藍得綠」「為什麼 space 內背景色是粉色」）。
+    // 「調色盤樣式」那個選項只在 Android 的桌布取色那條路上才有意義，留給它。
+    val style = if (dynamic) ui.paletteStyle else PaletteStyle.TonalSpot
     val generated = rememberDynamicColorScheme(
         seedColor = seed ?: androidx.compose.ui.graphics.Color(0xFF1F1E33),
         isDark = dark,
-        style = ui.paletteStyle,
+        style = style,
         specVersion = ui.specVersion,
     )
     // 目標配色：動態開啟且種子存在 → material-kolor 生成；否則手調品牌 Arcaea 色板
