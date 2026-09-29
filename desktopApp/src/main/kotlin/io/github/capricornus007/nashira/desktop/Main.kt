@@ -68,23 +68,6 @@ private fun trayMenuY(pointerY: Int, menuHeight: Int, screenHeight: Int): Int {
     return y.coerceIn(0, (screenHeight - menuHeight).coerceAtLeast(0))
 }
 
-/** 雙線性重繪到指定尺寸（托盤圖示要照槽的实际大小給圖，交給 AWT 自己縮會偏位）。 */
-private fun scaleImage(
-    src: java.awt.image.BufferedImage,
-    width: Int,
-    height: Int,
-): java.awt.image.BufferedImage {
-    val out = java.awt.image.BufferedImage(width, height, java.awt.image.BufferedImage.TYPE_INT_ARGB)
-    val g = out.createGraphics()
-    g.setRenderingHint(
-        java.awt.RenderingHints.KEY_INTERPOLATION,
-        java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR,
-    )
-    g.setRenderingHint(java.awt.RenderingHints.KEY_RENDERING, java.awt.RenderingHints.VALUE_RENDER_QUALITY)
-    g.drawImage(src, 0, 0, width, height, null)
-    g.dispose()
-    return out
-}
 
 @OptIn(ExperimentalComposeUiApi::class)
 fun main(args: Array<String>) {
@@ -156,6 +139,9 @@ fun main(args: Array<String>) {
         }
         // 載不到圖就當作沒有托盤：寧可關窗即退，也不要收進去之後沒有圖示能召回。
         val trayAvailable = java.awt.SystemTray.isSupported() && trayImage != null
+        // 圖示「真的掛上去了」才算數：bar 正在重建時 tray.add() 會丟例外，掛不上卻以為掛上了，
+        // 關窗就會藏進一個不存在的托盤、叫不回來（用戶 2026-09-29：後臺圖示不見）。
+        var trayAttached by remember { mutableStateOf(false) }
         val strings = stringsFor(ui.language)
         var mainWindow by remember { mutableStateOf<java.awt.Window?>(null) }
 
@@ -196,26 +182,6 @@ fun main(args: Array<String>) {
             // 右鍵時記錄鼠標位置：菜單錨在托盤圖示上方（PlatformDefault 在
             // bspwm 會把窗口丟到屏幕頂部，2026-09-14 用戶截圖回報位置錯）。
             var trayMenuScreenPos by remember { mutableStateOf(java.awt.Point(0, 0)) }
-            // 托盤槽的尺寸由 bar 決定（這臺 i3bar 是 33x33 實體），AWT 只按自己那套
-            // 「使用者空間」畫，圖與槽對不上時圖就被塞在槽的角落而不是置中
-            //（用戶 2026-09-29：「托盤圖標依舊偏右下角」）。嵌入完成後把實際 bounds
-            // 讀回來，照那個尺寸重畫一張再 setImage——尺寸對上了就沒有偏移可留。
-            LaunchedEffect(trayIconAwt) {
-                val src = trayImage ?: return@LaunchedEffect
-                var settled = false
-                repeat(10) {
-                    if (settled) return@repeat
-                    delay(300L)
-                    val slot: java.awt.Dimension =
-                        runCatching { trayIconAwt.getSize() }.getOrNull() ?: return@repeat
-                    if (slot.width <= 0 || slot.height <= 0) return@repeat
-                    if (slot.width != src.width || slot.height != src.height) {
-                        println("NASHIRA_TRAY: slot=${slot.width}x${slot.height} image=${src.width}x${src.height}")
-                        runCatching { trayIconAwt.setImage(scaleImage(src, slot.width, slot.height)) }
-                    }
-                    settled = true
-                }
-            }
             // 監聽器與托盤註冊都收進 DisposableEffect：原本兩行直接寫在 Composable 本體，
             // **每次重組就再 add 一次**——托盤被右鍵疊成一排、一次右鍵同時觸發好幾個監聽器
             // （用戶 2026-09-25 照片）。一進一出，離開時也把圖示拿掉，不留孤兒。
@@ -233,10 +199,51 @@ fun main(args: Array<String>) {
                 }
                 val tray = java.awt.SystemTray.getSystemTray()
                 trayIconAwt.addMouseListener(listener)
-                runCatching { tray.add(trayIconAwt) }
                 onDispose {
-                    runCatching { tray.remove(trayIconAwt) }
+                    if (trayAttached) runCatching { tray.remove(trayIconAwt) }
                     runCatching { trayIconAwt.removeMouseListener(listener) }
+                    trayAttached = false
+                }
+            }
+            // 挂托盤＋自癒：
+            // 1) add 失敗（bar 正在重建、那一瞬間沒人擁有托盤）就每 2 秒重試。原本這裡是
+            //    `runCatching { tray.add(...) }` 把例外吞掉，結果行程活著、X 那邊卻完全沒有
+            //    圖示視窗，而且程式還以為自己有托盤——關窗就藏進不存在的托盤，叫不回來。
+            // 2) bar 被重建時（i3-msg restart / bar mode toggle / 換 WM），X 會把掛在舊 bar 下的
+            //    圖示視窗一併銷掉，而 AWT 永遠不會重新嵌入。所以自己盯 `_NET_SYSTEM_TRAY_S0`
+            //    的擁有者，換人就重掛。
+            LaunchedEffect(trayIconAwt) {
+                val tray = java.awt.SystemTray.getSystemTray()
+                val watch = TrayOwnerWatch()
+                var owner = watch.owner()
+                // 診斷：JNA 拿不到 X 連線時 owner() 回 -1，自癒條件永遠不成立，
+                // 必須看得見才發現（用戶 2026-09-29：圖示不見、log 卻一聲不響）。
+                println("NASHIRA_TRAY: 啟動時托盤擁有者=$owner supported=${java.awt.SystemTray.isSupported()}")
+                try {
+                    while (true) {
+                        if (!trayAttached) {
+                            val attached = runCatching {
+                                tray.add(trayIconAwt)
+                                true
+                            }.getOrDefault(false)
+                            println("NASHIRA_TRAY: add -> attached=$attached owner=${watch.owner()}")
+                            if (attached) {
+                                trayAttached = true
+                                owner = watch.owner()
+                            }
+                        } else {
+                            val now = watch.owner()
+                            if (now > 0L && owner > 0L && now != owner) {
+                                println("NASHIRA_TRAY: 托盤擁有者換了 $owner -> $now，重新嵌入")
+                                runCatching { tray.remove(trayIconAwt) }
+                                trayAttached = false
+                                owner = now
+                            }
+                        }
+                        delay(2_000L)
+                    }
+                } finally {
+                    watch.close()
                 }
             }
 
@@ -351,7 +358,9 @@ fun main(args: Array<String>) {
 
         Window(
             onCloseRequest = {
-                if (trayAvailable) mainWindow?.isVisible = false else exitApplication()
+                // 用「掛上了沒有」判斷，不是用「平台支援嗎」：圖示沒掛成功就藏窗，
+                // 等於把程式關進一個叫不回來的地方。
+                if (trayAttached) mainWindow?.isVisible = false else exitApplication()
             },
             title = "Nashira",
             icon = painterResource("nashira-icon.png"),
