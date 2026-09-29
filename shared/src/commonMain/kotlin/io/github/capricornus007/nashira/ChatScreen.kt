@@ -3346,8 +3346,12 @@ private fun MessageRow(
     replyToPreview: String? = null,
 )
 {
-    var menuOpen by remember(msg.eventId) { mutableStateOf(false) }
-    var menuAnchor by remember(msg.eventId) { mutableStateOf(Offset.Unspecified) }
+    // 選單狀態的 key 不能只用 eventId：**待送訊息的 eventId 是 null**，同一屏裡所有
+    // 待送列就會共用同一份 menuOpen/menuAnchor —— 右鍵點這一列、選單卻開在另一列
+    // 上次的位置（用戶 2026-09-29 那張貼紙選單錯位的圖）。補上 outbox 交易號與時間戳當後備。
+    val rowKey = msg.eventId?.full ?: msg.outboxTransactionId ?: "${msg.sender.full}-${msg.timestamp}"
+    var menuOpen by remember(rowKey) { mutableStateOf(false) }
+    var menuAnchor by remember(rowKey) { mutableStateOf(Offset.Unspecified) }
     // 反應選擇器：跟 action 選單分開兩個彈窗，從 hover 列的笑臉鈕或選單裡那列開
     var reactOpen by remember { mutableStateOf(false) }
     var reactAnchor by remember { mutableStateOf(Offset.Unspecified) }
