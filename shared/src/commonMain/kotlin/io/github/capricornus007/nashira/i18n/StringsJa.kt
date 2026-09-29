@@ -270,6 +270,7 @@ object JaStrings : Strings by EnStrings {
     override val audioInputDevice = "入力デバイス（マイク）"
     override val audioOutputDevice = "出力デバイス（スピーカー）"
     override val audioDeviceDefault = "システム既定"
+    override fun audioDeviceIsDefault(name: String) = "$name（システム既定）"
     override val trayOpen = "Nashira を開く"
     override val trayQuit = "終了"
     override val jumpToLatest = "最新へ移動"

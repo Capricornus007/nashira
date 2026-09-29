@@ -2319,12 +2319,14 @@ private fun TimelinePane(
                         // 鍵盤等高的量測點：空場時記下基準 top，鍵盤開時兩者的差就是鍵盤高度
                         // （面板開著時不取樣——那時把輸入列頂起來的是面板自己）
                         .onGloballyPositioned { c ->
-                            val top = c.boundsInRoot().top.toInt()
-                            when {
-                                !stickerPanel && !composerFocused -> composerBaselineTopPx = top
-                                !stickerPanel && composerFocused && composerBaselineTopPx > top ->
-                                    // 寫進 UiState：那裡會存檔，換聊天室／重開程式都直接沿用
-                                    uiState.imeHeightPx = composerBaselineTopPx - top
+                            if (softKeyboardShiftsComposer) {
+                                val top = c.boundsInRoot().top.toInt()
+                                when {
+                                    !stickerPanel && !composerFocused -> composerBaselineTopPx = top
+                                    !stickerPanel && composerFocused && composerBaselineTopPx > top ->
+                                        // 寫進 UiState：那裡會存檔，換聊天室／重開程式都直接沿用
+                                        uiState.imeHeightPx = composerBaselineTopPx - top
+                                }
                             }
                         },
                     verticalAlignment = Alignment.Bottom,
@@ -2568,7 +2570,8 @@ private fun TimelinePane(
                     // 但那個數含導航列，扣掉之後落在同一個位置）。
                     // 真機實測：拿 ② 的 950px 時輸入列與鍵盤狀態差 0px，
                     // 讓 ③ 的 960px 蓋過去會差 10px，所以別改成取最大。
-                    val measuredPx = maxOf(systemImeHeightPx(), uiState.imeHeightPx)
+                    val measuredPx =
+                        if (softKeyboardShiftsComposer) maxOf(systemImeHeightPx(), uiState.imeHeightPx) else 0
                     val panelHeight = with(density) {
                         (if (measuredPx > 0) measuredPx
                         else (LocalWindowInfo.current.containerSize.height * 0.40f).toInt()).toDp()
@@ -3935,13 +3938,13 @@ private fun MessageBodyContent(
                     modifier = modifier,
                 )
             }
-            // P5-3：訊息**本身**含連結時才附 og 預覽卡，一個連結一張卡
-            // （回覆的引用塊不算，見 urlsInMessage）
-            val previewUrls = urlsInMessage(formatted, body.text)
-            if (previewUrls.isNotEmpty()) {
-                Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    previewUrls.forEach { url -> UrlPreviewInline(url = url) }
-                }
+            // P5-3：訊息**本身**含連結時才附 og 預覽卡（回覆的引用塊不算，見 urlsInMessage）。
+            // 一張訊息只給一張卡，取第一個連結：Element／Telegram 都是這樣，
+            // 而同一則訊息裡的多個連結常常是同一個網站的入口，標題一模一樣的兩張卡
+            // 看起來就是壞掉（2026-09-29 用戶在 Gentoo 漏洞房間點名）。
+            val previewUrl = urlsInMessage(formatted, body.text).firstOrNull()
+            if (previewUrl != null) {
+                Column(Modifier.padding(top = 6.dp)) { UrlPreviewInline(url = previewUrl) }
             }
         }
         is MessageBody.Image -> {

@@ -23,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import de.connect2x.trixnity.client.MatrixClient
@@ -74,7 +75,7 @@ fun MessageImage(
                             // 影片沒有縮圖端點；圖片第一輪縮圖失敗也直接退原檔
                             service.getMedia(source.mxcUrl, maxSize = MaxMediaBytes)
                         } else {
-                            service.getThumbnail(source.mxcUrl, 480, 480, maxSize = MaxMediaBytes)
+                            service.getThumbnail(source.mxcUrl, TimelineThumbnailPx, TimelineThumbnailPx, maxSize = MaxMediaBytes)
                         }
                     is MediaSource.Encrypted -> service.getEncryptedMedia(source.file, maxSize = MaxMediaBytes)
                 }
@@ -121,6 +122,9 @@ fun MessageImage(
                 .aspectRatio(ratio)
                 .then(if (onOpen != null) Modifier.clickable(onClick = onOpen) else Modifier),
             contentScale = if (isSticker) ContentScale.Fit else ContentScale.Crop,
+            // 一定要明寫 High：預設是 Low（最近鄰），縮放時直接糊成一團或鋸齒
+            //（用戶 2026-09-29 對照 Telegram：「tg 無論點開之前還是點開之後都沒那麼糊」）。
+            filterQuality = FilterQuality.High,
         )
         // 載入失敗就退回檔名，至少看得出這裡本來有東西
         failed -> Text(
@@ -156,6 +160,22 @@ private fun ratioOf(width: Int?, height: Int?, bitmap: ImageBitmap?): Float {
 
 /** 縮圖上限 2 MiB：時間線一次可能掛十幾張圖，原圖直接拉會把手機流量與記憶體吃光。 */
 internal const val MaxMediaBytes = 2L * 1024 * 1024
+
+/**
+ * 時間線縮圖的請求尺寸（長邊，實體像素）。
+ *
+ * 為什麼是 800 而不是原本的 480：顯示寬度上限是 264dp，本機 uiScale=1.75、
+ * 手機常见 2.6~3.0，都要 500~800 實體像素才夠。要 480 等於請伺服器給一張
+ * 比顯示位置還小的圖，再把它放大畫出去——那就是「點開之前就糊」的直接原因。
+ * 800 也是 Element 時間線用的預設值，伺服器端普遍不會再往下壓。
+ */
+internal const val TimelineThumbnailPx = 800L
+
+/** 時間線那張縮圖在快取裡的鍵；檢視器拿它當「先顯示的佔位圖」。 */
+internal fun mediaThumbnailCacheKey(source: MediaSource): String = when (source) {
+    is MediaSource.Plain -> source.mxcUrl
+    is MediaSource.Encrypted -> source.file.url
+}
 
 private fun MediaSource.cacheKey(): String = when (this) {
     is MediaSource.Plain -> mxcUrl

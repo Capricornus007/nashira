@@ -65,6 +65,28 @@ fun audioDevicesFor(isInput: Boolean): List<AudioDevice> =
         .sortedBy { if (it.id.endsWith("[default]")) 0 else 1 }
         .distinctBy { it.label }
 
+/** 下拉清單的一項；id 為 null 表示「系統預設」。 */
+data class AudioDeviceOption(val id: String?, val label: String)
+
+/**
+ * 裝置下拉清單：「系統預設」自己一列（不重複裝置名），實際是哪個裝置改標在
+ * 那一列的裝置名後面。之前兩列並排（「系統預設: X」＋「X」）看起來就是重複
+ * （用戶 2026-09-29 點名）。設置頁與底欄快捷面板都走這裡，兩邊才會一致。
+ */
+fun audioDeviceOptions(
+    strings: Strings,
+    devices: List<AudioDevice>,
+    defaultName: String?,
+): List<AudioDeviceOption> =
+    listOf(AudioDeviceOption(null, strings.audioDeviceDefault)) +
+        devices.map { device ->
+            val isDefault = defaultName != null && device.label == defaultName
+            AudioDeviceOption(
+                device.id,
+                if (isDefault) strings.audioDeviceIsDefault(device.label) else device.label,
+            )
+        }
+
 /**
  * 一行「目前選了哪個裝置」的顯示文字：selectedId 為 null 就是系統預設，
  * 這時照 Discord 的寫法把實際裝置名帶出來（`系統預設: Ryzen …`）；查不到名字

@@ -272,6 +272,7 @@ object KoStrings : Strings by EnStrings {
     override val audioInputDevice = "입력 장치(마이크)"
     override val audioOutputDevice = "출력 장치(스피커)"
     override val audioDeviceDefault = "시스템 기본값"
+    override fun audioDeviceIsDefault(name: String) = "$name(시스템 기본값)"
     override val trayOpen = "Nashira 열기"
     override val trayQuit = "종료"
     override val jumpToLatest = "최신으로 이동"

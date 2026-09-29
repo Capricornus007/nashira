@@ -145,4 +145,83 @@ object BarIcons {
             }
         }.build()
     }
+    /** 「原始碼」那列用的 `</>`（原本是「人頭」＝帳號，用戶 2026-09-29 點名不對）。 */
+    val Code: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "Code", defaultWidth = 24.dp, defaultHeight = 24.dp,
+            viewportWidth = 24f, viewportHeight = 24f,
+        ).apply {
+            path(fill = SolidColor(Color.Black)) {
+                moveTo(9.4f, 16.6f); lineTo(4.8f, 12f); lineTo(9.4f, 7.4f)
+                lineTo(8f, 6f); lineTo(2f, 12f); lineTo(8f, 18f); close()
+                moveTo(14.6f, 16.6f); lineTo(19.2f, 12f); lineTo(14.6f, 7.4f)
+                lineTo(16f, 6f); lineTo(22f, 12f); lineTo(16f, 18f); close()
+            }
+        }.build()
+    }
+
+    /** 「外觀」用調色盤意象的亮度圖示（原本那顆星星語意是「收藏」）。 */
+    val Appearance: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "Appearance", defaultWidth = 24.dp, defaultHeight = 24.dp,
+            viewportWidth = 24f, viewportHeight = 24f,
+        ).apply {
+            path(fill = SolidColor(Color.Black)) { circle(12f, 12f, 4.4f) }
+            path(stroke = SolidColor(Color.Black), strokeLineWidth = 1.9f) {
+                for (i in 0 until 8) {
+                    val angle = Math.PI / 4.0 * i
+                    val dx = kotlin.math.cos(angle).toFloat()
+                    val dy = kotlin.math.sin(angle).toFloat()
+                    moveTo(12f + dx * 7f, 12f + dy * 7f)
+                    lineTo(12f + dx * 9.4f, 12f + dy * 9.4f)
+                }
+            }
+        }.build()
+    }
+
+    /** 「語言」用的地球圖示（原本那顆鉛筆是「編輯」）。 */
+    val Language: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "Language", defaultWidth = 24.dp, defaultHeight = 24.dp,
+            viewportWidth = 24f, viewportHeight = 24f,
+        ).apply {
+            path(stroke = SolidColor(Color.Black), strokeLineWidth = 1.7f) {
+                circle(12f, 12f, 9f)
+                moveTo(3f, 12f); lineTo(21f, 12f)
+                moveTo(12f, 3f)
+                curveTo(15.4f, 6.6f, 15.4f, 17.4f, 12f, 21f)
+                curveTo(8.6f, 17.4f, 8.6f, 6.6f, 12f, 3f)
+                close()
+                moveTo(4.6f, 7.4f); lineTo(19.4f, 7.4f)
+                moveTo(4.6f, 16.6f); lineTo(19.4f, 16.6f)
+            }
+        }.build()
+    }
+
+    /** 「純黑（AMOLED）」那列的對比圖示（這列原本左邊空著，看起來像漏圖）。 */
+    val Contrast: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "Contrast", defaultWidth = 24.dp, defaultHeight = 24.dp,
+            viewportWidth = 24f, viewportHeight = 24f,
+        ).apply {
+            path(stroke = SolidColor(Color.Black), strokeLineWidth = 1.8f) { circle(12f, 12f, 9f) }
+            path(fill = SolidColor(Color.Black)) {
+                moveTo(12f, 3f)
+                curveTo(16.97f, 3f, 21f, 7.03f, 21f, 12f)
+                curveTo(21f, 16.97f, 16.97f, 21f, 12f, 21f)
+                close()
+            }
+        }.build()
+    }
+}
+
+/** 用四段貝塞爾近似一個正圓（PathBuilder 沒有 addCircle，本檔所有圖示共用這個）。 */
+private fun androidx.compose.ui.graphics.vector.PathBuilder.circle(cx: Float, cy: Float, r: Float) {
+    val k = r * 0.5523f
+    moveTo(cx, cy - r)
+    curveTo(cx + k, cy - r, cx + r, cy - k, cx + r, cy)
+    curveTo(cx + r, cy + k, cx + k, cy + r, cx, cy + r)
+    curveTo(cx - k, cy + r, cx - r, cy + k, cx - r, cy)
+    curveTo(cx - r, cy - k, cx - k, cy - r, cx, cy - r)
+    close()
 }

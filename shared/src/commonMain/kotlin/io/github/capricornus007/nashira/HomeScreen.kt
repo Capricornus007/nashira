@@ -164,10 +164,10 @@ internal fun SettingsScaffold(
     onBack: (() -> Unit)?,
     content: @Composable () -> Unit,
 ) {
-    val appBarState = rememberTopAppBarState()
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(appBarState)
+    // 列頭固定、不做收合動畫：整頁內容是 LazyColumn 裡的單一 item，
+    // 用 exitUntilCollapsed 會卡在「半收合」狀態——往上推之後再也回不來，
+    // 標題被切一半（用戶 2026-09-29 點名）。Element／Telegram 桌面版的設定列頭也是固定的。
     Scaffold(
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
             TopAppBar(
@@ -179,7 +179,11 @@ internal fun SettingsScaffold(
                     }
                 },
                 title = { Text(title, fontWeight = FontWeight.Bold) },
-                scrollBehavior = scrollBehavior,
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+                ),
             )
         },
     ) { padding ->
@@ -224,7 +228,7 @@ private fun SettingsRoot(
             item { shape ->
                 SettingsNavigationItem(
                     shape = shape,
-                    icon = Icons.Filled.Star,
+                    icon = BarIcons.Appearance,
                     title = strings.appearance,
                     description = strings.appearanceHint,
                     onClick = { onNavigate(SettingsPage.APPEARANCE) },
@@ -242,7 +246,7 @@ private fun SettingsRoot(
             item { shape ->
                 SettingsDropdownItem(
                     shape = shape,
-                    icon = Icons.Filled.Create,
+                    icon = BarIcons.Language,
                     title = strings.language,
                     current = ui.language.displayName,
                 ) { close ->
@@ -268,13 +272,9 @@ private fun SettingsRoot(
                         title = strings.audioInputDevice,
                         current = audioDeviceLabel(strings, devices, ui.audioInput, defaultName),
                     ) { close ->
-                        SettingsMenuOption(
-                            audioDeviceLabel(strings, devices, null, defaultName),
-                            ui.audioInput == null,
-                        ) { ui.audioInput = null; close() }
-                        devices.forEach { device ->
-                            SettingsMenuOption(device.label, ui.audioInput == device.id) {
-                                ui.audioInput = device.id; close()
+                        audioDeviceOptions(strings, devices, defaultName).forEach { option ->
+                            SettingsMenuOption(option.label, ui.audioInput == option.id) {
+                                ui.audioInput = option.id; close()
                             }
                         }
                     }
@@ -287,13 +287,9 @@ private fun SettingsRoot(
                         title = strings.audioOutputDevice,
                         current = audioDeviceLabel(strings, devices, ui.audioOutput, defaultName),
                     ) { close ->
-                        SettingsMenuOption(
-                            audioDeviceLabel(strings, devices, null, defaultName),
-                            ui.audioOutput == null,
-                        ) { ui.audioOutput = null; close() }
-                        devices.forEach { device ->
-                            SettingsMenuOption(device.label, ui.audioOutput == device.id) {
-                                ui.audioOutput = device.id; close()
+                        audioDeviceOptions(strings, devices, defaultName).forEach { option ->
+                            SettingsMenuOption(option.label, ui.audioOutput == option.id) {
+                                ui.audioOutput = option.id; close()
                             }
                         }
                     }
@@ -345,6 +341,7 @@ private fun AppearancePage(onBack: () -> Unit) {
             item { shape ->
                 SettingsSwitchItem(
                     shape = shape,
+                    icon = BarIcons.Contrast,
                     title = strings.pureBlack,
                     description = strings.pureBlackHint,
                     checked = ui.pureBlack,
@@ -533,7 +530,7 @@ private fun AboutPage(onBack: () -> Unit) {
             item { shape ->
                 SettingsItem(
                     shape = shape,
-                    icon = Icons.Filled.Person,
+                    icon = BarIcons.Code,
                     title = strings.sourceCode,
                     description = AppInfo.repo,
                     onClick = { openLink(AppInfo.repoUrl) },

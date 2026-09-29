@@ -12,3 +12,12 @@ import androidx.compose.runtime.Composable
  */
 @Composable
 internal expect fun systemImeHeightPx(): Int
+
+/**
+ * 這個平台的軟鍵盤會不會「把佈局頂起來」（安卓會；桌面不會）。
+ *
+ * 桌面必須是 false：面板高度原本是照「輸入列被頂上去多少」量出來並存進設定的，
+ * 桌面根本沒有鍵盤，那個數會被視窗被 i3 重新切尺寸之類的佈局位移誤寫成一个大數，
+ * 然後長期沿用 → 窄窗口（半屏）時貼圖面板撐到快全屏（用戶 2026-09-29 點名 #67）。
+ */
+expect val softKeyboardShiftsComposer: Boolean

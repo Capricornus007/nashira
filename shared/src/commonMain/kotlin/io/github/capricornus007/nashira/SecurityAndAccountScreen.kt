@@ -160,7 +160,12 @@ fun SecurityAndAccountScreen(
                             .padding(horizontal = 18.dp, vertical = 16.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        AvatarImage(session.client, null, displayName, Modifier.size(56.dp).clip(CircleShape))
+                        AvatarImage(
+                            session.client,
+                            profile?.avatarUrl?.takeIf { it.isNotBlank() },
+                            displayName,
+                            Modifier.size(56.dp).clip(CircleShape),
+                        )
                         Column(
                             Modifier.padding(start = 14.dp),
                             verticalArrangement = Arrangement.spacedBy(2.dp),

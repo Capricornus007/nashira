@@ -68,34 +68,9 @@ private fun trayMenuY(pointerY: Int, menuHeight: Int, screenHeight: Int): Int {
 /** 問不到托盤那一格多大時退回的邊長：AWT 自己假設的托盤尺寸就是 24。 */
 private const val TRAY_ICON_FALLBACK_PX = 24
 
-/**
- * 逐次減半縮到目標邊長。512→16 一步到位的雙線性會糊（用戶 2026-09-28 點名
- * 「後台圖標沒修」），每一步倍率 ≤1/2 才保得住細節。
- */
-private fun scaleTrayIcon(src: java.awt.image.BufferedImage, side: Int): java.awt.image.BufferedImage {
-    var cur = src
-    while (cur.width > side) {
-        val nextSide = (cur.width / 2).coerceAtLeast(side)
-        val next = java.awt.image.BufferedImage(
-            nextSide,
-            nextSide,
-            java.awt.image.BufferedImage.TYPE_INT_ARGB,
-        )
-        val g = next.createGraphics()
-        g.setRenderingHint(
-            java.awt.RenderingHints.KEY_INTERPOLATION,
-            java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR,
-        )
-        g.setRenderingHint(
-            java.awt.RenderingHints.KEY_RENDERING,
-            java.awt.RenderingHints.VALUE_RENDER_QUALITY,
-        )
-        g.drawImage(cur, 0, 0, nextSide, nextSide, null)
-        g.dispose()
-        cur = next
-    }
-    return cur
-}
+/** X11 ButtonPress 事件裡的滑鼠鍵編號。 */
+private const val MouseButton1 = 1
+private const val MouseButton3 = 3
 
 
 
@@ -111,66 +86,31 @@ private fun scaleTrayIcon(src: java.awt.image.BufferedImage, side: Int): java.aw
  */
 private fun fitTrayIcon(icon: java.awt.TrayIcon, src: java.awt.image.BufferedImage) {
     val slotPx = traySlotSizePx() ?: return
-    val scale = System.getProperty("sun.java2d.uiScale")?.toFloatOrNull() ?: 1f
-    val side = (slotPx / scale).roundToInt().coerceIn(8, 64)
-    println("NASHIRA_TRAY: 那一格 ${slotPx}px、uiScale=$scale → 圖示出 $side px")
+    val scale = awtUiScale()
+    // 無條件舍去，不是四捨五入：湊整會畫得比畫布大（33/1.75→19→33.25px），
+    // 多出來的那一點從右與下被裁掉，看上去就是圖貼到格子右下角。
+    val side = (slotPx / scale).toInt().coerceIn(8, 64)
+    println("NASHIRA_TRAY: 退路（AWT）：那一格 ${slotPx}px、uiScale=$scale → 圖示出 $side px")
     java.awt.EventQueue.invokeLater {
         icon.isImageAutoSize = false
-        icon.setImage(trayIconImage(src, side))
+        icon.setImage(awtTrayImage(src, side))
     }
 }
 
 /**
- * 出圖：先把「亮部質心」搬到畫面正中，再縮到那一格的大小。
+ * AWT 使用者空間與 X 實體像素之間那把尺（本機 2.0）。
  *
- * 用戶 2026-09-29 三輪點名「後臺圖標偏右下角」。中間試過「留透明邊距」的做法，
- * 結果多出一條白線——實測證明 AWT 那塊托盤畫布的底色是**白**的，
- * 任何透明邊（邊距、平移後的缺口）都會畫成一條白線。所以只能「不透明地搬」：
- * 以亮部質心為中心裁一個正方形再縮，圖仍是滿版、不露底色，視覺重心也就正了。
+ * 問 AWT 實際用的縮放，不是讀 sun.java2d.uiScale：那個屬性會被後端改寫
+ *（本機我們設 2，跑起來 AWT 回報 1.75——Xft.dpi=168 走的是小數縮放），
+ * 照屬性算就會算錯尺寸。
  */
-private fun trayIconImage(src: java.awt.image.BufferedImage, side: Int): java.awt.image.BufferedImage =
-    scaleTrayIcon(centerOnBrightContent(src), side)
-
-/** 以亮部（圖標裡那顆 N 與那顆星）的質心為中心裁一方塊；本來就居中就不動。 */
-private fun centerOnBrightContent(src: java.awt.image.BufferedImage): java.awt.image.BufferedImage {
-    val w = src.width
-    val h = src.height
-    var sumX = 0L
-    var sumY = 0L
-    var count = 0L
-    val step = (w / 128).coerceAtLeast(1)
-    var y = 0
-    while (y < h) {
-        var x = 0
-        while (x < w) {
-            val rgb = src.getRGB(x, y)
-            val lum = (((rgb shr 16) and 0xFF) * 75 + ((rgb shr 8) and 0xFF) * 150 + (rgb and 0xFF) * 29) / 256
-            if (lum > BrightPixelLuma) {
-                sumX += x
-                sumY += y
-                count++
-            }
-            x += step
-        }
-        y += step
-    }
-    if (count < 16) return src
-    val cx = (sumX / count).toInt()
-    val cy = (sumY / count).toInt()
-    val dx = cx - w / 2
-    val dy = cy - h / 2
-    // 本來就差不多居中（偏移不到 2%）就別亂動圖
-    if (kotlin.math.abs(dx) < w * 0.02f && kotlin.math.abs(dy) < h * 0.02f) return src
-    // 要把質心搬到正中，裁切窗口至少得比原圖小 2*偏移，否則窗口頂到邊、搬不動
-    val shift = maxOf(kotlin.math.abs(dx), kotlin.math.abs(dy))
-    val crop = (minOf(w, h) - 2 * shift - 8).coerceAtLeast((minOf(w, h) * 0.6f).toInt())
-    val x0 = (cx - crop / 2).coerceIn(0, w - crop)
-    val y0 = (cy - crop / 2).coerceIn(0, h - crop)
-    return src.getSubimage(x0, y0, crop, crop)
-}
-
-private const val BrightPixelLuma = 105
-
+private fun awtUiScale(): Float =
+    runCatching {
+        java.awt.Window.getWindows()
+            .mapNotNull { it.graphicsConfiguration?.defaultTransform?.scaleX }
+            .firstOrNull { it > 0.0 }
+            ?.toFloat()
+    }.getOrNull() ?: System.getProperty("sun.java2d.uiScale")?.toFloatOrNull() ?: 1f
 
 @OptIn(ExperimentalComposeUiApi::class)
 fun main(args: Array<String>) {
@@ -215,8 +155,7 @@ fun main(args: Array<String>) {
             }.getOrNull()
         }
         // 載不到圖就當作沒有托盤：寧可關窗即退，也不要收進去之後沒有圖示能召回。
-        val trayAvailable = java.awt.SystemTray.isSupported() && traySource != null
-        // 圖示「真的掛上去了」才算數：bar 正在重建時 tray.add() 會丟例外，掛不上卻以為掛上了，
+        // 圖示「真的掛上去了」才算數：bar 正在重建時嵌入會失敗，掛不上卻以為掛上了，
         // 關窗就會藏進一個不存在的托盤、叫不回來（用戶 2026-09-29：後臺圖示不見）。
         var trayAttached by remember { mutableStateOf(false) }
         val strings = stringsFor(ui.language)
@@ -253,88 +192,145 @@ fun main(args: Array<String>) {
             if (!ok) println("NASHIRA_HOTKEY: global hotkey unavailable (X11 grab failed)")
         }
 
-        if (trayAvailable && traySource != null) {
-            // 也不設 tooltip：懸浮跳出白底「Nashira」那一塊，用戶 2026-09-28 點名要拿掉。
-            // remember：TrayIcon 必須全程同一個實例——下面只 add 一次，若每次重組都 new
-            // 一顆，托盤就會被疊成一排（用戶 2026-09-25 照片：右鍵一次多一顆）。
-            val trayIconAwt = remember(traySource) {
-                java.awt.TrayIcon(trayIconImage(traySource, TRAY_ICON_FALLBACK_PX)).apply {
-                    isImageAutoSize = true
-                }
-            }
-            // AWT 字體渲染：系統屬性在 JVM 啟動時設定（main() 最前面），
-            // 這裡只設字體本身。抗鋸齒/LCD 子像素由 awt.useSystemAAFontSettings 控制。
-            // AWT PopupMenu 在 Linux 上不用系統字體渲染管線（FreeType），
-            // 中文缺筆畫、抗鋸齒差（2026-09-14 用戶對比 fcitx5 截圖）。
-            // 改用 Compose Popup：跟 app 主體同渲染管線，字體/抗鋸齒一致。
+        // 候選窗口「從外面搬 fcitx 的窗口」這條試過並**撤掉**了（ImCandidateMover 先留檔不啟動）：
+        // fcitx5 每按一個鍵就自己擺一次位置，我們 40ms 後再拖一次，實測就是
+        // 「打一個字閃一下、越打越不停地閃」（用戶 2026-09-29 點名）。
+        // 要不吃架只能讓「搬行動作發生在 XIM 回調之內」——那是 JBR 內建的
+        // ClientComponentCaretPositionTracker 的位置，外面模擬不出來。
+
+        if (traySource != null) {
+            // 選單用 Compose 視窗，不用 AWT PopupMenu：後者在 Linux 上不走系統字體渲染
+            // 管線（FreeType），中文缺筆畫、抗鋸齒差（2026-09-14 用戶對比 fcitx5 截圖）。
             var trayMenuOpen by remember { mutableStateOf(false) }
             // 右鍵時記錄鼠標位置：菜單錨在托盤圖示上方（PlatformDefault 在
             // bspwm 會把窗口丟到屏幕頂部，2026-09-14 用戶截圖回報位置錯）。
             var trayMenuScreenPos by remember { mutableStateOf(java.awt.Point(0, 0)) }
-            // 監聽器與托盤註冊都收進 DisposableEffect：原本兩行直接寫在 Composable 本體，
-            // **每次重組就再 add 一次**——托盤被右鍵疊成一排、一次右鍵同時觸發好幾個監聽器
-            // （用戶 2026-09-25 照片）。一進一出，離開時也把圖示拿掉，不留孤兒。
-            DisposableEffect(trayIconAwt) {
-                val listener = object : java.awt.event.MouseAdapter() {
-                    override fun mousePressed(e: java.awt.event.MouseEvent) {
-                        when (e.button) {
-                            java.awt.event.MouseEvent.BUTTON3 -> {
-                                trayMenuScreenPos = java.awt.MouseInfo.getPointerInfo().location
+
+            // 圖示優先走原生 XEmbed（自己照實體像素畫，見 X11TrayIcon）；建不起來才退回
+            // AWT TrayIcon —— 那條路的畫布只有 16 使用者空間再硬Dup兩倍，必然糊。
+            val nativeTray = remember(traySource) {
+                X11TrayIcon.create(
+                    render = { width, height -> trayArgb(traySource, width, height) },
+                    onButton = { button, rootX, rootY ->
+                        when (button) {
+                            MouseButton3 -> {
+                                // X 報的是實體像素，選單窗口吃的是 AWT 使用者空間，要換算
+                                val scale = awtUiScale()
+                                trayMenuScreenPos = java.awt.Point(
+                                    (rootX / scale).roundToInt(),
+                                    (rootY / scale).roundToInt(),
+                                )
                                 trayMenuOpen = true
                             }
-                            java.awt.event.MouseEvent.BUTTON1 -> showMainWindow()
+                            MouseButton1 -> showMainWindow()
                         }
+                    },
+                )
+            }
+            if (nativeTray != null) {
+                // 嵌入與否是事件執行緒回報的，用輪詢收；順帶盯 bar 重啟（換擁有者就重新 Dock）
+                LaunchedEffect(nativeTray) {
+                    val watch = TrayOwnerWatch()
+                    try {
+                        var owner = watch.owner()
+                        while (true) {
+                            val attached = nativeTray.isEmbedded
+                            if (trayAttached != attached) trayAttached = attached
+                            val now = watch.owner()
+                            if (now > 0L && (now != owner || !attached)) {
+                                println("NASHIRA_TRAY: 重新 Dock（embedded=$attached owner=$owner→$now）")
+                                owner = now
+                                nativeTray.redock(now)
+                            }
+                            delay(2_000L)
+                        }
+                    } finally {
+                        watch.close()
                     }
                 }
-                val tray = java.awt.SystemTray.getSystemTray()
-                trayIconAwt.addMouseListener(listener)
-                onDispose {
-                    if (trayAttached) runCatching { tray.remove(trayIconAwt) }
-                    runCatching { trayIconAwt.removeMouseListener(listener) }
-                    trayAttached = false
+                DisposableEffect(nativeTray) {
+                    onDispose {
+                        nativeTray.close()
+                        trayAttached = false
+                    }
                 }
             }
-            // 挂托盤＋自癒：
-            // 1) add 失敗（bar 正在重建、那一瞬間沒人擁有托盤）就每 2 秒重試。原本這裡是
-            //    `runCatching { tray.add(...) }` 把例外吞掉，結果行程活著、X 那邊卻完全沒有
-            //    圖示視窗，而且程式還以為自己有托盤——關窗就藏進不存在的托盤，叫不回來。
-            // 2) bar 被重建時（i3-msg restart / bar mode toggle / 換 WM），X 會把掛在舊 bar 下的
-            //    圖示視窗一併銷掉，而 AWT 永遠不會重新嵌入。所以自己盯 `_NET_SYSTEM_TRAY_S0`
-            //    的擁有者，換人就重掛。
-            LaunchedEffect(trayIconAwt) {
-                val tray = java.awt.SystemTray.getSystemTray()
-                val watch = TrayOwnerWatch()
-                var owner = watch.owner()
-                // 診斷：JNA 拿不到 X 連線時 owner() 回 -1，自癒條件永遠不成立，
-                // 必須看得見才發現（用戶 2026-09-29：圖示不見、log 卻一聲不響）。
-                println("NASHIRA_TRAY: 啟動時托盤擁有者=$owner supported=${java.awt.SystemTray.isSupported()}")
-                try {
-                    while (true) {
-                        if (!trayAttached) {
-                            val attached = runCatching {
-                                tray.add(trayIconAwt)
-                                true
-                            }.getOrDefault(false)
-                            println("NASHIRA_TRAY: add -> attached=$attached owner=${watch.owner()}")
-                            if (attached) {
-                                trayAttached = true
-                                owner = watch.owner()
-                                // 掛上去之後才問得到那一格多大（socket 這時才存在）
-                                fitTrayIcon(trayIconAwt, traySource)
-                            }
-                        } else {
-                            val now = watch.owner()
-                            if (now > 0L && owner > 0L && now != owner) {
-                                println("NASHIRA_TRAY: 托盤擁有者換了 $owner -> $now，重新嵌入")
-                                runCatching { tray.remove(trayIconAwt) }
-                                trayAttached = false
-                                owner = now
+            if (nativeTray == null) {
+                // 也不設 tooltip：懸浮跳出白底「Nashira」那一塊，用戶 2026-09-28 點名要拿掉。
+                // remember：TrayIcon 必須全程同一個實例——下面只 add 一次，若每次重組都 new
+                // 一顆，托盤就會被疊成一排（用戶 2026-09-25 照片：右鍵一次多一顆）。
+                val trayIconAwt = remember(traySource) {
+                    java.awt.TrayIcon(awtTrayImage(traySource, TRAY_ICON_FALLBACK_PX)).apply {
+                        isImageAutoSize = true
+                    }
+                }
+                // AWT 字體渲染：系統屬性在 JVM 啟動時設定（main() 最前面），
+                // 這裡只設字體本身。抗鋸齒/LCD 子像素由 awt.useSystemAAFontSettings 控制。
+                // 監聽器與托盤註冊都收進 DisposableEffect：原本兩行直接寫在 Composable 本體，
+                // **每次重組就再 add 一次**——托盤被右鍵疊成一排、一次右鍵同時觸發好幾個監聽器
+                // （用戶 2026-09-25 照片）。一進一出，離開時也把圖示拿掉，不留孤兒。
+                DisposableEffect(trayIconAwt) {
+                    val listener = object : java.awt.event.MouseAdapter() {
+                        override fun mousePressed(e: java.awt.event.MouseEvent) {
+                            when (e.button) {
+                                java.awt.event.MouseEvent.BUTTON3 -> {
+                                    trayMenuScreenPos = java.awt.MouseInfo.getPointerInfo().location
+                                    trayMenuOpen = true
+                                }
+                                java.awt.event.MouseEvent.BUTTON1 -> showMainWindow()
                             }
                         }
-                        delay(2_000L)
                     }
-                } finally {
-                    watch.close()
+                    val tray = java.awt.SystemTray.getSystemTray()
+                    trayIconAwt.addMouseListener(listener)
+                    onDispose {
+                        if (trayAttached) runCatching { tray.remove(trayIconAwt) }
+                        runCatching { trayIconAwt.removeMouseListener(listener) }
+                        trayAttached = false
+                    }
+                }
+                // 挂托盤＋自癒：
+                // 1) add 失敗（bar 正在重建、那一瞬間沒人擁有托盤）就每 2 秒重試。原本這裡是
+                //    `runCatching { tray.add(...) }` 把例外吞掉，結果行程活著、X 那邊卻完全沒有
+                //    圖示視窗，而且程式還以為自己有托盤——關窗就藏進不存在的托盤，叫不回來。
+                // 2) bar 被重建時（i3-msg restart / bar mode toggle / 換 WM），X 會把掛在舊 bar 下的
+                //    圖示視窗一併銷掉，而 AWT 永遠不會重新嵌入。所以自己盯 `_NET_SYSTEM_TRAY_S0`
+                //    的擁有者，換人就重掛。
+                LaunchedEffect(trayIconAwt) {
+                    val tray = java.awt.SystemTray.getSystemTray()
+                    val watch = TrayOwnerWatch()
+                    var owner = watch.owner()
+                    // 診斷：JNA 拿不到 X 連線時 owner() 回 -1，自癒條件永遠不成立，
+                    // 必須看得見才發現（用戶 2026-09-29：圖示不見、log 卻一聲不響）。
+                    println("NASHIRA_TRAY: 啟動時托盤擁有者=$owner supported=${java.awt.SystemTray.isSupported()}")
+                    try {
+                        while (true) {
+                            if (!trayAttached) {
+                                val attached = runCatching {
+                                    tray.add(trayIconAwt)
+                                    true
+                                }.getOrDefault(false)
+                                println("NASHIRA_TRAY: add -> attached=$attached owner=${watch.owner()}")
+                                if (attached) {
+                                    trayAttached = true
+                                    owner = watch.owner()
+                                    // 掛上去之後才問得到那一格多大（socket 這時才存在）
+                                    fitTrayIcon(trayIconAwt, traySource)
+                                }
+                            } else {
+                                val now = watch.owner()
+                                if (now > 0L && owner > 0L && now != owner) {
+                                    println("NASHIRA_TRAY: 托盤擁有者換了 $owner -> $now，重新嵌入")
+                                    runCatching { tray.remove(trayIconAwt) }
+                                    trayAttached = false
+                                    owner = now
+                                }
+                            }
+                            delay(2_000L)
+                        }
+                    } finally {
+                        watch.close()
+                    }
                 }
             }
 
@@ -417,6 +413,13 @@ fun main(args: Array<String>) {
                     // 配色就會「主窗深色、選單淺色」（2026-09-28 用戶截圖）。
                     NashiraTheme(colorScheme = rememberNashiraColorScheme(systemDark)) {
                         val density = LocalDensity.current
+                        val menuBackground = MaterialTheme.colorScheme.surfaceContainerHigh
+                        // 窗口寬高是「Compose 量到的實體 px ÷ density」取整數，會比畫面少掉
+                        // 不到 1px；那條縫露出的是 AWT 窗口自己的底色（預設白）→
+                        // 選單右側一條白線（用戶 2026-09-29 點名）。把底色塗成選單同色就看不見了。
+                        LaunchedEffect(window, menuBackground) {
+                            window.background = java.awt.Color(menuBackground.red, menuBackground.green, menuBackground.blue)
+                        }
                         var contentSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
                         // 窗口高度跟著內容收：create 時那個 118 是含舊版 10dp 外距的數字，
                         // 現在實心同尺寸就用不完了（用戶：選單還是偏大）。

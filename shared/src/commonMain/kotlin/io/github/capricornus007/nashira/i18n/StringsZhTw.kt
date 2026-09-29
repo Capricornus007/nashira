@@ -277,6 +277,7 @@ object ZhTwStrings : Strings {
     override val audioInputDevice = "輸入裝置（麥克風）"
     override val audioOutputDevice = "輸出裝置（喇叭）"
     override val audioDeviceDefault = "系統預設"
+    override fun audioDeviceIsDefault(name: String) = "$name（系統預設）"
     override val trayOpen = "開啟 Nashira"
     override val trayQuit = "結束程式"
     override val jumpToLatest = "跳到最新"
@@ -297,6 +298,8 @@ object ZhTwStrings : Strings {
  * 沒覆寫的鍵顯示繁體（比顯示英文好）。
  */
 object ZhCnStrings : Strings by ZhTwStrings {
+    override val audioDeviceDefault = "系统默认"
+    override fun audioDeviceIsDefault(name: String) = "$name（系统默认）"
     override val menuUndo = "撤销"
     override val menuRedo = "重做"
     override val menuCut = "剪切"

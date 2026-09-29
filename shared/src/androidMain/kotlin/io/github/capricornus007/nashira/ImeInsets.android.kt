@@ -21,3 +21,5 @@ internal actual fun systemImeHeightPx(): Int {
         (ime - nav).coerceAtLeast(0)
     }.getOrDefault(0)
 }
+
+actual val softKeyboardShiftsComposer: Boolean get() = true

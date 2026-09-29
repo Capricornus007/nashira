@@ -37,11 +37,13 @@ internal fun configureX11Platform() {
  *（2240x1400 → 1120x700 邏輯像素，字級才正常）。
  */
 private fun applyUiScale() {
-    if (System.getProperty("sun.java2d.uiScale") != null) return
-    val scale = detectScale() ?: return
-    if (scale <= 1) return
+    val existing = System.getProperty("sun.java2d.uiScale")?.toFloatOrNull()
+    val detected = detectScale()
+    val target = detected ?: existing?.let { Math.round(it) } ?: return
+    if (target <= 1) return
+    if (existing != null && existing == target.toFloat()) return
     System.setProperty("sun.java2d.uiScale.enabled", "true")
-    System.setProperty("sun.java2d.uiScale", scale.toString())
+    System.setProperty("sun.java2d.uiScale", target.toString())
 }
 
 private fun detectScale(): Int? {

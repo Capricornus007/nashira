@@ -2,6 +2,7 @@ package io.github.capricornus007.nashira.desktop
 
 import com.sun.jna.Library
 import com.sun.jna.Native
+import com.sun.jna.NativeLong
 import com.sun.jna.Pointer
 import com.sun.jna.Structure
 import com.sun.jna.ptr.IntByReference
@@ -52,6 +53,73 @@ internal interface X11Lib : Library {
         winXReturn: IntByReference?,
         winYReturn: IntByReference?,
         maskReturn: IntByReference?,
+    ): Int
+
+    // ── 自己畫托盤要用的那幾條（見 X11TrayIcon.kt）──────────────────────────
+    fun XDefaultScreen(display: Pointer?): Int
+    fun XDefaultDepth(display: Pointer?, screen: Int): Int
+    fun XDefaultVisual(display: Pointer?, screen: Int): Pointer?
+    fun XRootWindow(display: Pointer?, screen: Int): Long
+    fun XVisualIDFromVisual(visual: Pointer?): Long
+    fun XGetVisualInfo(display: Pointer?, vinfoMask: NativeLong, template: Pointer?, nitemsReturn: IntByReference?): Pointer?
+    fun XCreateSimpleWindow(
+        display: Pointer?,
+        parent: Long,
+        x: Int,
+        y: Int,
+        width: Int,
+        height: Int,
+        borderWidth: Int,
+        border: NativeLong,
+        background: NativeLong,
+    ): Long
+
+    fun XSelectInput(display: Pointer?, window: Long, events: NativeLong): Int
+    fun XStoreName(display: Pointer?, window: Long, name: String): Int
+    fun XChangeWindowAttributes(display: Pointer?, window: Long, valuemask: NativeLong, attrs: Pointer?): Int
+    fun XChangeProperty(
+        display: Pointer?,
+        window: Long,
+        property: Long,
+        type: Long,
+        format: Int,
+        mode: Int,
+        data: Pointer?,
+        nelements: Int,
+    ): Int
+
+    fun XMapWindow(display: Pointer?, window: Long): Int
+    fun XUnmapWindow(display: Pointer?, window: Long): Int
+    fun XSendEvent(display: Pointer?, window: Long, propagate: Int, mask: NativeLong, event: Pointer?): Int
+    fun XFlush(display: Pointer?): Int
+    fun XPending(display: Pointer?): Int
+    fun XNextEvent(display: Pointer?, event: Pointer?): Int
+    fun XCreateGC(display: Pointer?, drawable: Long, valuemask: NativeLong, attrs: Pointer?): Pointer?
+    fun XCreateImage(
+        display: Pointer?,
+        visual: Pointer?,
+        depth: Int,
+        format: Int,
+        offset: Int,
+        data: Pointer?,
+        width: Int,
+        height: Int,
+        bitmapPad: Int,
+        bytesPerLine: Int,
+    ): Pointer?
+
+    /** 注意：XPutImage 沒有 plane_mask 參數（那是 XCopyPlane 的），多宣告一個會把呼叫弄歪。 */
+    fun XPutImage(
+        display: Pointer?,
+        drawable: Long,
+        gc: Pointer?,
+        image: Pointer?,
+        srcX: Int,
+        srcY: Int,
+        destX: Int,
+        destY: Int,
+        width: Int,
+        height: Int,
     ): Int
 }
 

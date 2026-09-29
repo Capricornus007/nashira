@@ -305,6 +305,12 @@ interface Strings {
      * formatDate 每種語法真的不同）；哪天要調語序，某個語言 override 即可。
      */
     fun audioDeviceDefaultNamed(name: String): String = "$audioDeviceDefault: $name"
+
+    /**
+     * 裝置清單裡標明「這一列就是系統預設那個裝置」。
+     * 清單不再同時出現「系統預設: X」與「X」兩列（用戶 2026-09-29 點名像壞掉）。
+     */
+    fun audioDeviceIsDefault(name: String): String = "$name ($audioDeviceDefault)"
     val trayOpen: String
     val trayQuit: String
     val jumpToLatest: String

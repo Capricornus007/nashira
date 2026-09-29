@@ -277,6 +277,7 @@ object EnStrings : Strings {
     override val audioInputDevice = "Input device (microphone)"
     override val audioOutputDevice = "Output device (speakers)"
     override val audioDeviceDefault = "System default"
+    override fun audioDeviceIsDefault(name: String) = "$name (system default)"
     override val trayOpen = "Open Nashira"
     override val trayQuit = "Quit"
     override val jumpToLatest = "Jump to latest"

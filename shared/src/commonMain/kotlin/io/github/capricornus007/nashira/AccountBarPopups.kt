@@ -235,13 +235,9 @@ fun AudioDevicePanel(
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                     ) {
                         Column {
-                            DeviceOptionRow(
-                                label = defaultText,
-                                selected = currentDevice == null,
-                            ) { if (isInput) ui.audioInput = null else ui.audioOutput = null }
-                            devices.forEach { device ->
-                                DeviceOptionRow(label = device.label, selected = currentDevice == device.id) {
-                                    if (isInput) ui.audioInput = device.id else ui.audioOutput = device.id
+                            audioDeviceOptions(strings, devices, defaultName).forEach { option ->
+                                DeviceOptionRow(label = option.label, selected = currentDevice == option.id) {
+                                    if (isInput) ui.audioInput = option.id else ui.audioOutput = option.id
                                 }
                             }
                         }
