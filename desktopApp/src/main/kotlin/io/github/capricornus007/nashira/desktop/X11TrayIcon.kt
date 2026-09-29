@@ -214,7 +214,6 @@ internal class X11TrayIcon private constructor(
                 if (event.getInt(OffFormat) != 32) return
                 if (event.getLong(OffData + 8L) != XembedEmbeddedNotify) return
                 isEmbedded = true
-                println("NASHIRA_TRAY: 已嵌入托盤 window=0x${window.toString(16)}")
                 selectEvents() // 嵌入式之後重選：見 selectEvents 的說明
                 // 被 reparent 進 socket 之後才 map；map 完 bar 才會開始要畫面
                 x11.XMapWindow(display, window)
@@ -299,7 +298,6 @@ internal class X11TrayIcon private constructor(
                 x11.XInternAtom(display, "_NET_SYSTEM_TRAY_S$screen", false),
             )
             if (owner == 0L) {
-                println("NASHIRA_TRAY: 這一瞬間沒有人擁有托盤（bar 正在重啟？）")
                 x11.XCloseDisplay(display)
                 return null
             }

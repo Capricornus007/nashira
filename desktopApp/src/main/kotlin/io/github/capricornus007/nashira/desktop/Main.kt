@@ -90,7 +90,6 @@ private fun fitTrayIcon(icon: java.awt.TrayIcon, src: java.awt.image.BufferedIma
     // 無條件舍去，不是四捨五入：湊整會畫得比畫布大（33/1.75→19→33.25px），
     // 多出來的那一點從右與下被裁掉，看上去就是圖貼到格子右下角。
     val side = (slotPx / scale).toInt().coerceIn(8, 64)
-    println("NASHIRA_TRAY: 退路（AWT）：那一格 ${slotPx}px、uiScale=$scale → 圖示出 $side px")
     java.awt.EventQueue.invokeLater {
         icon.isImageAutoSize = false
         icon.setImage(awtTrayImage(src, side))
@@ -302,16 +301,14 @@ fun main(args: Array<String>) {
                     var owner = watch.owner()
                     // 診斷：JNA 拿不到 X 連線時 owner() 回 -1，自癒條件永遠不成立，
                     // 必須看得見才發現（用戶 2026-09-29：圖示不見、log 卻一聲不響）。
-                    println("NASHIRA_TRAY: 啟動時托盤擁有者=$owner supported=${java.awt.SystemTray.isSupported()}")
-                    try {
+                        try {
                         while (true) {
                             if (!trayAttached) {
                                 val attached = runCatching {
                                     tray.add(trayIconAwt)
                                     true
                                 }.getOrDefault(false)
-                                println("NASHIRA_TRAY: add -> attached=$attached owner=${watch.owner()}")
-                                if (attached) {
+                                    if (attached) {
                                     trayAttached = true
                                     owner = watch.owner()
                                     // 掛上去之後才問得到那一格多大（socket 這時才存在）
