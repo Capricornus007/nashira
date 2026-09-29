@@ -1,5 +1,37 @@
 # Nashira 交接文檔
 
+更新：2026-09-29（本輪 0.1.25 → **0.1.26**）。
+
+## 本輪狀態：2026-09-29（0.1.26）
+
+- **主題顏色改成「色號制」**：`ThemeAccent` 16 色 enum 拿掉，改存 `accentHex`（`#RRGGBB`）。
+  色票 57 顆＝19 個色系 × HCT tone 30/50/70，**明度一律用 material-kolor 的 `TonalPalette` 算**，
+  不手寫色值。外加「自訂色號」輸入框（邊打邊套，格式不對只標紅）。舊的 `accent`=enum 名
+  在載入時經 `legacyAccentHex()` 轉成同一顆色，使用者的主題不會掉。
+  **踩過的坑**：`Color.value` 的 ARGB 在 ULong 的**高 32 位**，自己 `value and 0xFFFFFF` 永遠得 0
+  → 57 顆全變 `#000000`、`distinctBy` 去重後只剩一顆（用戶當場點名「才一顆」「刪了那麼多顏色」）。
+  一律走 `toArgb()`。
+- **外觀頁排版**：色票從「掛在頁面縮排上的裸 Column」放進 `SettingsGroup` 當一列，
+  與上方「主題模式」卡片同縮排（實測兩張卡都是 x=24..1096）。
+- **純黑（AMOLED）重調**：表面層級全部換成**中性灰階**（原本那批帶藍 cast 的黑壓在 #000 上像髒灰），
+  台階再壓淺一階（#0E/#15/#1D，實測聊天室清單原本是 #1C1C1C、被點名「太亮」）；
+  開關改用 MD3 標準 `primary/onPrimary`（暗金容器在純黑上發渾）；
+  左側首頁鈕不再鋪整塊實心金（「作為顏色本身就有點突兀」），三種主題統一改淡金底＋金色圖案。
+- **i18n 委派坑（重要）**：介面裡「有預設實作、又讀其他屬性」的 `fun`，在
+  `object JaStrings : Strings by EnStrings` 這種委派下會**在委派對象身上執行**，讀到的是
+  **那個語系**的值 → 簡中介面顯示繁中的「系統預設」。已把 `audioDeviceDefaultNamed`／
+  `audioDeviceIsDefault` 改成**各語系自己實作**（介面宣告為 abstract，並把原因寫在 KDoc）。
+- **簡體中文補全**：`ZhCnStrings` 從 49 鍵擴到 242 鍵（用詞依據 Element Web 官方簡中、AOSP、
+  CLDR／EmojiAll；**沒有用 opencc 這類機械轉換**）。
+- **托盤**：改原生 XEmbed 自繪 33×33 實體像素（AWT 的 `XTrayIconPeer` 在 uiScale=2 時只有 16px、
+  且 bar 重建後永不重嵌）；`TrayOwnerWatch` 監看 `_NET_SYSTEM_TRAY_S0` 擁有者變化自動重掛。
+- **開連結**：`openLink` 先走 `xdg-open`、失敗才退回 `Desktop.browse`（AWT 那條會靜默失敗）。
+- **未結案的已知項**：#62 打包改用 JBR 執行期＋`-Djb.awt.newXimClient.enabled=true`
+  （候選框跟光標**只有 JBR 做得到**，OpenJDK 不報光標位置；jlink 後 90MiB 已實啟動成功）；
+  #57 縮圖照實體像素要圖；#64 presence；#65 一鍵登出其他裝置；#66 發送前圖片確認框；#67 介面縮放。
+
+---
+
 更新：2026-09-25（上一版是 2026-09-24 導出、master @ `76fb1d4`；之後 70+ 筆提交的狀態這版已逐條對碼核過）。
 
 ## 本輪狀態：2026-09-25 第二批（0.1.15 → **0.1.16**）

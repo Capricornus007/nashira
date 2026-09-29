@@ -1,16 +1,11 @@
 package io.github.capricornus007.nashira
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -37,6 +32,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -352,6 +348,11 @@ private fun AppearancePage(onBack: () -> Unit) {
         // 桌面沒有桌布取色：動態顏色開關、調色盤樣式、顏色規格都不顯示；
         // 色票（手選強調色）兩邊都要有
         val dynamic = dynamicColorSupported && ui.dynamicColor
+        // 色票一律放進群組卡片當一列，不要再另外掛在頁面縮排上：先前那樣和上方
+        // 「主題模式」卡片左緣差 8dp，用戶 2026-09-29 兩輪點名「看起來依舊沒有對齊」。
+        // 色票本身跟 InstallerX Revived 一樣只在「動態顏色關閉時」出現：開了動態顏色
+        // 就一律取桌布色，手選色票沒有意義（實機對照 com.rosan.installer.x.revived
+        // 主題設定頁：動態顏色 ON → 主題顏色整段消失）。
         SettingsGroup(title = strings.themeColor) {
             if (dynamicColorSupported) {
                 item { shape ->
@@ -394,18 +395,16 @@ private fun AppearancePage(onBack: () -> Unit) {
                     }
                 }
             }
-        }
-        // 色票跟 InstallerX Revived 一樣是「動態顏色關閉時」才出現：開了動態顏色就
-        // 一律取桌布色，手選色票沒有意義（實機對照 com.rosan.installer.x.revived
-        // 主題設定頁：動態顏色 ON → 主題顏色整段消失）。
-        AnimatedVisibility(
-            visible = !dynamic,
-            enter = expandVertically() + fadeIn(),
-            exit = shrinkVertically() + fadeOut(),
-        ) {
-            Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(strings.themeColor, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-                AccentPicker(selected = ui.accent, language = ui.language, onSelect = { ui.accent = it })
+            if (!dynamic) item { shape ->
+                Surface(shape = shape, color = MaterialTheme.colorScheme.surfaceContainer) {
+                    Column(Modifier.padding(16.dp)) {
+                        AccentPicker(
+                            selectedHex = ui.accentHex,
+                            language = ui.language,
+                            onSelect = { ui.accentHex = it },
+                        )
+                    }
+                }
             }
         }
     }

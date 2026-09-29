@@ -91,20 +91,31 @@ internal val NashiraLightColors = lightColorScheme(
 )
 
 /**
- * 純黑（AMOLED）變體：深色板把背景/表面壓到真黑，容器層級換成黑階。
- * 以開關提供，不動品牌深色板的 #1F1E33 基底。
+ * 純黑（AMOLED）變體：把**主色**（品牌基底 #1F1E33 那層背景）壓成純黑，表面層級一律中性灰階（R=G=B）。
+ *
+ * 兩件事都是用戶 2026-09-29 點名後改的：
+ * 1. 不沿用品牌深藍紫那套帶藍 cast 的容器色——#12111C 壓在 #000000 上，藍味會被放大成「一層髒髒的灰」。
+ * 2. 台階壓得很淺（#0E/#15/#1D）：聊天室清單那整片用的是 surfaceContainerHigh，
+ *    原本給到 #1C1C1C，實測被他點名「我說太亮的是聊天室列表」。
+ *
+ * 強調色（設定頁上的「主題顏色」）不動——省電省在大面積背景，不在那幾千個點的顏色。
  */
 internal val NashiraPureBlackColors = NashiraDarkColors.copy(
     background = Color(0xFF000000),
+    onBackground = Color(0xFFEAEAEA),
     surface = Color(0xFF000000),
+    onSurface = Color(0xFFEAEAEA),
+    surfaceContainer = Color(0xFF0E0E0E),
+    surfaceContainerHigh = Color(0xFF151515),
+    surfaceContainerHighest = Color(0xFF1D1D1D),
+    surfaceContainerLow = Color(0xFF070707),
     surfaceContainerLowest = Color(0xFF000000),
-    surfaceContainerLow = Color(0xFF0B0A12),
-    surfaceContainer = Color(0xFF12111C),
-    surfaceContainerHigh = Color(0xFF191826),
-    surfaceContainerHighest = Color(0xFF1F1E30),
-    surfaceVariant = Color(0xFF262538),
     surfaceDim = Color(0xFF000000),
-    surfaceBright = Color(0xFF2E2D42),
+    surfaceBright = Color(0xFF2A2A2A),
+    surfaceVariant = Color(0xFF202020),
+    onSurfaceVariant = Color(0xFFB3B3B3),
+    outline = Color(0xFF8A8A8A),
+    outlineVariant = Color(0xFF3A3A3A),
 )
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)

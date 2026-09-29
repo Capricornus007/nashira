@@ -30,9 +30,10 @@ import io.github.capricornus007.nashira.theme.NashiraDarkColors
 import io.github.capricornus007.nashira.theme.NashiraLightColors
 import io.github.capricornus007.nashira.theme.NashiraPureBlackColors
 import io.github.capricornus007.nashira.theme.NashiraTheme
-import io.github.capricornus007.nashira.theme.ThemeAccent
 import io.github.capricornus007.nashira.theme.ThemeMode
 import io.github.capricornus007.nashira.theme.dynamicColorSupported
+import io.github.capricornus007.nashira.theme.legacyAccentHex
+import io.github.capricornus007.nashira.theme.parseAccentHex
 import io.github.capricornus007.nashira.theme.wallpaperSeedColor
 import io.github.capricornus007.nashira.i18n.stringsFor
 
@@ -66,7 +67,16 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
     /** Material You 配置（僅 Android 顯示；動態顏色開啟時以抽屜動畫展開） */
     var paletteStyle by mutableStateOf(stored.enumOr("paletteStyle", PaletteStyle.Expressive))
     var specVersion by mutableStateOf(stored.enumOr("specVersion", ColorSpec.SpecVersion.SPEC_2025))
-    var accent by mutableStateOf(stored["accent"]?.let { name -> ThemeAccent.entries.firstOrNull { it.name == name } })
+    /**
+     * 手選強調色，存成 `#RRGGBB`；null＝預設（動態取色或品牌 Arcaea 色板）。
+     * 色票圓點與「自己打色號」寫的是同一個欄位，所以不必兩套狀態再比較誰優先。
+     * 舊版存的是 `accent`（色系 enum 名），載入時轉換成同一顆色。
+     */
+    var accentHex by mutableStateOf(
+        // 「有這個鍵」就代表新格式（空字串＝預設），沒有才退回舊的色系名
+        if ("accentHex" in stored) stored["accentHex"]?.takeIf { parseAccentHex(it) != null }
+        else legacyAccentHex(stored["accent"]),
+    )
     var spaceIconMode by mutableStateOf(stored.enumOr("spaceIconMode", SpaceIconMode.ROOM_PREVIEWS))
 
     /** 聊天室列表與 Space 圖示上的未讀提示（白條／紅圈數字） */
@@ -193,6 +203,7 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
             "dynamicColor" to dynamicColor.toString(),
             "paletteStyle" to paletteStyle.name,
             "specVersion" to specVersion.name,
+            "accentHex" to (accentHex ?: ""),
             "spaceIconMode" to spaceIconMode.name,
             "showUnreadIndicators" to showUnreadIndicators.toString(),
             "showMessagePreview" to showMessagePreview.toString(),
@@ -211,7 +222,7 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
             "audioOutputVolume" to audioOutputVolume.toString(),
             "audioMicMuted" to audioMicMuted.toString(),
             "audioPlaybackMuted" to audioPlaybackMuted.toString(),
-        ) + (accent?.let { mapOf("accent" to it.name) } ?: emptyMap())
+        )
         if (snapshot == lastPersisted) return
         lastPersisted = snapshot
         runCatching { storage.save(snapshot) }
@@ -245,7 +256,7 @@ fun rememberNashiraColorScheme(defaultDark: Boolean? = null): ColorScheme {
     //   動態顏色 OFF → 手選色票；沒選就是 null，落回品牌 Arcaea 色板（＝色票裡的「預設」）
     // 桌面沒有桌布取色（dynamicColorSupported=false），一律走色票這條。
     val dynamic = dynamicColorSupported && ui.dynamicColor
-    val seed = if (dynamic) wallpaperSeedColor(enabled = true) else ui.accent?.color
+    val seed = if (dynamic) wallpaperSeedColor(enabled = true) else ui.accentHex?.let { parseAccentHex(it) }
     val generated = rememberDynamicColorScheme(
         seedColor = seed ?: androidx.compose.ui.graphics.Color(0xFF1F1E33),
         isDark = dark,

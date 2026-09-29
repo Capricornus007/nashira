@@ -690,15 +690,24 @@ private fun ServerRail(
         ) {
             item {
                 RailSlot(selected = selectedSpace == null, unread = homeUnread, onClick = { onSelectSpace(null) }) { shape ->
+                    val homeSelected = selectedSpace == null
+                    // 選中不鋪整塊實心金：那顆方塊是整個畫面最大的一片發光面積，
+                    // 用戶 2026-09-29 直接說「作為顏色本身就有點突兀」。
+                    // 改成淡金底＋金色圖案（三種主題一致），保留「選中＝跟品牌色有關」的暗示。
+                    val homeFill = if (homeSelected) {
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.20f)
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainerHigh
+                    }
                     Box(
                         Modifier.size(RailIconSize).clip(shape)
-                            .background(if (selectedSpace == null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh),
+                            .background(homeFill),
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
                             Icons.Filled.Home,
                             contentDescription = null,
-                            tint = if (selectedSpace == null) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = if (homeSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(22.dp),
                         )
                     }

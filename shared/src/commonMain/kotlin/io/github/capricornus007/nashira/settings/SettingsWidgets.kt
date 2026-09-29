@@ -208,9 +208,12 @@ fun SettingsSwitchItem(
                     )
                 },
                 colors = SwitchDefaults.colors(
-                    checkedTrackColor = MaterialTheme.colorScheme.primaryContainer,
-                    checkedThumbColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    checkedIconColor = MaterialTheme.colorScheme.primaryContainer,
+                    // 用 primary／onPrimary（MD3 開關的標準配色），不要 primaryContainer：
+                    // 暗金容器在深藍紫底上剛好，壓到純黑就變成一塊發渾的橄欖色
+                    // （用戶 2026-09-29 點名 AMOLED 下的開關不對）
+                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                    checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                    checkedIconColor = MaterialTheme.colorScheme.primary,
                     uncheckedTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                     uncheckedThumbColor = MaterialTheme.colorScheme.outline,
                     uncheckedIconColor = MaterialTheme.colorScheme.surfaceContainerHighest,

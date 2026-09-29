@@ -112,6 +112,8 @@ interface Strings {
     val specExpressive: String
     val themeColor: String
     val themeColorDefault: String
+    val customColor: String
+    val customColorInvalid: String
     val spaceIconMode: String
     val spaceAvatar: String
     val spaceRoomAvatars: String
@@ -301,16 +303,21 @@ interface Strings {
     val audioDeviceDefault: String
     /**
      * 「系統預設: <裝置名>」——Discord 的寫法，一眼看出預設其實落在哪個裝置。
-     * 六種語言都是「<標籤>: <名字>」同一個順序，所以給預設實作就好（不像
-     * formatDate 每種語法真的不同）；哪天要調語序，某個語言 override 即可。
+     *
+     * **刻意不給預設實作**：JaStrings/KoStrings/ZhCnStrings/ZhHkStrings 都是
+     * `Strings by 別的物件`，介面裡的預設實作會被委派到那個物件身上執行，
+     * 裡面讀到的 `audioDeviceDefault` 就是**它的**值而不是覆寫後的值
+     * （實測：簡中介面顯示成繁中的「系統預設」，用戶 2026-09-29 點名）。
+     * 所以要每個語系自己寫一行，新加這種「讀別的屬性」的函式也照這個做法。
      */
-    fun audioDeviceDefaultNamed(name: String): String = "$audioDeviceDefault: $name"
+    fun audioDeviceDefaultNamed(name: String): String
 
     /**
      * 裝置清單裡標明「這一列就是系統預設那個裝置」。
      * 清單不再同時出現「系統預設: X」與「X」兩列（用戶 2026-09-29 點名像壞掉）。
+     * 同上：不用預設實作，避免被 `by` 委派綁到別的語系。
      */
-    fun audioDeviceIsDefault(name: String): String = "$name ($audioDeviceDefault)"
+    fun audioDeviceIsDefault(name: String): String
     val trayOpen: String
     val trayQuit: String
     val jumpToLatest: String
