@@ -187,7 +187,7 @@ fun AudioDevicePanel(
                         Text(
                             if (isInput) strings.audioInputDevice else strings.audioOutputDevice,
                             style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold,
+                            fontWeight = FontWeight.Medium,
                             color = MaterialTheme.colorScheme.onSurface,
                         )
                         Text(
@@ -226,7 +226,7 @@ fun AudioDevicePanel(
                     Text(
                         "${if (isInput) strings.inputVolume else strings.outputVolume}  $volume%",
                         style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
+                        fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Slider(

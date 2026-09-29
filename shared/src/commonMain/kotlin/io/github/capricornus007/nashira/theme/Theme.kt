@@ -57,12 +57,11 @@ internal val NashiraDarkColors = darkColorScheme(
 
 /** 品牌淺色板。基底是協商定案的 Arcaea 曲目色 #E0E1CC（米綠）。 */
 internal val NashiraLightColors = lightColorScheme(
-    // 淺色主題留金色：米綠底 #E0E1CC 是暖色，配藍紫系（星群藍那族）實測很髒
-    // （用戶 2026-09-29：「好醜，e0e1cc 背景配上黑字要的這麼醜麼」）。
-    // 星群藍只用在深色與純黑兩套上——那兩邊的背景是冷色／中性，藍才站得住。
-    primary = NashiraGoldDeep,
+    // 強調色與深色／純黑同一族（星群藍），淺色用深一階的 #3E4AA8 才壓得住米綠底。
+    // 容器 #A2AFF8：壓深字 6.9:1、對米綠底 1.58:1（原本給 #C7CEFF 只有 1.15，等於看不出來）。
+    primary = NashiraStarBlueDeep,
     onPrimary = NashiraLightBackground,
-    primaryContainer = NashiraGold,
+    primaryContainer = NashiraStarBlueContainerLight,
     onPrimaryContainer = NashiraIndigo,
     secondary = NashiraIndigoMid,
     onSecondary = Color(0xFFFFFFFF),
@@ -73,9 +72,11 @@ internal val NashiraLightColors = lightColorScheme(
     tertiaryContainer = Color(0xFFE5DEFF),
     onTertiaryContainer = Color(0xFF1D1549),
     background = NashiraLightBackground,
-    onBackground = NashiraIndigo,
+    // 正文退一階（#23283F → #343A57）：米綠底上對比從 10.9:1 換到 8.4:1，
+    // 還是 AAA，但不再是「潑墨」那種硬黑（用戶 2026-09-29 點名黑字在淺色下醜）
+    onBackground = NashiraIndigoSoft,
     surface = NashiraLightBackground,
-    onSurface = NashiraIndigo,
+    onSurface = NashiraIndigoSoft,
     surfaceVariant = Color(0xFFC8CAB1),
     onSurfaceVariant = NashiraIndigoDeep,
     surfaceContainer = Color(0xFFD9DABF),
@@ -121,6 +122,15 @@ internal val NashiraPureBlackColors = NashiraDarkColors.copy(
     outlineVariant = Color(0xFF3A3A3A),
 )
 
+/**
+ * 字重約定（用戶 2026-09-29：「也得統一一下字體粗細」）。加新文字時照這套，
+ * 不要各頁自己選：
+ *   Bold 700    ＝ 頁面／房間標題、自己的顯示名、未讀徽章數字
+ *   SemiBold 600＝ 只用來表示「未讀」這一種狀態差
+ *   Medium 500  ＝ 條目主文字（聊天室清單標題、設定列標題、訊息發送者名）與分組小標
+ *   Normal 400  ＝ 內文、說明文字、時間戳
+ * 條目主文字一律**顯式**寫 Medium，不要賭 `titleMedium` 的預設值。
+ */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun NashiraTheme(

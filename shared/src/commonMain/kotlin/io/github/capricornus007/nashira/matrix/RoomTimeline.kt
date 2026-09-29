@@ -55,6 +55,12 @@ class RoomTimeline(
     private val pinned = RoomRepository(client).pinnedEvents(roomId)
 
     private val initState = MutableStateFlow(false)
+    /**
+     * 成員表的當下值。本機回顯（outbox）那條路徑拿不到 `pageFlow()` combine 進來的
+     * members，但自己剛發出去的訊息最該顯示自己的暱稱——寫成 localpart 會讓它看起來
+     * 像別人發的（用戶 2026-09-29 點名「為什麼發送的時候要變原來昵稱」）。
+     */
+    private val latestMembers = MutableStateFlow<Map<UserId, RoomUser>>(emptyMap())
     private val loadingBefore = MutableStateFlow(false)
 
     suspend fun init(startFrom: EventId) {
@@ -140,6 +146,7 @@ class RoomTimeline(
                 // 一條事件流。整份materialize 會把整個房間歷史留在堆積裡——治理房或
                 // 幾乎沒有訊息的房間（自動往前翻）實測會撐到 255MB/256MB 然後 OOM。
                 val windowed = state.elements.takeLast(TimelineWindowSize)
+                latestMembers.value = members
                 // 先把每條事件流取到當下值：反應要先掃一遍才知道哪則訊息掛了哪些反應
                 val events = windowed.map { eventFlow -> eventFlow.first() }
                 val reactions = aggregateReactions(events)
@@ -195,12 +202,17 @@ class RoomTimeline(
                 else -> null
             }
             ?: return null
+        // 自己的暱稱與頭像照樣從成員表取，取不到才退回 localpart：
+        // 之前這裡直接寫 localpart，剛發出去的訊息頭上掛的是 ID 而不是暱稱
+        val me = client.userId
+        val meMember = latestMembers.value[me]
         return TimelineMessage(
             eventId = null,
             roomId = roomId,
             sender = client.userId,
-            senderName = client.userId.full.removePrefix("@").substringBefore(':'),
-            senderAvatarUrl = null,
+            senderName = meMember?.name.visibleNameOrNull()
+                ?: me.full.removePrefix("@").substringBefore(':'),
+            senderAvatarUrl = meMember?.event?.content?.avatarUrl,
             body = body,
             timestamp = outbox.createdAt.toEpochMilliseconds(),
             pending = true,

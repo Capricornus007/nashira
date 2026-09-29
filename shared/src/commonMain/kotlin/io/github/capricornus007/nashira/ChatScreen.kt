@@ -1270,7 +1270,7 @@ private fun RoomListItem(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = if (unread.unread || room.isInvite) FontWeight.SemiBold else FontWeight.Normal,
+                        fontWeight = if (unread.unread || room.isInvite) FontWeight.SemiBold else FontWeight.Medium,
                         color = if (unread.unread || room.isInvite) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f),
                     )
@@ -3378,7 +3378,7 @@ private fun MessageRow(
                         Text(
                             msg.senderName,
                             style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
+                            fontWeight = FontWeight.Medium,
                             color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
