@@ -4001,7 +4001,10 @@ private fun CodeBlockBubble(code: String, copyLabel: String) {
                 IconButton(
                     onClick = { clipboard.setText(AnnotatedString(code)) },
                     modifier = Modifier
-                        .align(Alignment.TopEnd)
+                        // 放右下而不是右上：懸停時那顆「表情／回覆／更多」膠囊錨在整則訊息的
+                        // 右上角，複製鈕若也釘右上就會被它整個蓋住（用戶 2026-09-29 截圖）。
+                        .align(Alignment.BottomEnd)
+                        .padding(4.dp)
                         .size(26.dp)
                         .background(
                             MaterialTheme.colorScheme.surfaceContainerHighest,
@@ -4056,12 +4059,24 @@ private fun EmoticonInline(
 
 private fun MessageBody.previewText(strings: io.github.capricornus007.nashira.i18n.Strings): String =
     when (this) {
-        is MessageBody.Text -> text
+        is MessageBody.Text -> text.oneLinePreview()
         is MessageBody.Image -> if (isSticker) strings.stickerMessage else strings.imageMessage
         is MessageBody.Voice -> strings.voiceMessage
         is MessageBody.Attachment -> name
         MessageBody.Undecryptable -> strings.undecryptable
     }
+
+/**
+ * 清單預覽只有一行，而程式碼塊的原始 body 第一行就是 ``` 圍欄——照原樣顯示的話，
+ * 外面那條只能看到三個反引號（用戶 2026-09-29 截圖）。圍欄行丟掉、換行壓成空格，
+ * 露出的才是真正的程式碼內容。
+ */
+private fun String.oneLinePreview(): String =
+    lineSequence()
+        .filterNot { it.trimStart().startsWith("```") }
+        .joinToString(" ") { it.trim() }
+        .replace(Regex("\\s+"), " ")
+        .trim()
 
 /** P5-3：訊息內連結的 og 預覽卡（抓不到就不顯示，不佔位）。 */
 @Composable

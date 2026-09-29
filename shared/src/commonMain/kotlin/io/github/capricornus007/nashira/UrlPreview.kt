@@ -69,9 +69,22 @@ fun urlsInMessage(formattedBody: String?, plainBody: String): List<String> {
     val haystack = formattedBody?.replace(MxReplyBlockRegex, "") ?: plainBody
     return URL_REGEX.findAll(haystack)
         .map { it.value.trimEnd(',', '.', ';', ':', '!', '?') }
+        .filterNot { isSelfPlatformUrl(it) }
         .distinct()
         .take(3)
         .toList()
+}
+
+/**
+ * 自己平台的連結不掛卡。matrix.to 的房間／使用者連結在訊息裡就是
+ * `https://matrix.to/#/#room:server`，抓下去拿到的 og 是 matrix.to 首頁那套
+ * 「Matrix – Decentralised and secure communication / You're invited to talk…」
+ * 宣傳文案——那不是這則訊息的預覽，是廣告（用戶 2026-09-29 截圖點名）。
+ * 連結照樣可點，只是不另外掛卡。
+ */
+private fun isSelfPlatformUrl(url: String): Boolean {
+    val host = url.substringAfter("://", "").substringBefore("/", "").lowercase()
+    return host == "matrix.to" || host == "www.matrix.to" || host == "app.element.io"
 }
 
 /**

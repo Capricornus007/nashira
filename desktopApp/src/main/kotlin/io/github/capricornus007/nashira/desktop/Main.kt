@@ -43,6 +43,30 @@ import io.github.capricornus007.nashira.DesktopNotifications
 import io.github.capricornus007.nashira.DesktopSingleInstance
 import kotlin.math.roundToInt
 
+// 托盤選單的「第一幀」估計尺寸：真實尺寸由內容量出來，這裡只求初始窗口不要太離譜。
+private const val TRAY_MENU_EST_W = 200
+private const val TRAY_MENU_EST_H = 118
+
+// 選單右緣對到滑標右邊一點。錨點必須是右緣：托盤圖示在螢幕最右，
+// 用「滑標 - 估計寬」算 x、之後再把窗口收成真實寬，就會整塊偏到圖示左邊
+//（用戶 2026-09-29 照片：選單開在後臺圖示左側很遠處）。
+private const val TRAY_MENU_RIGHT_PAD = 8
+private const val TRAY_MENU_GAP = 6
+
+/** 選單 x：右緣貼滑標，並夾在螢幕內。單位是 AWT 使用者空間（本機 = 實體 / 2）。 */
+private fun trayMenuX(pointerX: Int, menuWidth: Int, screenWidth: Int): Int =
+    (pointerX + TRAY_MENU_RIGHT_PAD - menuWidth).coerceIn(
+        0,
+        (screenWidth - menuWidth).coerceAtLeast(0),
+    )
+
+/** 選單 y：托盤在螢幕上半部就往下長，在下半部才往上長。 */
+private fun trayMenuY(pointerY: Int, menuHeight: Int, screenHeight: Int): Int {
+    val below = pointerY < screenHeight / 2
+    val y = if (below) pointerY + TRAY_MENU_GAP else pointerY - menuHeight - TRAY_MENU_GAP
+    return y.coerceIn(0, (screenHeight - menuHeight).coerceAtLeast(0))
+}
+
 @OptIn(ExperimentalComposeUiApi::class)
 fun main(args: Array<String>) {
     // AWT 字體渲染優化：LCD 子像素抗鋸齒（預設灰階在深色主題下像「關閉優化的 Windows」）
@@ -193,15 +217,10 @@ fun main(args: Array<String>) {
                 // （=400 實體像素）去 setBounds，選單直接大两倍。
                 // 而 Compose 的邏輯 dp 與 AWT 使用者空間在本機是同一個尺度（都 = 實體/2），
                 // 所以 dp 數字原樣傳給 AWT 就對了。
-                val menuW = 200
-                val menuH = 118
                 val scr = java.awt.Toolkit.getDefaultToolkit().screenSize
-                val menuX = (trayMenuScreenPos.x - menuW + 8).coerceIn(0, (scr.width - menuW).coerceAtLeast(0))
+                val menuX = trayMenuX(trayMenuScreenPos.x, TRAY_MENU_EST_W, scr.width)
                 // 托盤在螢幕上半部 → 選單往下長；在下半部才往上長
-                val menuY = (
-                    if (trayMenuScreenPos.y < scr.height / 2) trayMenuScreenPos.y + 6
-                    else trayMenuScreenPos.y - menuH - 6
-                ).coerceIn(0, (scr.height - menuH).coerceAtLeast(0))
+                val menuY = trayMenuY(trayMenuScreenPos.y, TRAY_MENU_EST_H, scr.height)
                 SwingWindow(
                     create = {
                         // ComposeWindow 是 final，繼承不了；但 `create` 給的就是
@@ -213,7 +232,7 @@ fun main(args: Array<String>) {
                             isUndecorated = true
                             type = java.awt.Window.Type.POPUP
                             isResizable = false
-                            setBounds(menuX, menuY, menuW, menuH)
+                            setBounds(menuX, menuY, TRAY_MENU_EST_W, TRAY_MENU_EST_H)
                         }
                     },
                     dispose = { it.dispose() },
@@ -240,9 +259,14 @@ fun main(args: Array<String>) {
                         LaunchedEffect(contentSize) {
                             val w = (contentSize.width / density.density).roundToInt()
                             val h = (contentSize.height / density.density).roundToInt()
-                            if (w > 0 && h > 0 && (w != window.width || h != window.height)) {
-                                window.setSize(w, h)
-                            }
+                            if (w <= 0 || h <= 0) return@LaunchedEffect
+                            // 量到真實寬高之後必須連 x/y 一起重算：只 setSize 不移窗口，
+                            // 窗口左上角還是用估計寬 200 算出來的，選單就偏到圖示左邊。
+                            val scr = java.awt.Toolkit.getDefaultToolkit().screenSize
+                            val x = trayMenuX(trayMenuScreenPos.x, w, scr.width)
+                            val y = trayMenuY(trayMenuScreenPos.y, h, scr.height)
+                            if (w != window.width || h != window.height) window.setSize(w, h)
+                            if (x != window.x || y != window.y) window.setLocation(x, y)
                         }
                         Surface(
                             modifier = Modifier
