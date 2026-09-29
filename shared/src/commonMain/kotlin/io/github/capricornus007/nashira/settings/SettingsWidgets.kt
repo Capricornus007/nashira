@@ -130,7 +130,7 @@ fun SettingsItem(
     // 條目主文字一律 Medium，寫死而不是靠 titleMedium 的預設值：
     // 聊天室清單標題、訊息發送者名都是自訂 Medium，這裡留預設就會一頁一個粗細
     val headline: @Composable () -> Unit = {
-        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
+        Text(title, style = MaterialTheme.typography.titleMedium)
     }
     if (onClick != null) {
         ListItem(

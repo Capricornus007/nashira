@@ -1270,7 +1270,7 @@ private fun RoomListItem(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = if (unread.unread || room.isInvite) FontWeight.SemiBold else FontWeight.Medium,
+                        fontWeight = if (unread.unread || room.isInvite) FontWeight.Bold else FontWeight.Normal,
                         color = if (unread.unread || room.isInvite) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f),
                     )

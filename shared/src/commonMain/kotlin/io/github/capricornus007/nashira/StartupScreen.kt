@@ -59,7 +59,6 @@ fun StartupScreen(message: String? = null) {
             Text(
                 message ?: strings.restoringSession,
                 style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
                 color = MaterialTheme.colorScheme.onSurface,
             )
         }
