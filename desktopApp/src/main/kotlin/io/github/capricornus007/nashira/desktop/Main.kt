@@ -41,6 +41,7 @@ import androidx.compose.runtime.snapshotFlow
 import io.github.capricornus007.nashira.AppNotifications
 import io.github.capricornus007.nashira.DesktopNotifications
 import io.github.capricornus007.nashira.DesktopSingleInstance
+import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
 // 托盤選單的「第一幀」估計尺寸：真實尺寸由內容量出來，這裡只求初始窗口不要太離譜。
@@ -65,6 +66,24 @@ private fun trayMenuY(pointerY: Int, menuHeight: Int, screenHeight: Int): Int {
     val below = pointerY < screenHeight / 2
     val y = if (below) pointerY + TRAY_MENU_GAP else pointerY - menuHeight - TRAY_MENU_GAP
     return y.coerceIn(0, (screenHeight - menuHeight).coerceAtLeast(0))
+}
+
+/** 雙線性重繪到指定尺寸（托盤圖示要照槽的实际大小給圖，交給 AWT 自己縮會偏位）。 */
+private fun scaleImage(
+    src: java.awt.image.BufferedImage,
+    width: Int,
+    height: Int,
+): java.awt.image.BufferedImage {
+    val out = java.awt.image.BufferedImage(width, height, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+    val g = out.createGraphics()
+    g.setRenderingHint(
+        java.awt.RenderingHints.KEY_INTERPOLATION,
+        java.awt.RenderingHints.VALUE_INTERPOLATION_BILINEAR,
+    )
+    g.setRenderingHint(java.awt.RenderingHints.KEY_RENDERING, java.awt.RenderingHints.VALUE_RENDER_QUALITY)
+    g.drawImage(src, 0, 0, width, height, null)
+    g.dispose()
+    return out
 }
 
 @OptIn(ExperimentalComposeUiApi::class)
@@ -177,6 +196,26 @@ fun main(args: Array<String>) {
             // 右鍵時記錄鼠標位置：菜單錨在托盤圖示上方（PlatformDefault 在
             // bspwm 會把窗口丟到屏幕頂部，2026-09-14 用戶截圖回報位置錯）。
             var trayMenuScreenPos by remember { mutableStateOf(java.awt.Point(0, 0)) }
+            // 托盤槽的尺寸由 bar 決定（這臺 i3bar 是 33x33 實體），AWT 只按自己那套
+            // 「使用者空間」畫，圖與槽對不上時圖就被塞在槽的角落而不是置中
+            //（用戶 2026-09-29：「托盤圖標依舊偏右下角」）。嵌入完成後把實際 bounds
+            // 讀回來，照那個尺寸重畫一張再 setImage——尺寸對上了就沒有偏移可留。
+            LaunchedEffect(trayIconAwt) {
+                val src = trayImage ?: return@LaunchedEffect
+                var settled = false
+                repeat(10) {
+                    if (settled) return@repeat
+                    delay(300L)
+                    val slot: java.awt.Dimension =
+                        runCatching { trayIconAwt.getSize() }.getOrNull() ?: return@repeat
+                    if (slot.width <= 0 || slot.height <= 0) return@repeat
+                    if (slot.width != src.width || slot.height != src.height) {
+                        println("NASHIRA_TRAY: slot=${slot.width}x${slot.height} image=${src.width}x${src.height}")
+                        runCatching { trayIconAwt.setImage(scaleImage(src, slot.width, slot.height)) }
+                    }
+                    settled = true
+                }
+            }
             // 監聽器與托盤註冊都收進 DisposableEffect：原本兩行直接寫在 Composable 本體，
             // **每次重組就再 add 一次**——托盤被右鍵疊成一排、一次右鍵同時觸發好幾個監聽器
             // （用戶 2026-09-25 照片）。一進一出，離開時也把圖示拿掉，不留孤兒。
