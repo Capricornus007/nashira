@@ -6,22 +6,27 @@ import java.net.URI
 /**
  * 開外部連結。
  *
- * 只走 AWT 的 `Desktop.browse` 會「第二次點沒反應」：它內部只起一個桌面整合輔助
- * 流程，失敗時丟 IOException，而我們原本連都沒接、也沒備援 → 點了什麼都沒發生，
- * 也查不出原因（用戶 2026-09-29 在「帳戶與安全性」連點登出連結時點名）。
- * 這裡改成：先問 Desktop，不行（或丟例外）就直接叫 `xdg-open`，兩條路都失敗才留一行 log。
+ * Linux 上先走 `xdg-open`：AWT 的 `Desktop.browse` 只有「第一次」開得起來——它成功時
+ * 也不會回報「瀏覽器其實沒開新分頁」，所以拿它當主路徑時，第二次的點擊會靜默無效
+ * （用戶 2026-09-29 兩輪點名，並說明不是連點才觸發）。`xdg-open` 是桌面環境自己那套
+ * 預設程式入口，Qt/GTK 應用實際用的也是它，所以放前面；`Desktop.browse` 留當備援
+ * （沒有 xdg-open 的極精簡環境）。
  */
 actual fun openLink(url: String) {
     val uri = runCatching { URI(url) }.getOrNull() ?: return
+    if (runXdgOpen(uri.toString())) return
     if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
-        runCatching { Desktop.getDesktop().browse(uri) }.onSuccess { return }
+        runCatching { Desktop.getDesktop().browse(uri) }.onFailure {
+            println("NASHIRA_OPENLINK: 開不了 $url（${it::class.simpleName} ${it.message}）")
+        }
+        return
     }
-    runCatching {
-            ProcessBuilder("xdg-open", uri.toString()).redirectErrorStream(true).start().let { process ->
-                // 吃掉結束、別擋著呼叫端（點擊常常在 EDT 上）
-                Thread { runCatching { process.waitFor() } }.apply { isDaemon = true }.start()
-            }
-    }.onFailure {
-        println("NASHIRA_OPENLINK: 開不了 $url（${it::class.simpleName} ${it.message}）")
-    }
+    println("NASHIRA_OPENLINK: 開不了 $url（沒有 xdg-open，也不支援 Desktop.browse）")
 }
+
+/** 起來 xdg-open 就回 true；非阻塞——點擊常常在 EDT 上，不能等瀏覽器。 */
+private fun runXdgOpen(url: String): Boolean = runCatching {
+    val process = ProcessBuilder("xdg-open", url).redirectErrorStream(true).start()
+    Thread { runCatching { process.waitFor() } }.apply { isDaemon = true }.start()
+    true
+}.getOrDefault(false)

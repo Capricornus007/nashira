@@ -235,14 +235,6 @@ fun SecurityAndAccountScreen(
                     onClick = avatarPicker ?: {},
                 )
             }
-            item { shape ->
-                SettingsItem(
-                    shape = shape,
-                    icon = Icons.Filled.Lock,
-                    title = strings.deviceId,
-                    description = session.client.deviceId,
-                )
-            }
         }
 
         SelfVerificationSection(

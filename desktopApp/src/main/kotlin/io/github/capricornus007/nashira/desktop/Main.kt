@@ -25,9 +25,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.clickable
 import io.github.capricornus007.nashira.LocalUiState
@@ -434,17 +434,23 @@ fun main(args: Array<String>) {
                             if (w != window.width || h != window.height) window.setSize(w, h)
                             if (x != window.x || y != window.y) window.setLocation(x, y)
                         }
+                        // Surface 一定要 fillMaxSize：窗口寬高是「內容實體 px ÷ 縮放」取整數，
+                        // 兩邊一定差不到 1px。若 Surface 只包內容大小，那條縫露出的是 Skia
+                        // 面板自己的底（塗窗口背景色沒用），就是用戶點了幾輪的「右鍵選單右側白線」。
+                        // 改成填滿整個窗口後，多出來的那一點是同一個底色，看不見。
                         Surface(
-                            modifier = Modifier
-                                .wrapContentSize()
-                                .onSizeChanged { contentSize = it },
+                            modifier = Modifier.fillMaxSize(),
                             color = MaterialTheme.colorScheme.surfaceContainerHigh,
                         ) {
                             // 條目用 fillMaxWidth 填的是「窗口寬」（200），所以右側永遠掛一片
                             // 空白。Column 先按最長那條文字收緊，fillMaxWidth 填的才是內容寬。
                             // 注意要用 IntrinsicSize.**Max**：Min 會收到「最長那個詞」，
                             //「開啟 Nashira」就被掰成兩行（用戶 2026-09-29 照片）。
-                            Column(modifier = Modifier.width(IntrinsicSize.Max)) {
+                            Column(
+                                modifier = Modifier
+                                    .width(IntrinsicSize.Max)
+                                    .onSizeChanged { contentSize = it },
+                            ) {
                                 Text(
                                     strings.trayOpen,
                                     Modifier

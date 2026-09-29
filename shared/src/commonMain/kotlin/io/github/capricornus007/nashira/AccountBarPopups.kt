@@ -93,34 +93,12 @@ fun ProfilePopup(
             modifier = Modifier.width(300.dp),
         ) {
             Column {
-                // 橫幅：Arcaea 品牌漸層（深空藍 → 金）
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(84.dp)
-                        .background(
-                            Brush.linearGradient(
-                                listOf(Color(0xFF1F1E33), NashiraGold.copy(alpha = 0.75f)),
-                            ),
-                        ),
-                )
-                Column(Modifier.padding(horizontal = 16.dp)) {
-                    // 頭像疊在橫幅上（往上偏移半顆）＋線上綠點
-                    Box(Modifier.offset(y = (-42).dp)) {
-                        Box {
-                            AvatarImage(client, profile?.avatarUrl, displayName, Modifier.size(80.dp).clip(CircleShape))
-                            Box(
-                                Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .size(20.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF23A55A))
-                                    .padding(4.dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh),
-                            )
-                        }
-                    }
+                // 原本這裡有一條 84dp 的品牌漸層橫幅，頭像右下還釘一顆**永遠綠**的點。
+                // 兩個都是「別家沒有的東西」：橫幅背後沒有任何資料（Matrix 沒有自訂大橫幅），
+                // 綠點更不是在線狀態（我們根本沒接 presence），用戶 2026-09-29 點名「莫名其妙的
+                // 漸變背景跟頭像右下角的綠色」。改成：頭像直接擺在卡片上，不騙人有狀態。
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                    AvatarImage(client, profile?.avatarUrl, displayName, Modifier.size(64.dp).clip(CircleShape))
                     Spacer(Modifier.height(4.dp))
                     Text(
                         displayName,
