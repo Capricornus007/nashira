@@ -122,6 +122,8 @@ object KoStrings : Strings by EnStrings {
     override val backgroundSyncHint = "연결을 유지해 백그라운드에서도 알림을 받습니다"
     override val actionReply = "답장"
     override val actionCopyText = "텍스트 복사"
+    override val actionResendPending = "재전송"
+    override val actionDropPending = "삭제"
     override val actionCopyLink = "메시지 링크 복사"
     override val actionDelete = "메시지 삭제"
     override val actionSelectMessages = "메시지 선택"

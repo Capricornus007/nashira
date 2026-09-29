@@ -179,6 +179,8 @@ object EnStrings : Strings {
     override val backgroundSyncHint = "Keeps the connection open so notifications arrive in the background"
     override val actionReply = "Reply"
     override val actionCopyText = "Copy text"
+    override val actionResendPending = "Resend"
+    override val actionDropPending = "Delete"
     override val actionCopyLink = "Copy message link"
     override val actionDelete = "Remove message"
     override val actionSelectMessages = "Select messages"

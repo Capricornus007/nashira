@@ -122,6 +122,8 @@ object JaStrings : Strings by EnStrings {
     override val backgroundSyncHint = "接続を維持して、バックグラウンドでも通知を受け取る"
     override val actionReply = "返信"
     override val actionCopyText = "テキストをコピー"
+    override val actionResendPending = "再送信"
+    override val actionDropPending = "削除"
     override val actionCopyLink = "メッセージのリンクをコピー"
     override val actionDelete = "メッセージを削除"
     override val actionSelectMessages = "メッセージを選択"

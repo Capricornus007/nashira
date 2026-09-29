@@ -141,6 +141,8 @@ interface Strings {
     val backgroundSyncHint: String
     val actionReply: String
     val actionCopyText: String
+    val actionResendPending: String
+    val actionDropPending: String
     val actionCopyLink: String
     val actionDelete: String
     val actionSelectMessages: String

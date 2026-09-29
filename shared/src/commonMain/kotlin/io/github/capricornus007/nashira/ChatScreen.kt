@@ -2669,6 +2669,20 @@ private fun TimelinePane(
                             }
                         },
                         onReply = { replyTo = msg },
+                        onResendPending = {
+                            val text = msg.body as? MessageBody.Text ?: return@MessageRow
+                            val tx = msg.outboxTransactionId
+                            scope.launch {
+                                roomRepository.sendText(msg.roomId, text.text, text.formattedBody)
+                                // 重發成功後把卡住的那筆清掉，否則時間線會同時出現兩則
+                                tx?.let { roomRepository.dropPendingMessage(msg.roomId, it) }
+                            }
+                        },
+                        onDropPending = {
+                            msg.outboxTransactionId?.let { tx ->
+                                scope.launch { roomRepository.dropPendingMessage(msg.roomId, tx) }
+                            }
+                        },
                         onIgnoreUser = {
                             scope.launch {
                                 roomRepository.setIgnored(msg.sender, true)
@@ -3317,6 +3331,9 @@ private fun MessageRow(
     onIgnoreUser: () -> Unit,
     onCopyLink: () -> Unit,
     onDelete: () -> Unit,
+    /** 卡住的待送訊息（本機回顯）：拿原文重發一次、並清掉佇列裡那一筆。 */
+    onResendPending: () -> Unit = {},
+    onDropPending: () -> Unit = {},
     onViewSource: () -> Unit,
     onForward: () -> Unit,
     onToggleReaction: (String, EventId?) -> Unit,
@@ -3585,6 +3602,14 @@ private fun MessageRow(
                     reactAnchor = Offset.Unspecified
                     reactOpen = true
                 }
+            }
+            // 待送的訊息不會自己重試（Trixnity 只在送的時候試一次），沒有這兩個按鈕
+            // 就只能永遠看它半透明掛在那裡（用戶 2026-09-29 點名）
+            if (msg.pending) {
+                if (msg.body is MessageBody.Text) {
+                    ContextMenuItem(strings.actionResendPending) { menuOpen = false; onResendPending() }
+                }
+                ContextMenuItem(strings.actionDropPending, destructive = true) { menuOpen = false; onDropPending() }
             }
             if (msg.body is MessageBody.Text) {
                 ContextMenuItem(strings.actionCopyText) { menuOpen = false; onCopyText() }

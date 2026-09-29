@@ -8,6 +8,9 @@ import de.connect2x.trixnity.client.room.getState
 import de.connect2x.trixnity.client.room.message.replace
 import de.connect2x.trixnity.client.room.message.text
 import de.connect2x.trixnity.client.room.toFlowList
+import de.connect2x.trixnity.client.store.StoreTransactionManager
+import de.connect2x.trixnity.client.store.repository.RoomOutboxMessageRepository
+import de.connect2x.trixnity.client.store.repository.RoomOutboxMessageRepositoryKey
 import de.connect2x.trixnity.client.flattenNotNull
 import de.connect2x.trixnity.client.flattenValues
 import de.connect2x.trixnity.client.store.Room
@@ -180,6 +183,8 @@ data class TimelineMessage(
     val pending: Boolean = false,
     /** outbox 送出失敗的原因；非 null 時 UI 要標紅並允許重試。 */
     val sendError: String? = null,
+    /** 本機回顯專屬：outbox 的交易編號，用來重發完／刪除後把那一筆從佇列拿掉。 */
+    val outboxTransactionId: String? = null,
     /** 這則訊息上的反應：表情 → 統計。 */
     val reactions: Map<String, ReactionInfo> = emptyMap(),
     /** 橋接訊息帶的 `external_url`（Telegram 橋等），有值才給「來源網址」。 */
@@ -689,6 +694,24 @@ class RoomRepository(val client: MatrixClient) {
         }
 
     /** 發送貼圖（MSC2545 m.sticker）：走 StickerRepository 的加密路徑，回 eventId 便於撤回 */
+    /**
+     * 把一則卡在發送佇列（本機回顯）裡的訊息刪掉。
+     *
+     * Trixnity 沒開放「刪單筆 outbox」的便利方法（`RoomOutboxMessageStore` 只有
+     * update 與 deleteByRoomId），所以自己開一筆寫入交易叫底層 repository 刪。
+     * 沒有這條路，送不出去又關不掉的訊息會永遠半透明掛在時間線最下面
+     * （用戶 2026-09-29：「還是沒有重試發送啊？你要不實作一下 刪除 按鈕？」）。
+     */
+    suspend fun dropPendingMessage(roomId: RoomId, transactionId: String): Result<Unit> = runCatching {
+        val repository = client.di.get<RoomOutboxMessageRepository>()
+        val transactions = client.di.get<StoreTransactionManager>()
+        transactions.writeTransaction {
+            // delete 宣告成 `context(transaction: WriteTransaction)`：交易是隱式接收者、不是參數，
+            // 而 key 的房間欄位要 RoomId（兩點都是編譯器直接告訴我的）
+            repository.delete(RoomOutboxMessageRepositoryKey(roomId, transactionId))
+        }
+    }
+
     suspend fun sendSticker(roomId: RoomId, sticker: StickerItem): Result<String> =
         StickerRepository(client).sendSticker(roomId, sticker)
 

@@ -65,6 +65,12 @@ import androidx.compose.runtime.collectAsState
  * 個人資料卡（Discord 個人檔案彈出）。橫幅用品牌 Arcaea 漸層；
  * 按鈕：編輯個人資料（→帳戶頁）、複製 Matrix ID（回饋「已複製」）。
  */
+// 彈出卡要浮在帳號列**上方**、不要蓋住它（用戶 2026-09-29 對照 Discord：
+// 「它那卡片，也沒有覆蓋底欄吧？」）。Popup 的 offset 是像素、對齊基準在視窗下緣，
+// 所以得自己扣掉帳號列高度：頭像 40dp＋Row 內距 4×2＋Surface 內距 6×2 ≈ 60dp，再留 8dp 縫隙。
+@Composable
+private fun popupLiftPx(): Int = with(androidx.compose.ui.platform.LocalDensity.current) { 68.dp.toPx().toInt() }
+
 @Composable
 fun ProfilePopup(
     client: de.connect2x.trixnity.client.MatrixClient,
@@ -82,7 +88,7 @@ fun ProfilePopup(
 
     Popup(
         alignment = Alignment.BottomStart,
-        offset = IntOffset(0, -8),
+        offset = IntOffset(12.dp.toPxI(), -popupLiftPx()),
         onDismissRequest = onDismiss,
         properties = PopupProperties(focusable = true),
     ) {
@@ -124,7 +130,7 @@ fun ProfilePopup(
                         Column {
                             PopupMenuRow(icon = { Icon(Icons.Filled.Create, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp)) }, label = strings.editProfile, onClick = onEditProfile)
                             PopupMenuRow(icon = {
-                                Icon(BarIcons.ContentCopy, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                                Icon(BarIcons.IdBadge, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                             }, label = if (copied) strings.copiedToClipboard else strings.copyMatrixId, onClick = {
                                 clipboard.setText(AnnotatedString(accountId))
                                 copied = true
@@ -163,7 +169,7 @@ fun AudioDevicePanel(
 
     Popup(
         alignment = Alignment.BottomEnd,
-        offset = IntOffset(0, -8),
+        offset = IntOffset(-(12.dp.toPxI()), -popupLiftPx()),
         onDismissRequest = onDismiss,
         properties = PopupProperties(focusable = true),
     ) {
@@ -311,3 +317,8 @@ private fun DeviceOptionRow(label: String, selected: Boolean, onClick: () -> Uni
         }
     }
 }
+
+/** 12dp 這種小距離要餵給 Popup 的 IntOffset，得先過 density。 */
+@Composable
+private fun androidx.compose.ui.unit.Dp.toPxI(): Int =
+    with(androidx.compose.ui.platform.LocalDensity.current) { toPx().toInt() }

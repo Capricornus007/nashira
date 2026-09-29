@@ -213,8 +213,62 @@ object BarIcons {
             }
         }.build()
     }
+    /**
+     * 「ID 徽章」：圓角牌＋裡面的 I 與 D。
+     * 給「複製 Matrix ID」用——那顆通用「兩張紙」的複製圖示在Discord對照下被點名
+     * （用戶 2026-09-29：「discord 那邊的圖標好像比起單純的複製圖標更合適」），
+     * 因為這裡複製的是**身份識別碼**，不是任意內容。
+     */
+    val IdBadge: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "IdBadge", defaultWidth = 24.dp, defaultHeight = 24.dp,
+            viewportWidth = 24f, viewportHeight = 24f,
+        ).apply {
+            path(stroke = SolidColor(Color.Black), strokeLineWidth = 1.7f) {
+                roundRect(2.6f, 5.2f, 21.4f, 18.8f, 3f)
+            }
+            // I
+            path(fill = SolidColor(Color.Black)) { rect(6.4f, 9.4f, 7.9f, 14.6f) }
+            // D 的豎棒
+            path(fill = SolidColor(Color.Black)) { rect(10.4f, 9.4f, 11.9f, 14.6f) }
+            // D 的右半圓：從上緣畫到下緣
+            path(stroke = SolidColor(Color.Black), strokeLineWidth = 1.7f) {
+                moveTo(11.9f, 9.4f)
+                lineTo(14.2f, 9.4f)
+                curveTo(17.4f, 9.4f, 17.4f, 14.6f, 14.2f, 14.6f)
+                lineTo(11.9f, 14.6f)
+            }
+        }.build()
+    }
 }
 
+/** 圓角矩形路徑（四角各一段貝塞爾，k 與 [circle] 同一個近似常數）。 */
+private fun androidx.compose.ui.graphics.vector.PathBuilder.roundRect(
+    left: Float, top: Float, right: Float, bottom: Float, r: Float,
+) {
+    val k = r * 0.5523f
+    moveTo(left + r, top)
+    lineTo(right - r, top)
+    curveTo(right - r + k, top, right, top + r - k, right, top + r)
+    lineTo(right, bottom - r)
+    curveTo(right, bottom - r + k, right - r + k, bottom, right - r, bottom)
+    lineTo(left + r, bottom)
+    curveTo(left + r - k, bottom, left, bottom - r + k, left, bottom - r)
+    lineTo(left, top + r)
+    curveTo(left, top + r - k, left + r - k, top, left + r, top)
+    close()
+}
+
+/** 實心矩形（PathBuilder 沒有 addRect）。 */
+private fun androidx.compose.ui.graphics.vector.PathBuilder.rect(
+    left: Float, top: Float, right: Float, bottom: Float,
+) {
+    moveTo(left, top)
+    lineTo(right, top)
+    lineTo(right, bottom)
+    lineTo(left, bottom)
+    close()
+}
 /** 用四段貝塞爾近似一個正圓（PathBuilder 沒有 addCircle，本檔所有圖示共用這個）。 */
 private fun androidx.compose.ui.graphics.vector.PathBuilder.circle(cx: Float, cy: Float, r: Float) {
     val k = r * 0.5523f

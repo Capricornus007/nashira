@@ -213,6 +213,7 @@ class RoomTimeline(
             senderName = meMember?.name.visibleNameOrNull()
                 ?: me.full.removePrefix("@").substringBefore(':'),
             senderAvatarUrl = meMember?.event?.content?.avatarUrl,
+            outboxTransactionId = outbox.transactionId,
             body = body,
             timestamp = outbox.createdAt.toEpochMilliseconds(),
             pending = true,
