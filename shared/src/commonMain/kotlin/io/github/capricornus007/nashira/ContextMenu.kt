@@ -18,10 +18,12 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.isSpecified
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.DpOffset
 
@@ -33,28 +35,41 @@ import androidx.compose.ui.unit.DpOffset
  * 右鍵事件在 Main pass 就消費掉，避免同一下又觸發列的一般點擊。
  */
 @OptIn(ExperimentalFoundationApi::class)
+@Composable
 fun Modifier.contextMenuGestures(
     onClick: (() -> Unit)? = null,
     onContextMenu: (Offset) -> Unit,
-): Modifier = this
-    .pointerInput(onContextMenu) {
-        awaitPointerEventScope {
-            while (true) {
-                val event = awaitPointerEvent(PointerEventPass.Main)
-                if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed) {
-                    // 位置要一起帶出去：桌面選單要開在指標處，不然滑鼠在右邊、選單卻從列首彈出
-                    val position = event.changes.firstOrNull()?.position ?: Offset.Zero
-                    event.changes.forEach { it.consume() }
-                    onContextMenu(position)
+): Modifier {
+    // 用戶 2026-09-30 #5 那張圖把偏移量定死了：右鍵點最上面那列，選單卻開在第二列——
+    // 剛好差**一整列的高度**。因為 `DropdownMenu` 的預設錨點是該列的**左下角**，
+    // 而 `change.position` 是該列**自己的局部座標**（實測：指標 (156,66) 落在 nodeSize 548x100 之內），
+    // 兩者的 y 差了一整個列高。所以只減一次列高，不多不少。
+    //
+    // 踩過的坑（別再犯）：v1 同時減了列高**又**減了該列在視窗裡的原點 → 減兩次 →
+    // 選單飛到點擊點上方；v2 改用自訂 PopupPositionProvider → 選單被頂到螢幕 (0,0)。
+    val anchorHeightPx = remember { mutableIntStateOf(0) }
+    return this
+        .onGloballyPositioned { anchorHeightPx.intValue = it.size.height }
+        .pointerInput(onContextMenu) {
+            awaitPointerEventScope {
+                while (true) {
+                    val event = awaitPointerEvent(PointerEventPass.Main)
+                    if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed) {
+                        // 位置要一起帶出去：桌面選單要開在指標處，不然滑鼠在右邊、選單卻從列首彈出
+                        val local = event.changes.firstOrNull()?.position ?: Offset.Zero
+                        val position = Offset(local.x, local.y - anchorHeightPx.intValue)
+                        event.changes.forEach { it.consume() }
+                        onContextMenu(position)
+                    }
                 }
             }
         }
-    }
-    // 觸控長按沒有「指標位置」的概念，用 Offset.Unspecified 表示「照預設位置開」
-    .combinedClickable(
-        onClick = { onClick?.invoke() },
-        onLongClick = { onContextMenu(Offset.Unspecified) },
-    )
+        // 觸控長按沒有「指標位置」的概念，用 Offset.Unspecified 表示「照預設位置開」
+        .combinedClickable(
+            onClick = { onClick?.invoke() },
+            onLongClick = { onContextMenu(Offset.Unspecified) },
+        )
+}
 
 /** 選單的一列；`destructive` 用錯誤色（離開房間、刪除訊息這類）。 */
 @Composable

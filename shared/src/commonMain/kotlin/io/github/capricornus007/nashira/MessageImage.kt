@@ -31,6 +31,7 @@ import de.connect2x.trixnity.client.MatrixClient
 import de.connect2x.trixnity.client.media.MediaService
 import de.connect2x.trixnity.utils.toByteArray
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import io.github.capricornus007.nashira.matrix.MediaSource
 
 /** 貼圖不畫底、不裁切，尺寸比照 Element／SchildiChat 的行內貼圖。 */
@@ -72,42 +73,56 @@ fun MessageImage(
     val boxPx = remember(density, maxWidth) { with(density) { maxWidth.toPx() }.toInt().coerceAtLeast(1) }
     LaunchedEffect(client, key, boxPx) {
         if (bitmap != null) return@LaunchedEffect
-        // 啟動初期伺服器版本還沒讀進來，請求會走舊版媒體端點被 404，所以失敗要重試幾次
-        repeat(MediaFetchAttempts) { attempt ->
-            if (attempt > 0) delay(MediaRetryDelayMillis * attempt)
-            val small = bitmap?.let { it.width < boxPx } == true
-            val media = client.di.get<MediaService>().let { service ->
-                when (source) {
-                    is MediaSource.Plain ->
-                        if (isVideo || attempt > 0 || small) {
-                            // 影片沒有縮圖端點；縮圖不夠大（或第一輪失敗）就改抓原檔本機降採樣
-                            service.getMedia(source.mxcUrl, maxSize = OriginalMaxMediaBytes)
-                        } else {
-                            // 高度給 3 倍寬：scale 是「塞進這個框」，框不夠高會讓直式圖的寬度被壓掉
-                            service.getThumbnail(
-                                source.mxcUrl,
-                                boxPx.toLong(),
-                                boxPx.toLong() * ThumbnailHeightFactor,
-                                maxSize = MaxMediaBytes,
-                            )
-                        }
-                    is MediaSource.Encrypted -> service.getEncryptedMedia(source.file, maxSize = OriginalMaxMediaBytes)
+        // 抓取與解碼**挪出主執行緒**：Skia 沒有解碼期降採樣，一張 2560 的原圖是「先整張解開、再縮」，
+        // 而 LaunchedEffect 跑在桌面端的 UI 執行緒上——來回翻時間線時，每張新進畫面的圖都在主緒
+        // 解 6–8 MB 的 JPEG（還疊上換成 Mitchell 的高品質縮放），就會黏
+        //（用戶 2026-09-30 點名「時間線來回翻動訊息似乎開始粘滯了」）。
+        //
+        // 寫快取與狀態留回主緒：MediaBitmapCache 是普通 LinkedHashMap，不是執行緒安全的。
+        val decoded = withContext(kotlinx.coroutines.Dispatchers.Default) {
+            var best: ImageBitmap? = null
+            // 啟動初期伺服器版本還沒讀進來，請求會走舊版媒體端點被 404，所以失敗要重試幾次
+            for (attempt in 0 until MediaFetchAttempts) {
+                if (attempt > 0) delay(MediaRetryDelayMillis * attempt)
+                val small = best?.let { it.width < boxPx } == true
+                val media = client.di.get<MediaService>().let { service ->
+                    when (source) {
+                        is MediaSource.Plain ->
+                            if (isVideo || attempt > 0 || small) {
+                                // 影片沒有縮圖端點；縮圖不夠大（或第一輪失敗）就改抓原檔本機降採樣
+                                service.getMedia(source.mxcUrl, maxSize = OriginalMaxMediaBytes)
+                            } else {
+                                // 高度給 3 倍寬：scale 是「塞進這個框」，框不夠高會讓直式圖的寬度被壓掉
+                                service.getThumbnail(
+                                    source.mxcUrl,
+                                    boxPx.toLong(),
+                                    boxPx.toLong() * ThumbnailHeightFactor,
+                                    maxSize = MaxMediaBytes,
+                                )
+                            }
+                        is MediaSource.Encrypted -> service.getEncryptedMedia(source.file, maxSize = OriginalMaxMediaBytes)
+                    }
+                }.getOrNull()
+                val bytes = media?.toByteArray(this) ?: continue
+                val frame = if (isVideo) {
+                    decodeVideoFrame(bytes, maxDimension = boxPx * 2)
+                } else {
+                    decodeImageBitmap(bytes, maxDimension = boxPx * 2)
                 }
-            }.getOrNull()
-            val bytes = media?.toByteArray(this) ?: return@repeat
-            val decoded = if (isVideo) {
-                decodeVideoFrame(bytes, maxDimension = boxPx * 2)
-            } else {
-                decodeImageBitmap(bytes, maxDimension = boxPx * 2)
+                if (frame != null) {
+                    best = frame
+                    // 拿到夠寬的一張才算完；否則繼續下一輪去撈原檔
+                    if (isVideo || frame.width >= boxPx) break
+                }
             }
-            if (decoded != null) {
-                MediaBitmapCache.put(key, decoded)
-                bitmap = decoded
-                // 拿到夠寬的一張才算完；否則繼續下一輪去撈原檔
-                if (isVideo || decoded.width >= boxPx) return@LaunchedEffect
-            }
+            best
         }
-        if (bitmap == null) failed = true
+        if (decoded != null) {
+            MediaBitmapCache.put(key, decoded)
+            bitmap = decoded
+        } else if (bitmap == null) {
+            failed = true
+        }
     }
 
     // 事件裡的長寬只用來保留版位，避免圖片載入後把整條時間線往下推
