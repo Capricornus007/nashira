@@ -71,6 +71,7 @@ import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.Image
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.text.font.FontWeight
@@ -326,7 +327,10 @@ fun ChatScreen(
         // 桌面版**不因為窗口變窄就退化成手機版面**：用戶 2026-09-30 拿 Telegram 半屏截圖點名
         // 「半屏甚至都能，而 nashira 目前半屏跟移動端似的」。TG 半屏時照樣是三欄＋懸浮面板，
         // 所以只有「軟鍵盤會頂起輸入列」的平台（手機）才用 720dp 這個寬閾值。
-        val compact = maxWidth < if (softKeyboardShiftsComposer) 720.dp else 420.dp
+        // 窄螢幕**不混欄**（用戶 2026-09-30 重申最初的規格：「在聊天裡就只顯示聊天頁，
+        // 不在就顯示聊天室列表跟 space 欄，這點別跟 discord 跟 tg 學」）→ 一律走單欄外殼。
+        // 我先前把桌面閾值降到 420dp 想學 TG 半屏三欄，結果時間線被擠到一行四個字（截圖 #26）。
+        val compact = maxWidth < 720.dp
         PlatformBackHandler(enabled = directoryOpen) { directoryOpen = false }
         PlatformBackHandler(enabled = settingsOpen) { settingsOpen = false }
         AnimatedContent(
@@ -368,6 +372,8 @@ fun ChatScreen(
                 )
             } else {
                 Row(Modifier.fillMaxSize()) {
+                    // 清單欄寬度跟著窗口縮：TG 半屏時清單變窄、時間線仍然能讀
+                    // （用戶 2026-09-30 那張半屏截圖：我們的时间線被擠到一行四個字）
                     Box(Modifier.width(DiscordRailWidth + DiscordChannelWidth).fillMaxHeight()) {
                         Row(Modifier.fillMaxSize()) {
                             ServerRail(
@@ -1789,12 +1795,6 @@ private fun TimelinePane(
 
     // 貼圖／表情面板：停靠態（右欄）與浮動態共用同一個寬度，拖過就存檔
     val stickerPanelDocked = uiState.stickerPanelDocked && !membersOpen
-    val dockedPanelWidthDp = with(LocalDensity.current) {
-        val windowPx = LocalWindowInfo.current.containerSize.width
-        val cap = (windowPx - 40.dp.toPx()).toInt().coerceAtLeast(StickerPanelMinWidthDp)
-        (if (uiState.stickerPanelWidthDp > 0) uiState.stickerPanelWidthDp else DockedPanelDefaultWidthDp)
-            .dp.coerceIn(StickerPanelMinWidthDp.dp, cap.dp)
-    }
     var composerBaselineTopPx by remember(room.roomId) { mutableStateOf(0) }
     // 「＋」的附件選單（桌面是小彈窗、手機是底部面板）
     var attachMenu by remember(room.roomId) { mutableStateOf(false) }
@@ -1938,6 +1938,8 @@ private fun TimelinePane(
             },
             emojiFilter = emojiFilter,
             modifier = panelModifier,
+            // 桌面版才給切換鈕：手機沒有「右欄」這個形態
+            pinned = stickerPanelDocked,
         )
     }
     // 送圖是「附件」，跟貼圖面板是兩件事：微信／Telegram 都把它放在輸入列旁邊自己一顆
@@ -2408,20 +2410,21 @@ private fun TimelinePane(
                 ) {
                     IconButton(
                         onClick = {
+                            // 桌面是**三態循環**：不顯示 → 懸浮 → 固定右欄 → 不顯示
+                            // （用戶 2026-09-30：「tg 那邊根本不需要什麼『停靠右邊』的按鈕，
+                            //   就是不顯示/懸浮/固定三狀態循環」）。手機沒有右欄，維持兩態。
+                            if (!softKeyboardShiftsComposer && stickerPanel && !uiState.stickerPanelDocked) {
+                                uiState.stickerPanelDocked = true
+                                return@IconButton
+                            }
                             if (stickerPanel) {
-                                // 面板開著→這顆是「叫回輸入法」：收面板、把焦點給文字欄並彈鍵盤
+                                // 面板開著→這顆是「叫回輸入法」：收面板（停靠態一併清掉）、把焦點給打字框
                                 stickerPanel = false
-                                if (softKeyboardShiftsComposer) {
-                                    runCatching { composerFocus.requestFocus() }
-                                    keyboardController?.show()
-                                } else {
-                                    runCatching { composerFocus.requestFocus() }
-                                }
+                                uiState.stickerPanelDocked = false
+                                runCatching { composerFocus.requestFocus() }
+                                if (softKeyboardShiftsComposer) keyboardController?.show()
                             } else {
-                                // 開面板時主動收掉輸入框焦點：面板是浮動態，留著焦點的話
-                                // 下面那條「拿到焦點就收面板」會立刻把它關掉
-                                stickerPanel = true
-                                keyboardController?.hide()
+                                if (softKeyboardShiftsComposer) keyboardController?.hide()
                                 focusManager.clearFocus()
                             }
                         },
@@ -2669,10 +2672,17 @@ private fun TimelinePane(
             }
         },
     ) { padding ->
-        // 停靠態的面板是**右欄**（用戶 2026-09-30 那組 TG 截圖 #13：全高、貼頂、時間線變窄），
-        // 所以聊天區與面板並排成 Row；浮動態仍然疊在同一格上。
-        Row(Modifier.fillMaxSize()) {
-        Box(Modifier.weight(1f)) {
+        // 用 BoxWithConstraints 拿 Dp 約束：LocalWindowInfo.containerSize 是**邏輯像素**，
+        // 跟 .toPx()（實體）混算會錯（實測時間線憑空少一條寬度）
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val availableHeightDp = maxHeight
+            val dockedPanelWidthDp = (
+                if (uiState.stickerPanelWidthDp > 0) uiState.stickerPanelWidthDp
+                else DockedPanelDefaultWidthDp
+                ).dp.coerceIn(StickerPanelMinWidthDp.dp, (maxWidth - 40.dp).coerceAtLeast(StickerPanelMinWidthDp.dp))
+            val dockInset = if (stickerPanelDocked && stickerPanel && !compact) dockedPanelWidthDp else 0.dp
+            Box(Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxSize().padding(end = dockInset)) {
         // Trixnity 的 getLastTimelineEvents 回傳「新→舊」，所以用 reverseLayout：
         // index 0（最新）畫在最底部，新訊息自然從下方長出來，跟 Discord/Telegram 一致。
         LazyColumn(
@@ -2970,12 +2980,12 @@ private fun TimelinePane(
                 // 出現時從右下角往上滑一點＋淡入（64Gram 桌面版就是這個小幅度位移）。
                 enter = slideInVertically(tween(200)) { it / 6 } + fadeIn(tween(140)),
                 exit = fadeOut(tween(110)) + slideOutVertically(tween(170)) { it / 6 },
-                // 位置照 Telegram 桌面版：**貼右緣、垂直置中**（用戶 2026-09-30 那組 TG 截圖），
-                // 不是釘在右下角
+                // 浮動態＝**貼右緣、坐在輸入列上方**（用戶 2026-09-30：「你沒做右側面板
+                // 為什麼要把懸浮的居中？」——置中是停靠進右欄那一種才該有的樣子）
                 modifier = Modifier
-                    .align(Alignment.CenterEnd)
+                    .align(Alignment.BottomEnd)
                     .zIndex(2f)
-                    .padding(end = 8.dp),
+                    .padding(end = 8.dp, bottom = 8.dp),
             ) {
                 // 右側浮動面板：**寬度可以拖左緣調整**並存檔（用戶 2026-09-30：
                 // 「你還沒做那個可變寬度的右側邊表情面板形態嗎？」）。
@@ -2990,16 +3000,13 @@ private fun TimelinePane(
                     (windowWidthPx - 40.dp.toPx()).toInt().coerceAtLeast(StickerPanelMinWidthDp).dp
                 }
                 val panelWidth = wantedDp.coerceIn(StickerPanelMinWidthDp.dp, maxDp)
-                val windowHeightDp = with(density) {
-                    LocalWindowInfo.current.containerSize.height.toDp()
-                }
                 // 高度：我連猜兩次都不對（68%「有點高了」→ 50%「看起來依舊」），
                 // 所以改成**拖下緣自己調、當場存檔**，這裡只給一個偏小的預設值。
                 // 我讀反了：他嫌的是**太矮**（只露出兩排貼圖，TG 露三排），我卻一路往矮調。
                 // 預設回到三排的量（窗口 62%、上下限 420–640dp），下限也抬到不會只剩兩排。
-                val autoPanelHeight = (windowHeightDp * 0.62f).coerceIn(420.dp, 640.dp)
+                val autoPanelHeight = (availableHeightDp * 0.62f).coerceIn(420.dp, 640.dp)
                 val panelHeight = if (uiState.stickerPanelHeightDp > 0) {
-                    uiState.stickerPanelHeightDp.dp.coerceIn(StickerPanelMinHeightDp.dp, windowHeightDp * 0.85f)
+                    uiState.stickerPanelHeightDp.dp.coerceIn(StickerPanelMinHeightDp.dp, availableHeightDp * 0.85f)
                 } else {
                     autoPanelHeight
                 }
@@ -3116,14 +3123,18 @@ private fun TimelinePane(
                     }
                 }
             }
-        }
+            }
+            // 停靠態：**全高的右欄**（TG 截圖 #13——面板貼頂、時間線變窄）。
+            // 用「疊在右側＋替時間線預留同寬的內距」實作，不再動根容器結構。
             if (stickerPanelDocked && stickerPanel && !compact) {
                 StickerDockedColumn(
+                    modifier = Modifier.align(Alignment.TopEnd),
                     widthDp = dockedPanelWidthDp,
                     onWidthChanged = { uiState.stickerPanelWidthDp = it.value.roundToInt() },
                     onUndock = { uiState.stickerPanelDocked = false },
                     content = { mod -> stickerPanelContent(mod) },
                 )
+            }
             }
         }
     }
@@ -3581,6 +3592,7 @@ private fun DateDivider(label: String) {
  */
 @Composable
 private fun StickerDockedColumn(
+    modifier: Modifier = Modifier,
     widthDp: Dp,
     onWidthChanged: (Dp) -> Unit,
     onUndock: () -> Unit,
@@ -3590,7 +3602,7 @@ private fun StickerDockedColumn(
     val handleSource = remember { MutableInteractionSource() }
     val handleHovered by handleSource.collectIsHoveredAsState()
     Box(
-        Modifier
+        modifier
             .fillMaxHeight()
             .width(widthDp)
             .background(MaterialTheme.colorScheme.surfaceContainerLow),
