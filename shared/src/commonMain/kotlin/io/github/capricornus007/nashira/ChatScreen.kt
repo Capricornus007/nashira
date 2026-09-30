@@ -237,7 +237,7 @@ private const val DefaultStickerPanelWidthDp = 380
 private const val DockedPanelDefaultWidthDp = 420
 private const val StickerPanelMinWidthDp = 260
 private const val StickerPanelMaxWidthDp = 760
-private const val StickerPanelMinHeightDp = 220
+private const val StickerPanelMinHeightDp = 360
 private const val StickerPanelMaxHeightDp = 900
 
 /** Discord／Matrix Spaces 式主畫面：Space 欄、聊天室欄、訊息區與成員欄。 */
@@ -2995,7 +2995,9 @@ private fun TimelinePane(
                 }
                 // 高度：我連猜兩次都不對（68%「有點高了」→ 50%「看起來依舊」），
                 // 所以改成**拖下緣自己調、當場存檔**，這裡只給一個偏小的預設值。
-                val autoPanelHeight = (windowHeightDp * 0.40f).coerceIn(260.dp, 360.dp)
+                // 我讀反了：他嫌的是**太矮**（只露出兩排貼圖，TG 露三排），我卻一路往矮調。
+                // 預設回到三排的量（窗口 62%、上下限 420–640dp），下限也抬到不會只剩兩排。
+                val autoPanelHeight = (windowHeightDp * 0.62f).coerceIn(420.dp, 640.dp)
                 val panelHeight = if (uiState.stickerPanelHeightDp > 0) {
                     uiState.stickerPanelHeightDp.dp.coerceIn(StickerPanelMinHeightDp.dp, windowHeightDp * 0.85f)
                 } else {
@@ -3009,6 +3011,39 @@ private fun TimelinePane(
                     stickerPanelContent(Modifier.fillMaxSize())
                     val handleSource = remember { MutableInteractionSource() }
                     val handleHovered by handleSource.collectIsHoveredAsState()
+                    // 右緣也能拖：往右拉＝變寬。浮動面板原本只有左緣可調，
+                    // 對「想把它拉大」的手勢來說右緣才是直覺的那一邊
+                    val rHandleSource = remember { MutableInteractionSource() }
+                    val rHandleHovered by rHandleSource.collectIsHoveredAsState()
+                    Box(
+                        Modifier
+                            .align(Alignment.CenterEnd)
+                            .fillMaxHeight()
+                            .width(10.dp)
+                            .hoverable(rHandleSource)
+                            .pointerHoverIcon(horizontalResizeIcon)
+                            .pointerInput(Unit) {
+                                detectDragGestures { change, dragAmount ->
+                                    change.consume()
+                                    val base = uiState.stickerPanelWidthDp.takeIf { it > 0 }
+                                        ?: panelWidth.value.toInt()
+                                    uiState.stickerPanelWidthDp =
+                                        (base + (dragAmount.x / density.density).roundToInt())
+                                            .coerceIn(StickerPanelMinWidthDp, StickerPanelMaxWidthDp)
+                                }
+                            },
+                    ) {
+                        Box(
+                            Modifier
+                                .align(Alignment.CenterEnd)
+                                .fillMaxHeight()
+                                .width(2.dp)
+                                .background(
+                                    if (rHandleHovered) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+                                    else Color.Transparent
+                                )
+                        )
+                    }
                     // 下緣拖拽調高（跟左緣調寬同一套：懸停浮現細線＋游標提示，不自創按鈕）
                     val vHandleSource = remember { MutableInteractionSource() }
                     val vHandleHovered by vHandleSource.collectIsHoveredAsState()
