@@ -180,18 +180,13 @@ fun main(args: Array<String>) {
             }
         }
 
-        fun toggleMainWindow() {
-            val w = mainWindow ?: return
-            if (w.isVisible) w.isVisible = false else showMainWindow()
-        }
-
-        // 全域快捷鍵（app 自行註冊，XGrabKey）：Ctrl+Alt+N 切換主視窗。
-        // 桌面限定；X11 不可用（純 Wayland）時靜默跳過。
-        LaunchedEffect(Unit) {
-            // X11 keysym：ASCII 可打印字元＝其字碼（'n' = 0x6E）
-            val ok = GlobalHotkey.register(0x6E) { toggleMainWindow() }
-            if (!ok) println("NASHIRA_HOTKEY: global hotkey unavailable (X11 grab failed)")
-        }
+        // 全域快捷鍵（XGrabKey）**拿掉了**（用戶 2026-09-30：「務必別，我不需要它……
+        // 總覺得可能會跟其他軟件衝突到」）。他的擔憂是技術事實，不是偏好問題：
+        // XGrabKey 是把鍵從正常派送裡搶走，註冊成功後**別的程式就再也收不到這組鍵**，
+        // 誰先搶到誰贏、別人無從察覺。一個「叫回視窗」的便利功能不值得去動全域鍵盤。
+        // 收回來的方式已經夠用：點托盤圖示（左鍵）或托盤選單的「開啟 Nashira」。
+        // 之後若要提供這種熱鍵，條件是：設定頁預設關閉＋用戶自己按一個組合＋
+        // 可一鍵解除註冊（見待辦 #85）。
 
         // 候選窗口「從外面搬 fcitx 的窗口」這條試過並**撤掉**了（ImCandidateMover 先留檔不啟動）：
         // fcitx5 每按一個鍵就自己擺一次位置，我們 40ms 後再拖一次，實測就是
