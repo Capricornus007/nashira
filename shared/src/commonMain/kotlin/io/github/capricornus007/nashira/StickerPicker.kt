@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -34,7 +35,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -53,8 +56,10 @@ import io.github.capricornus007.nashira.matrix.StickerItem
 import io.github.capricornus007.nashira.matrix.StickerPack
 import io.github.capricornus007.nashira.matrix.StickerRepository
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.size
 import io.github.capricornus007.nashira.emoji.EmojiEntry
@@ -180,30 +185,80 @@ fun StickerPicker(
                     }
                     var selected by remember(packs.size) { mutableStateOf(0) }
                     val index = selected.coerceIn(0, packs.lastIndex)
+                    val gridState = rememberLazyGridState()
+                    val stripState = rememberLazyListState()
+                    val pickerScope = rememberCoroutineScope()
+                    // 每個包在這條長列表裡的起點：包 i 佔「1 格標頭 + N 張貼圖」。
+                    // 有這張表，捲動位置才能反查「現在在第幾包」，點底部圖示也知道該捲到哪裡。
+                    val packStarts = remember(packs) {
+                        val starts = ArrayList<Int>(packs.size)
+                        var cursor = 0
+                        packs.forEach { pack ->
+                            starts += cursor
+                            cursor += 1 + pack.stickers.size
+                        }
+                        starts
+                    }
                     // 貼圖頁：分頁條**釘住**（MoregramX 逐幀實測——捲動時它不動），會跟著捲走的
                     // 只有當前包名；表情頁相反，分類圖示條會隨捲動消失（見 EmojiBrowser）。
                     // 底部那條包封面圖示條只有貼圖頁有（表情頁靠自己的分類條選類）。
                     tabs()
-                    StickerGrid(
-                        pack = packs[index],
-                        client = client,
-                        onSend = onSend,
-                        header = {
-                            Text(
-                                packNames.getOrElse(index) { "" },
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 2.dp),
-                            )
-                        },
-                        modifier = Modifier.weight(1f),
-                    )
+                    // 所有包**首尾相連**排成一條長列表：往下捲會自然進入下一包，不是捲到包底就停
+                    //（用戶 2026-09-30 #43 對照 Telegram #44）。標頭那一格跨整行、寫包名。
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(96.dp),
+                        state = gridState,
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        packs.forEachIndexed { position, pack ->
+                            item(key = "h-pack-$position", span = { GridItemSpan(maxLineSpan) }) {
+                                Text(
+                                    packNames.getOrElse(position) { "" },
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 2.dp),
+                                )
+                            }
+                            items(
+                                pack.stickers,
+                                key = { "p$position-" + (it.shortcode + (it.mxcUrl ?: it.file?.url ?: "")) },
+                            ) { sticker ->
+                                Box(
+                                    Modifier
+                                        .aspectRatio(1f)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable { onSend(sticker) },
+                                ) {
+                                    StickerThumb(client, sticker)
+                                }
+                            }
+                        }
+                    }
+                    // 主區捲到哪 → 底部高亮跟著換那一包
+                    LaunchedEffect(gridState, packStarts) {
+                        snapshotFlow { gridState.firstVisibleItemIndex }.collect { visible ->
+                            var pack = 0
+                            for (position in packStarts.indices) {
+                                if (packStarts[position] > visible) break
+                                pack = position
+                            }
+                            if (pack != selected) selected = pack
+                        }
+                    }
+                    // 高亮的包變了 → 它那顆封面圖示滾進可見區（包多的時候才不會「選中的在螢幕外」）
+                    LaunchedEffect(selected, packs.size) {
+                        if (packs.isNotEmpty()) stripState.animateScrollToItem(index)
+                    }
                     // 包選擇是封面圖示條（Telegram／Discord／Element 都是這樣）：
                     // 原本的長文字標籤在包多時會橫向溢出，只能靠拖曳，滑鼠與觸控板都不順手。
                     // LazyRow 本身吃滾輪與拖曳，且只渲染可見項。
                     LazyRow(
+                        state = stripState,
                         modifier = Modifier.fillMaxWidth(),
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -214,7 +269,12 @@ fun StickerPicker(
                                 pack = pack,
                                 label = packNames.getOrElse(position) { pack.name },
                                 selected = position == index,
-                                onClick = { selected = position },
+                                onClick = {
+                                    selected = position
+                                    pickerScope.launch {
+                                        gridState.animateScrollToItem(packStarts.getOrElse(position) { 0 })
+                                    }
+                                },
                             )
                         }
                     }
@@ -266,36 +326,6 @@ private fun PackTab(
             StickerThumb(client, cover, onFailed = { attempt += 1 })
         } else {
             Text(label.take(1).uppercase(), style = MaterialTheme.typography.labelMedium)
-        }
-    }
-}
-
-@Composable
-private fun StickerGrid(
-    pack: StickerPack,
-    client: MatrixClient,
-    onSend: (StickerItem) -> Unit,
-    /** 網格第一格（跨整行）：分頁列＋當前包名。放進來才會跟著貼圖一起捲動。 */
-    header: @Composable () -> Unit = {},
-    modifier: Modifier = Modifier,
-) {
-    LazyVerticalGrid(
-        columns = GridCells.Adaptive(96.dp),
-        modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        item(key = "h-pack-header", span = { GridItemSpan(maxLineSpan) }) { header() }
-        items(pack.stickers, key = { it.shortcode + (it.mxcUrl ?: it.file?.url ?: "") }) { sticker ->
-            Box(
-                Modifier
-                    .aspectRatio(1f)
-                    .clip(RoundedCornerShape(10.dp))
-                    .clickable { onSend(sticker) },
-            ) {
-                StickerThumb(client, sticker)
-            }
         }
     }
 }
