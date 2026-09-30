@@ -510,7 +510,13 @@ fun main(args: Array<String>) {
                 if (event.type == KeyEventType.KeyDown && event.isCtrlPressed) {
                     when (event.key) {
                         Key.W -> { hideOrExit(); true }
-                        Key.Q -> { exitApplication(); true }
+                        // 必須跟托盤選單「結束程式」那條一樣包進 invokeLater：直接從按鍵
+                        // 處理器呼叫 exitApplication() 實測不會退出（用戶 2026-09-30 回報
+                        // 「關閉窗口的快捷鍵有效，但退出的就不行了」）。
+                        Key.Q -> {
+                            java.awt.EventQueue.invokeLater { exitApplication() }
+                            true
+                        }
                         else -> false
                     }
                 } else {
