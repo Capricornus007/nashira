@@ -8,6 +8,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.awt.ComposeWindow
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.awt.SwingWindow
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -486,11 +491,31 @@ fun main(args: Array<String>) {
             }
         }
 
+        // 藏窗或結束：用「掛上了沒有」判斷，不是用「平台支援嗎」——圖示沒掛成功就藏窗，
+        // 等於把程式關進一個叫不回來的地方。
+        // 抽出來是因為按視窗關閉鈕與 Ctrl+W 必須走**同一條路**（用戶 2026-09-30 #85）：
+        // Ctrl+W 的語意是「收起來」，不是「退出」；要退出的是 Ctrl+Q。
+        fun hideOrExit() {
+            if (trayAttached) mainWindow?.isVisible = false else exitApplication()
+        }
+
         Window(
-            onCloseRequest = {
-                // 用「掛上了沒有」判斷，不是用「平台支援嗎」：圖示沒掛成功就藏窗，
-                // 等於把程式關進一個叫不回來的地方。
-                if (trayAttached) mainWindow?.isVisible = false else exitApplication()
+            onCloseRequest = { hideOrExit() },
+            // Ctrl+W／Ctrl+Q 走 onPreviewKeyEvent：這是「程度 A」的全域——
+            // **只在我們自己的視窗有焦點時生效**，不碰 XGrabKey，不會搶走別的軟體的鍵
+            //（用戶 2026-09-30 點名原本的 Ctrl+Alt+N 全域抓取可能跟其他軟體衝突，已撤掉）。
+            // 用 onPreviewKeyEvent 而不是 onKeyEvent／修飾鍵選單：前者在焦點落到文字框時
+            // 仍然先看我們這裡，不會被輸入框吃掉變成「刪除單字」。
+            onPreviewKeyEvent = { event ->
+                if (event.type == KeyEventType.KeyDown && event.isCtrlPressed) {
+                    when (event.key) {
+                        Key.W -> { hideOrExit(); true }
+                        Key.Q -> { exitApplication(); true }
+                        else -> false
+                    }
+                } else {
+                    false
+                }
             },
             title = "Nashira",
             icon = painterResource("nashira-icon.png"),
