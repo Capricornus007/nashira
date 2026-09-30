@@ -72,6 +72,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish GitHub Release
+        id: publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -80,14 +81,22 @@ jobs:
           mapfile -t RPM < <(find desktopApp/build/compose/binaries/main -name '*.rpm' 2>/dev/null)
           ASSETS+=("${DEB[@]}" "${RPM[@]}")
           echo "Assets: ${ASSETS[*]}"
+          # 版號沒 bump 的提交（只改文件／註解）會走到這裡，而 $TAG 的 release 早已被
+          # 「建立這個版本的那一輪」發出去了。實測：對已發布的 release 再
+          # `gh release upload --clobber` 會被 GitHub 退回
+          # `HTTP 422: Published releases must have a valid tag`（run 36709195271），
+          # 於是每個不升版號的提交都紅一次。同一個版本的資產沒有「重發」這回事 → 直接跳過。
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "${ASSETS[@]}" --clobber
-          else
-            gh release create "$TAG" "${ASSETS[@]}" \
-              --target "$GITHUB_SHA" \
-              --title "Nashira $TAG" \
-              --notes "自用分發版（debug 簽章）。Android APK + Linux .deb/.rpm/.pkg.tar.zst（.pkg.tar.zst 由 arch job 稍後補傳）。"
+            echo "release $TAG 已存在（由建立這個版本的那一輪發布），跳過重複上傳。"
+            echo "要重發請先 bump gradle.properties 的 nashiraVersion。"
+            echo "created=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          echo "created=true" >> "$GITHUB_OUTPUT"
+          gh release create "$TAG" "${ASSETS[@]}" \
+            --target "$GITHUB_SHA" \
+            --title "Nashira $TAG" \
+            --notes "自用分發版（debug 簽章）。Android APK + Linux .deb/.rpm/.pkg.tar.zst（.pkg.tar.zst 由 arch job 稍後補傳）。"
 
   arch:
     name: Arch package (.pkg.tar.zst)
@@ -176,5 +185,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cd "$(dirname "$(find assets -name '*.pkg.tar.zst' | head -1)")"
+          # 只有「這一輪就是發布這個版本的那個 commit」才附檔。對已發布的 release 再
+          # `upload --clobber` 會吃到 GitHub 的 HTTP 422（見 Publish 步驟的註解），
+          # 而版號沒 bump 的提交（只改文件）走到的正是這種情況。
+          TARGET=$(gh release view "$TAG" --json targetCommitish -q .targetCommitish 2>/dev/null || echo "")
+          if [ -n "$TARGET" ] && [ "$TARGET" != "$GITHUB_SHA" ]; then
+            echo "$TAG 是由 $TARGET 發布的、不是本輪 $GITHUB_SHA → 版號沒 bump，跳過附檔。"
+            exit 0
+          fi
           gh release upload "$TAG" ./*.pkg.tar.zst --clobber
           echo "Arch package attached to $TAG"
