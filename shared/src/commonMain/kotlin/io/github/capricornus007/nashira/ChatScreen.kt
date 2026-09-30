@@ -312,7 +312,7 @@ fun ChatScreen(
     // 靜音的房間一律不進徽章（用戶 2026-09-30 #48/#50：設了靜音還冒紅點）。
     // 在這裡一次攔掉，聊天室列、Space 總和、首頁格才會跟著一起少；逐處判斷遲早漏一處。
     val mutedIds by roomRepository.mutedRoomIds.collectAsState()
-    LaunchedEffect(roomRepository) { roomRepository.refreshMutedRoomIds() }
+    LaunchedEffect(roomRepository) { roomRepository.refreshMutedRoomIds(attempts = 6) }
     val unreadByRoom = if (!showUnread) emptyMap() else allUnread.filterKeys { it.full !in mutedIds }
     val unreadBySpace = remember(snapshot, unreadByRoom) {
         snapshot.spaces.associate { space ->

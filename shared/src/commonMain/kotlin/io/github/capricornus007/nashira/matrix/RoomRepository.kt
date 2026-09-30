@@ -18,6 +18,7 @@ import de.connect2x.trixnity.client.store.RoomUser
 import de.connect2x.trixnity.client.store.TimelineEvent
 import de.connect2x.trixnity.client.store.type
 import de.connect2x.trixnity.client.user
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flow
@@ -935,12 +936,23 @@ class RoomRepository(val client: MatrixClient) {
      */
     val mutedRoomIds = kotlinx.coroutines.flow.MutableStateFlow<Set<String>>(emptySet())
 
-    suspend fun refreshMutedRoomIds() {
-        val rules = client.api.push.getPushRules().getOrNull() ?: return
-        mutedRoomIds.value = rules.global.room.orEmpty()
-            .filter { it.enabled && it.actions.none { action -> action is PushAction.Notify } }
-            .map { it.ruleId }
-            .toSet()
+    /**
+     * 重讀靜音清單。
+     *
+     * `attempts` 不給 1 是因為**啟動初期拿不到**：ChatScreen 組裝時同步還沒跑完，
+     * 這一次 `GET /pushrules` 會失敗，而原本寫成「失敗就 return」→ 清單永遠是空集合，
+     * 靜音房間的紅點照樣留著，而且要重啟程式才會好（用戶 2026-09-30 追問的那顆 1）。
+     */
+    suspend fun refreshMutedRoomIds(attempts: Int = 1, retryDelayMillis: Long = 1_500) {
+        repeat(attempts) { attempt ->
+            if (attempt > 0) delay(attempt * retryDelayMillis)
+            val rules = client.api.push.getPushRules().getOrNull() ?: return@repeat
+            mutedRoomIds.value = rules.global.room.orEmpty()
+                .filter { it.enabled && it.actions.none { action -> action is PushAction.Notify } }
+                .map { it.ruleId }
+                .toSet()
+            return
+        }
     }
 
     /**
@@ -958,6 +970,9 @@ class RoomRepository(val client: MatrixClient) {
         } else {
             client.api.push.deletePushRule("global", PushRuleKind.ROOM, roomId.full).getOrThrow()
         }
+        // 先就地改這份快取再重讀：只靠重讀的話，伺服器那趟一慢或一倒，
+        // 他剛按的「靜音」在畫面上就等於沒有效。
+        mutedRoomIds.value = if (muted) mutedRoomIds.value + roomId.full else mutedRoomIds.value - roomId.full
         refreshMutedRoomIds()
         Unit
     }
