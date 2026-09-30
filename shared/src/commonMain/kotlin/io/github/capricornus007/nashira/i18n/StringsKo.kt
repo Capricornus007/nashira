@@ -297,4 +297,5 @@ object KoStrings : Strings by EnStrings {
     override val jumpToOriginal = "원본 메시지로 이동"
     override val jumpBackToPrevious = "이전 위치로 돌아가기"
     override val stickerPanelResizeHint = "드래그로 너비 조절 · 두 번 클릭하면 오른쪽 열에 고정"
+    override val stickerPanelHeightHint = "드래그로 높이 조절"
 }

@@ -33,3 +33,6 @@ actual val audioDeviceSettingsSupported: Boolean = false
 
 actual val horizontalResizeIcon: androidx.compose.ui.input.pointer.PointerIcon
     get() = androidx.compose.ui.input.pointer.PointerIcon.Default
+
+actual val verticalResizeIcon: androidx.compose.ui.input.pointer.PointerIcon
+    get() = androidx.compose.ui.input.pointer.PointerIcon.Default

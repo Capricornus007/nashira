@@ -17,6 +17,9 @@ expect val backgroundSyncSupported: Boolean
  */
 expect val keyboardLayoutSettingsSupported: Boolean
 
+/** 「拖拽調高」那條邊界該用的滑鼠游標（上下雙箭頭）。 */
+expect val verticalResizeIcon: PointerIcon
+
 /**
  * 「拖拽調寬」那條邊界該用的滑鼠游標。桌面是左右雙箭頭（拖得動寬度的明確訊號）；
  * 手機沒有滑鼠，用預設。

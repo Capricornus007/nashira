@@ -168,6 +168,7 @@ import de.connect2x.trixnity.client.room
 import io.github.capricornus007.nashira.i18n.stringsFor
 import io.github.capricornus007.nashira.theme.audioDeviceSettingsSupported
 import io.github.capricornus007.nashira.theme.horizontalResizeIcon
+import io.github.capricornus007.nashira.theme.verticalResizeIcon
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerHoverIcon
@@ -236,6 +237,8 @@ private const val DefaultStickerPanelWidthDp = 380
 private const val DockedPanelDefaultWidthDp = 420
 private const val StickerPanelMinWidthDp = 260
 private const val StickerPanelMaxWidthDp = 760
+private const val StickerPanelMinHeightDp = 220
+private const val StickerPanelMaxHeightDp = 900
 
 /** Discord／Matrix Spaces 式主畫面：Space 欄、聊天室欄、訊息區與成員欄。 */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -2990,9 +2993,14 @@ private fun TimelinePane(
                 val windowHeightDp = with(density) {
                     LocalWindowInfo.current.containerSize.height.toDp()
                 }
-                // 高度：用戶 2026-09-30 嫌 68% 太高（「表情面板弄的有點高了？」）→ 壓到一半、
-                // 並且設一個絕對上限，大螢幕上不會跟著長成一面牆
-                val panelHeight = (windowHeightDp * 0.5f).coerceIn(320.dp, 520.dp)
+                // 高度：我連猜兩次都不對（68%「有點高了」→ 50%「看起來依舊」），
+                // 所以改成**拖下緣自己調、當場存檔**，這裡只給一個偏小的預設值。
+                val autoPanelHeight = (windowHeightDp * 0.40f).coerceIn(260.dp, 360.dp)
+                val panelHeight = if (uiState.stickerPanelHeightDp > 0) {
+                    uiState.stickerPanelHeightDp.dp.coerceIn(StickerPanelMinHeightDp.dp, windowHeightDp * 0.85f)
+                } else {
+                    autoPanelHeight
+                }
                 Box(
                     Modifier
                         .width(panelWidth)
@@ -3001,6 +3009,38 @@ private fun TimelinePane(
                     stickerPanelContent(Modifier.fillMaxSize())
                     val handleSource = remember { MutableInteractionSource() }
                     val handleHovered by handleSource.collectIsHoveredAsState()
+                    // 下緣拖拽調高（跟左緣調寬同一套：懸停浮現細線＋游標提示，不自創按鈕）
+                    val vHandleSource = remember { MutableInteractionSource() }
+                    val vHandleHovered by vHandleSource.collectIsHoveredAsState()
+                    Box(
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .height(10.dp)
+                            .hoverable(vHandleSource)
+                            .pointerHoverIcon(verticalResizeIcon)
+                            .pointerInput(Unit) {
+                                detectDragGestures { change, dragAmount ->
+                                    change.consume()
+                                    val base = uiState.stickerPanelHeightDp.takeIf { it > 0 }
+                                        ?: panelHeight.value.toInt()
+                                    uiState.stickerPanelHeightDp =
+                                        (base + (dragAmount.y / density.density).roundToInt())
+                                            .coerceIn(StickerPanelMinHeightDp, StickerPanelMaxHeightDp)
+                                }
+                            },
+                    ) {
+                        Box(
+                            Modifier
+                                .align(Alignment.BottomCenter)
+                                .fillMaxWidth()
+                                .height(2.dp)
+                                .background(
+                                    if (vHandleHovered) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+                                    else Color.Transparent
+                                )
+                        )
+                    }
                     HoverTooltip(text = strings.stickerPanelResizeHint) {
                     Box(
                         Modifier

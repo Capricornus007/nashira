@@ -191,6 +191,12 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
      */
     var stickerPanelWidthDp by mutableIntStateOf(stored["stickerPanelWidth"]?.toIntOrNull() ?: 0)
 
+    /**
+     * 浮動態面板的高度（dp）。0 = 沒調過，由介面給預設。
+     * 用戶 2026-09-30 兩輪都嫌太高（「看起來依舊」），所以不再由我猜比例——拖下緣調整、當場存檔。
+     */
+    var stickerPanelHeightDp by mutableIntStateOf(stored["stickerPanelHeight"]?.toIntOrNull() ?: 0)
+
     /** 貼圖／表情面板停靠成右欄（而不是浮在右側）。雙擊面板左緣那條邊切換。 */
     var stickerPanelDocked by mutableStateOf(stored["stickerPanelDocked"] == "true")
 
@@ -225,6 +231,7 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
             "imeHeight" to imeHeightPx.toString(),
             "stickerTab" to if (stickerTabEmoji) "emoji" else "sticker",
             "stickerPanelWidth" to stickerPanelWidthDp.toString(),
+            "stickerPanelHeight" to stickerPanelHeightDp.toString(),
             "stickerPanelDocked" to stickerPanelDocked.toString(),
             "pureBlack" to pureBlack.toString(),
         ) + mapOf(

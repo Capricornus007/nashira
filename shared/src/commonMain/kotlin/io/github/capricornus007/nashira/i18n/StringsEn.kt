@@ -174,6 +174,7 @@ object EnStrings : Strings {
     override val jumpToOriginal = "Jump to the original message"
     override val jumpBackToPrevious = "Back to where you were"
     override val stickerPanelResizeHint = "Drag to change width · double-click to dock into the right column"
+    override val stickerPanelHeightHint = "Drag to change height"
     override val attachPhoto = "Photo"
     override val attachSticker = "Sticker"
     override val attachTitle = "Send"

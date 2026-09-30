@@ -136,6 +136,7 @@ interface Strings {
     val jumpToOriginal: String
     val jumpBackToPrevious: String
     val stickerPanelResizeHint: String
+    val stickerPanelHeightHint: String
     val attachPhoto: String
     val attachSticker: String
     val attachTitle: String

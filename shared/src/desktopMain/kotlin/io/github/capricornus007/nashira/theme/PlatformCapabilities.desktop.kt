@@ -16,3 +16,8 @@ actual val horizontalResizeIcon: androidx.compose.ui.input.pointer.PointerIcon
     get() = androidx.compose.ui.input.pointer.PointerIcon(
         java.awt.Cursor(java.awt.Cursor.E_RESIZE_CURSOR)
     )
+
+actual val verticalResizeIcon: androidx.compose.ui.input.pointer.PointerIcon
+    get() = androidx.compose.ui.input.pointer.PointerIcon(
+        java.awt.Cursor(java.awt.Cursor.S_RESIZE_CURSOR)
+    )
