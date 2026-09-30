@@ -169,6 +169,7 @@ import io.github.capricornus007.nashira.i18n.stringsFor
 import io.github.capricornus007.nashira.theme.audioDeviceSettingsSupported
 import io.github.capricornus007.nashira.theme.horizontalResizeIcon
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import kotlin.math.roundToInt
@@ -232,6 +233,7 @@ private val MessageGutterWidth = 52.dp
 
 /** 桌面貼圖／表情面板的寬度範圍（dp）；使用者拖過就改用存起來的那個值。 */
 private const val DefaultStickerPanelWidthDp = 380
+private const val DockedPanelDefaultWidthDp = 420
 private const val StickerPanelMinWidthDp = 260
 private const val StickerPanelMaxWidthDp = 760
 
@@ -318,7 +320,10 @@ fun ChatScreen(
     }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val compact = maxWidth < 720.dp
+        // 桌面版**不因為窗口變窄就退化成手機版面**：用戶 2026-09-30 拿 Telegram 半屏截圖點名
+        // 「半屏甚至都能，而 nashira 目前半屏跟移動端似的」。TG 半屏時照樣是三欄＋懸浮面板，
+        // 所以只有「軟鍵盤會頂起輸入列」的平台（手機）才用 720dp 這個寬閾值。
+        val compact = maxWidth < if (softKeyboardShiftsComposer) 720.dp else 420.dp
         PlatformBackHandler(enabled = directoryOpen) { directoryOpen = false }
         PlatformBackHandler(enabled = settingsOpen) { settingsOpen = false }
         AnimatedContent(
@@ -1778,6 +1783,15 @@ private fun TimelinePane(
     // 量到的結果寫進 UiState.imeHeightPx（會存檔），換聊天室不必重新量。
     val density = LocalDensity.current
     val uiState = LocalUiState.current
+
+    // 貼圖／表情面板：停靠態（右欄）與浮動態共用同一個寬度，拖過就存檔
+    val stickerPanelDocked = uiState.stickerPanelDocked && !membersOpen
+    val dockedPanelWidthDp = with(LocalDensity.current) {
+        val windowPx = LocalWindowInfo.current.containerSize.width
+        val cap = (windowPx - 40.dp.toPx()).toInt().coerceAtLeast(StickerPanelMinWidthDp)
+        (if (uiState.stickerPanelWidthDp > 0) uiState.stickerPanelWidthDp else DockedPanelDefaultWidthDp)
+            .dp.coerceIn(StickerPanelMinWidthDp.dp, cap.dp)
+    }
     var composerBaselineTopPx by remember(room.roomId) { mutableStateOf(0) }
     // 「＋」的附件選單（桌面是小彈窗、手機是底部面板）
     var attachMenu by remember(room.roomId) { mutableStateOf(false) }
@@ -1831,7 +1845,8 @@ private fun TimelinePane(
         // 浮動態的面板：打字框一拿到焦點就收起來。這是 Telegram 桌面版的行為
         // （用戶 2026-09-30 更正：「那邊只有固定在右邊欄的時候點輸入框打字才不會消失」）——
         // 「邊打字邊留在畫面上」屬於**停靠進右欄**那一種形態，不是浮動態。
-        if (composerFocused) stickerPanel = false
+        // 停靠進右欄時**不收**：那一種是常驻欄位，打字不该把它弄丢（TG 行為，用戶 2026-09-30 更正）
+        if (composerFocused && !stickerPanelDocked) stickerPanel = false
     }
     // 「檢視原始碼」對話框：null = 關；內容是 JSON 或載入失敗訊息
     var viewSource by remember(room.roomId) { mutableStateOf<String?>(null) }
@@ -2651,7 +2666,10 @@ private fun TimelinePane(
             }
         },
     ) { padding ->
-        Box(Modifier.fillMaxSize()) {
+        // 停靠態的面板是**右欄**（用戶 2026-09-30 那組 TG 截圖 #13：全高、貼頂、時間線變窄），
+        // 所以聊天區與面板並排成 Row；浮動態仍然疊在同一格上。
+        Row(Modifier.fillMaxSize()) {
+        Box(Modifier.weight(1f)) {
         // Trixnity 的 getLastTimelineEvents 回傳「新→舊」，所以用 reverseLayout：
         // index 0（最新）畫在最底部，新訊息自然從下方長出來，跟 Discord/Telegram 一致。
         LazyColumn(
@@ -2941,18 +2959,20 @@ private fun TimelinePane(
                     )
                 }
             }
-            AnimatedVisibility(
-                visible = stickerPanel && !compact,
+            androidx.compose.animation.AnimatedVisibility(
+                visible = stickerPanel && !compact && !stickerPanelDocked,
                 // 桌面：面板是**浮在右下角的小窗**（用戶截圖 #9——聊天區不縮，
                 // 面板蓋住右下角；右側欄被「聊天室資料」佔住時也是這樣浮著，#10）。
                 // 要把它固定進右欄是用戶既有那個「右側欄」開關的事，這裡不加切換鈕。
                 // 出現時從右下角往上滑一點＋淡入（64Gram 桌面版就是這個小幅度位移）。
                 enter = slideInVertically(tween(200)) { it / 6 } + fadeIn(tween(140)),
                 exit = fadeOut(tween(110)) + slideOutVertically(tween(170)) { it / 6 },
+                // 位置照 Telegram 桌面版：**貼右緣、垂直置中**（用戶 2026-09-30 那組 TG 截圖），
+                // 不是釘在右下角
                 modifier = Modifier
-                    .align(Alignment.BottomEnd)
+                    .align(Alignment.CenterEnd)
                     .zIndex(2f)
-                    .padding(end = 12.dp, bottom = 12.dp),
+                    .padding(end = 8.dp),
             ) {
                 // 右側浮動面板：**寬度可以拖左緣調整**並存檔（用戶 2026-09-30：
                 // 「你還沒做那個可變寬度的右側邊表情面板形態嗎？」）。
@@ -2967,20 +2987,28 @@ private fun TimelinePane(
                     (windowWidthPx - 40.dp.toPx()).toInt().coerceAtLeast(StickerPanelMinWidthDp).dp
                 }
                 val panelWidth = wantedDp.coerceIn(StickerPanelMinWidthDp.dp, maxDp)
+                val windowHeightDp = with(density) {
+                    LocalWindowInfo.current.containerSize.height.toDp()
+                }
+                // 高度：用戶 2026-09-30 嫌 68% 太高（「表情面板弄的有點高了？」）→ 壓到一半、
+                // 並且設一個絕對上限，大螢幕上不會跟著長成一面牆
+                val panelHeight = (windowHeightDp * 0.5f).coerceIn(320.dp, 520.dp)
                 Box(
                     Modifier
                         .width(panelWidth)
-                        .height(440.dp)
+                        .height(panelHeight)
                 ) {
                     stickerPanelContent(Modifier.fillMaxSize())
                     val handleSource = remember { MutableInteractionSource() }
                     val handleHovered by handleSource.collectIsHoveredAsState()
+                    HoverTooltip(text = strings.stickerPanelResizeHint) {
                     Box(
                         Modifier
                             .align(Alignment.CenterStart)
                             .fillMaxHeight()
                             .width(10.dp)
                             .hoverable(handleSource)
+                            .pointerHoverIcon(horizontalResizeIcon)
                             .pointerHoverIcon(horizontalResizeIcon)
                             .pointerInput(Unit) {
                                 detectDragGestures { change, dragAmount ->
@@ -2992,6 +3020,10 @@ private fun TimelinePane(
                                     uiState.stickerPanelWidthDp =
                                         next.coerceIn(StickerPanelMinWidthDp, StickerPanelMaxWidthDp)
                                 }
+                            }
+                            .pointerInput(Unit) {
+                                // 雙擊這條邊＝停靠進右欄／取消停靠（不加新按鈕，TG 也沒有多餘控件）
+                                detectTapGestures(onDoubleTap = { uiState.stickerPanelDocked = !uiState.stickerPanelDocked })
                             },
                     ) {
                         // 懸停才浮現的細線：告訴人這條邊拖得動（調整把手，不是自創按鈕）
@@ -3006,7 +3038,17 @@ private fun TimelinePane(
                                 )
                         )
                     }
+                    }
                 }
+            }
+        }
+            if (stickerPanelDocked && stickerPanel && !compact) {
+                StickerDockedColumn(
+                    widthDp = dockedPanelWidthDp,
+                    onWidthChanged = { uiState.stickerPanelWidthDp = it.value.roundToInt() },
+                    onUndock = { uiState.stickerPanelDocked = false },
+                    content = { mod -> stickerPanelContent(mod) },
+                )
             }
         }
     }
@@ -3455,6 +3497,59 @@ private fun DateDivider(label: String) {
             modifier = Modifier.padding(horizontal = 10.dp),
         )
         HorizontalDivider(Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant)
+    }
+}
+
+/**
+ * 停靠態的貼圖／表情面板：**全高的右欄**（用戶 2026-09-30 的 TG 截圖 #13——面板貼頂、
+ * 時間線跟著變窄）。左緣可拖調寬、雙擊這條邊＝退回浮動態。
+ */
+@Composable
+private fun StickerDockedColumn(
+    widthDp: Dp,
+    onWidthChanged: (Dp) -> Unit,
+    onUndock: () -> Unit,
+    content: @Composable (Modifier) -> Unit,
+) {
+    val density = LocalDensity.current
+    val handleSource = remember { MutableInteractionSource() }
+    val handleHovered by handleSource.collectIsHoveredAsState()
+    Box(
+        Modifier
+            .fillMaxHeight()
+            .width(widthDp)
+            .background(MaterialTheme.colorScheme.surfaceContainerLow),
+    ) {
+        content(Modifier.fillMaxSize())
+        Box(
+            Modifier
+                .align(Alignment.CenterStart)
+                .fillMaxHeight()
+                .width(10.dp)
+                .hoverable(handleSource)
+                .pointerHoverIcon(horizontalResizeIcon)
+                .pointerInput(Unit) {
+                    detectDragGestures { change, dragAmount ->
+                        change.consume()
+                        onWidthChanged(
+                            (widthDp - (dragAmount.x / density.density).dp)
+                                .coerceIn(StickerPanelMinWidthDp.dp, StickerPanelMaxWidthDp.dp),
+                        )
+                    }
+                }
+                .pointerInput(Unit) { detectTapGestures(onDoubleTap = { onUndock() }) },
+        ) {
+            Box(
+                Modifier
+                    .align(Alignment.CenterStart)
+                    .fillMaxHeight()
+                    .width(2.dp)
+                    .background(
+                        if (handleHovered) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+                        else Color.Transparent
+                    ),
+            )
+        }
     }
 }
 

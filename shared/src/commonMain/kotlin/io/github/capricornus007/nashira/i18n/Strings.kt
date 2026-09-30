@@ -135,6 +135,7 @@ interface Strings {
     val mediaNoFile: String
     val jumpToOriginal: String
     val jumpBackToPrevious: String
+    val stickerPanelResizeHint: String
     val attachPhoto: String
     val attachSticker: String
     val attachTitle: String

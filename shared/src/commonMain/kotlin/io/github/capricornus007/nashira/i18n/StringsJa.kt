@@ -294,4 +294,5 @@ object JaStrings : Strings by EnStrings {
     override val mediaNoFile = "サーバーからファイルが返されませんでした"
     override val jumpToOriginal = "元のメッセージへ移動"
     override val jumpBackToPrevious = "元の位置へ戻る"
+    override val stickerPanelResizeHint = "ドラッグで幅変更・ダブルクリックで右カラムに固定"
 }

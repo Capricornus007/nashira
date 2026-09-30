@@ -191,6 +191,9 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
      */
     var stickerPanelWidthDp by mutableIntStateOf(stored["stickerPanelWidth"]?.toIntOrNull() ?: 0)
 
+    /** 貼圖／表情面板停靠成右欄（而不是浮在右側）。雙擊面板左緣那條邊切換。 */
+    var stickerPanelDocked by mutableStateOf(stored["stickerPanelDocked"] == "true")
+
     init {
         AudioSelection.input = audioInput
         AudioSelection.output = audioOutput
@@ -222,6 +225,7 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
             "imeHeight" to imeHeightPx.toString(),
             "stickerTab" to if (stickerTabEmoji) "emoji" else "sticker",
             "stickerPanelWidth" to stickerPanelWidthDp.toString(),
+            "stickerPanelDocked" to stickerPanelDocked.toString(),
             "pureBlack" to pureBlack.toString(),
         ) + mapOf(
             "audioInput" to (audioInput ?: ""),

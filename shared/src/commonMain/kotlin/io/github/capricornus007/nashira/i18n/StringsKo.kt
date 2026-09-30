@@ -296,4 +296,5 @@ object KoStrings : Strings by EnStrings {
     override val mediaNoFile = "서버가 파일을 반환하지 않았습니다"
     override val jumpToOriginal = "원본 메시지로 이동"
     override val jumpBackToPrevious = "이전 위치로 돌아가기"
+    override val stickerPanelResizeHint = "드래그로 너비 조절 · 두 번 클릭하면 오른쪽 열에 고정"
 }
