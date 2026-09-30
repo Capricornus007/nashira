@@ -79,9 +79,6 @@ fun StickerPicker(
      */
     emojiFilter: String = "",
     modifier: Modifier = Modifier,
-    /** 停靠進右欄那一態：頁籤列要**釘在頂部**。浮動態與手機維持原本「隨捲動滑走」的行為
-     *  （用戶 2026-09-30 截圖 #34：停靠時頁籤被捲走，貼圖／表情兩頁都回不去）。 */
-    pinned: Boolean = false,
 ) {
     val client = roomRepository.client
     val repository = remember(client) { StickerRepository(client) }
@@ -150,9 +147,6 @@ fun StickerPicker(
                 Column(Modifier.fillMaxSize()) {
                 if (isEmoji) {
                     val emoticons by remember(client) { repository.emoticons() }.collectAsState(initial = emptyList())
-                    // 停靠態：頁籤列釘在上方、不跟著捲動（否則面板一長，頁籤被捲走就換不了頁）
-                    if (pinned) tabs()
-                    val blankHeader: @Composable () -> Unit = {}
                     EmojiBrowser(
                         strings = strings,
                         client = client,
@@ -160,7 +154,7 @@ fun StickerPicker(
                         onPickEmoji = onPickEmoji,
                         onPickEmoticon = onPickEmoticon,
                         query = emojiFilter,
-                        header = if (pinned) blankHeader else tabs,
+                        header = tabs,
                         modifier = Modifier.weight(1f),
                     )
                 } else if (packs.isEmpty()) {
@@ -331,7 +325,7 @@ internal fun StickerThumb(
                     // 第一輪縮圖失敗後立刻退回原圖，不要一直卡 spinner。
                     val preferThumbnail = !isVideo && attempt == 0
                     val result = if (preferThumbnail) {
-                        service.getThumbnail(source.mxcUrl, 240, 240, maxSize = MaxMediaBytes)
+                        service.getThumbnail(source.mxcUrl, 240, 240 * ThumbnailHeightFactor, maxSize = MaxMediaBytes)
                     } else {
                         service.getMedia(source.mxcUrl, maxSize = MaxMediaBytes)
                     }

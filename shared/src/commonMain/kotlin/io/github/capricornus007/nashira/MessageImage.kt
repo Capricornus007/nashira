@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import de.connect2x.trixnity.client.MatrixClient
@@ -63,39 +64,52 @@ fun MessageImage(
     // Telegram 橋的動態貼圖是 video/webm：縮圖端點回 400、圖片解碼器吃不下，
     // 要抓原檔抽第一幀（與貼圖面板同一套 decodeVideoFrame）。
     val isVideo = remember(mimeType) { mimeType?.startsWith("video/") == true }
-    LaunchedEffect(client, key) {
+    val maxWidth = if (isSticker) StickerMaxWidth else ImageMaxWidth
+    // 向伺服器要縮圖的尺寸要按「實際上要畫多大」算：264dp 在 2 倍縮放下是 528 實體像素，
+    // 固定要 800 的「長邊」對直式照片來說寬度只剩三四百像素，擺進 528 的框就是放大 → 必糊
+    //（用戶 2026-09-30 截圖 #42 對照 #41：同一張圖，全螢幕清楚、時間線糊）。
+    val density = LocalDensity.current
+    val boxPx = remember(density, maxWidth) { with(density) { maxWidth.toPx() }.toInt().coerceAtLeast(1) }
+    LaunchedEffect(client, key, boxPx) {
         if (bitmap != null) return@LaunchedEffect
         // 啟動初期伺服器版本還沒讀進來，請求會走舊版媒體端點被 404，所以失敗要重試幾次
         repeat(MediaFetchAttempts) { attempt ->
             if (attempt > 0) delay(MediaRetryDelayMillis * attempt)
+            val small = bitmap?.let { it.width < boxPx } == true
             val media = client.di.get<MediaService>().let { service ->
                 when (source) {
                     is MediaSource.Plain ->
-                        if (isVideo || attempt > 0) {
-                            // 影片沒有縮圖端點；圖片第一輪縮圖失敗也直接退原檔
-                            service.getMedia(source.mxcUrl, maxSize = MaxMediaBytes)
+                        if (isVideo || attempt > 0 || small) {
+                            // 影片沒有縮圖端點；縮圖不夠大（或第一輪失敗）就改抓原檔本機降採樣
+                            service.getMedia(source.mxcUrl, maxSize = OriginalMaxMediaBytes)
                         } else {
-                            service.getThumbnail(source.mxcUrl, TimelineThumbnailPx, TimelineThumbnailPx, maxSize = MaxMediaBytes)
+                            // 高度給 3 倍寬：scale 是「塞進這個框」，框不夠高會讓直式圖的寬度被壓掉
+                            service.getThumbnail(
+                                source.mxcUrl,
+                                boxPx.toLong(),
+                                boxPx.toLong() * ThumbnailHeightFactor,
+                                maxSize = MaxMediaBytes,
+                            )
                         }
-                    is MediaSource.Encrypted -> service.getEncryptedMedia(source.file, maxSize = MaxMediaBytes)
+                    is MediaSource.Encrypted -> service.getEncryptedMedia(source.file, maxSize = OriginalMaxMediaBytes)
                 }
             }.getOrNull()
             val bytes = media?.toByteArray(this) ?: return@repeat
             val decoded = if (isVideo) {
-                decodeVideoFrame(bytes, maxDimension = 512)
+                decodeVideoFrame(bytes, maxDimension = boxPx * 2)
             } else {
-                bytes.let { decodeImageBitmap(it) }
+                decodeImageBitmap(bytes, maxDimension = boxPx * 2)
             }
             if (decoded != null) {
                 MediaBitmapCache.put(key, decoded)
                 bitmap = decoded
-                return@LaunchedEffect
+                // 拿到夠寬的一張才算完；否則繼續下一輪去撈原檔
+                if (isVideo || decoded.width >= boxPx) return@LaunchedEffect
             }
         }
-        failed = true
+        if (bitmap == null) failed = true
     }
 
-    val maxWidth = if (isSticker) StickerMaxWidth else ImageMaxWidth
     // 事件裡的長寬只用來保留版位，避免圖片載入後把整條時間線往下推
     val ratio = ratioOf(width, height, bitmap)
     val frame = modifier
@@ -162,20 +176,14 @@ private fun ratioOf(width: Int?, height: Int?, bitmap: ImageBitmap?): Float {
 internal const val MaxMediaBytes = 2L * 1024 * 1024
 
 /**
- * 時間線縮圖的請求尺寸（長邊，實體像素）。
- *
- * 為什麼是 800 而不是原本的 480：顯示寬度上限是 264dp，本機 uiScale=1.75、
- * 手機常见 2.6~3.0，都要 500~800 實體像素才夠。要 480 等於請伺服器給一張
- * 比顯示位置還小的圖，再把它放大畫出去——那就是「點開之前就糊」的直接原因。
- * 800 也是 Element 時間線用的預設值，伺服器端普遍不會再往下壓。
+ * 縮圖請求框的高度倍數：伺服器的 `method=scale` 是「把圖塞進這個框」，
+ * 框給 800×800 時一張直式照片的**寬度**會被壓到 400 以下，擺進 528 實體像素的
+ * 顯示框就得放大 → 糊。高度給 3 倍寬，直式圖才能保住整條寬度。
  */
-internal const val TimelineThumbnailPx = 800L
+internal const val ThumbnailHeightFactor = 3L
 
-/** 時間線那張縮圖在快取裡的鍵；檢視器拿它當「先顯示的佔位圖」。 */
-internal fun mediaThumbnailCacheKey(source: MediaSource): String = when (source) {
-    is MediaSource.Plain -> source.mxcUrl
-    is MediaSource.Encrypted -> source.file.url
-}
+/** 退而抓原檔時的上限：原圖普遍 3–6 MiB，卡在同一個 2 MiB 會直接拿不到檔案。 */
+internal const val OriginalMaxMediaBytes = 8L * 1024 * 1024
 
 private fun MediaSource.cacheKey(): String = when (this) {
     is MediaSource.Plain -> mxcUrl
