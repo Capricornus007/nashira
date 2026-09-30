@@ -295,4 +295,5 @@ object KoStrings : Strings by EnStrings {
     override val mediaFetchTimeout = "30초 내 응답 없음 (연결 또는 원본 서버가 너무 느립니다)"
     override val mediaNoFile = "서버가 파일을 반환하지 않았습니다"
     override val jumpToOriginal = "원본 메시지로 이동"
+    override val jumpBackToPrevious = "이전 위치로 돌아가기"
 }

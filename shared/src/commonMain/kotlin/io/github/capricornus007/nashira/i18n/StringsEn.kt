@@ -172,6 +172,7 @@ object EnStrings : Strings {
     override val mediaFetchTimeout = "No response within 30 seconds (the connection or the origin server is too slow)"
     override val mediaNoFile = "The server returned no file"
     override val jumpToOriginal = "Jump to the original message"
+    override val jumpBackToPrevious = "Back to where you were"
     override val attachPhoto = "Photo"
     override val attachSticker = "Sticker"
     override val attachTitle = "Send"

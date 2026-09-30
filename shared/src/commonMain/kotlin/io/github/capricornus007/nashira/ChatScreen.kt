@@ -1541,6 +1541,12 @@ private fun TimelinePane(
     }
     // 從引用列跳過去之後短暫標亮目標（沒有這個回饋，跳轉看起來像沒生效）
     var highlightedEventId by remember(room.roomId) { mutableStateOf<String?>(null) }
+    /**
+     * 跳轉之前看的位置。點引用跳走後時間線會重建視窗，**沒有回頭路**
+     * （用戶 2026-09-30：「跳轉原始訊息之後又跳轉回不去是怎麼回事啊」）
+     * → 記下跳之前的錨點，右下角給一顆「跳回剛才的位置」。
+     */
+    var returnToEvent by remember(room.roomId) { mutableStateOf<EventId?>(null) }
     LaunchedEffect(highlightedEventId) {
         if (highlightedEventId != null) {
             delay(1800)
@@ -1548,8 +1554,7 @@ private fun TimelinePane(
         }
     }
     // 與伺服器的連線狀態：待送訊息卡住時要分得清「還在送」與「根本送不出去」
-    val syncState by remember(roomRepository) { roomRepository.client.syncState }
-        .collectAsState(initial = SyncState.RUNNING)
+    val syncState by remember(roomRepository) { roomRepository.client.syncState }        .collectAsState(initial = SyncState.RUNNING)
     val syncBroken = syncState == SyncState.ERROR || syncState == SyncState.TIMEOUT || syncState == SyncState.STOPPED
     val loadingMore = page?.loadingBefore == true
     // 標題副行與輸入框都用房間真正的別名，沒有別名就用房間名，不再假造 "#一般"
@@ -1823,10 +1828,10 @@ private fun TimelinePane(
     val focusManager = LocalFocusManager.current
     var composerFocused by remember(room.roomId) { mutableStateOf(false) }
     LaunchedEffect(composerFocused) {
-        // 只有「軟鍵盤會頂起輸入列」的平台（手機）才互斥：那裡面板與鍵盤疊在一起會蓋住打字欄。
-        // 桌面用實體鍵盤，點輸入框只是要繼續打字，不該把面板收掉
-        // （用戶 2026-09-30：「爲什麼在顯示表情面板的時候點擊輸入框那個表情面板就要收回去？」）。
-        if (composerFocused && softKeyboardShiftsComposer) stickerPanel = false
+        // 浮動態的面板：打字框一拿到焦點就收起來。這是 Telegram 桌面版的行為
+        // （用戶 2026-09-30 更正：「那邊只有固定在右邊欄的時候點輸入框打字才不會消失」）——
+        // 「邊打字邊留在畫面上」屬於**停靠進右欄**那一種形態，不是浮動態。
+        if (composerFocused) stickerPanel = false
     }
     // 「檢視原始碼」對話框：null = 關；內容是 JSON 或載入失敗訊息
     var viewSource by remember(room.roomId) { mutableStateOf<String?>(null) }
@@ -2391,17 +2396,15 @@ private fun TimelinePane(
                                 if (softKeyboardShiftsComposer) {
                                     runCatching { composerFocus.requestFocus() }
                                     keyboardController?.show()
-                                }
-                            } else {
-                                stickerPanel = true
-                                if (softKeyboardShiftsComposer) {
-                                    keyboardController?.hide()
-                                    focusManager.clearFocus()
                                 } else {
-                                    // 桌面：開面板時焦點留在打字框，才能邊打字邊篩貼圖／
-                                    // 打 :shortcode: 出候選（收掉焦點等於把這條路堵死）
                                     runCatching { composerFocus.requestFocus() }
                                 }
+                            } else {
+                                // 開面板時主動收掉輸入框焦點：面板是浮動態，留著焦點的話
+                                // 下面那條「拿到焦點就收面板」會立刻把它關掉
+                                stickerPanel = true
+                                keyboardController?.hide()
+                                focusManager.clearFocus()
                             }
                         },
                         modifier = Modifier.size(44.dp),
@@ -2710,6 +2713,9 @@ private fun TimelinePane(
                         highlighted = highlightedEventId != null && msg.eventId?.full == highlightedEventId,
                         onJumpToReply = { id ->
                             scope.launch {
+                                // 先記下現在看的位置，跳過去才回得來
+                                val where = loaded.getOrNull(listState.firstVisibleItemIndex)?.eventId
+                                if (where != null && where != id) returnToEvent = where
                                 timeline.jumpTo(id)
                                 highlightedEventId = id.full
                             }
@@ -2907,6 +2913,32 @@ private fun TimelinePane(
                             modifier = Modifier.size(24.dp),
                         )
                     }
+                }
+            }
+            // 跳轉過就要有回頭路（用戶 2026-09-30：「跳轉原始訊息之後又跳轉回不去」）
+            returnToEvent?.let { back ->
+                Surface(
+                    onClick = {
+                        scope.launch {
+                            returnToEvent = null
+                            timeline.jumpTo(back)
+                            highlightedEventId = back.full
+                        }
+                    },
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    shadowElevation = 4.dp,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .zIndex(1.6f)
+                        .padding(end = 12.dp, bottom = 12.dp),
+                ) {
+                    Text(
+                        strings.jumpBackToPrevious,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    )
                 }
             }
             AnimatedVisibility(

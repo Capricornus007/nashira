@@ -5,40 +5,34 @@ import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.layout.boundsInWindow
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupProperties
-import kotlin.math.roundToInt
+import androidx.compose.ui.zIndex
 
 /**
  * 懸停時在元素下方浮出一行說明。
  *
  * 桌面版 Compose 1.12 **沒有** tooltip API（把 ui-desktop 的 jar 解開 grep `tooltipText`
- * 查無此符號），所以自己用 Popup 畫。用途：把「下載失敗」這種一律同一句話的標示，
- * 補上真正的失敗原因（用戶 2026-09-30：「那你就做個懸浮顯示具體原因」）。
+ * 查無此符號），得自己畫。**不要改用 `Popup`**：Popup 的 offset 走的是另一套座標系，
+ * 實測同一個錨點會飄到視窗另一邊（用戶 2026-09-30：「爲什麼它這個懸浮提示也要錯位？」）。
+ * 畫在同一個 Box 裡就永遠貼著錨點，也不受窗口縮放／密度換算影響。
  */
 @Composable
 fun HoverTooltip(
     text: String?,
     modifier: Modifier = Modifier,
-    maxLines: Int = 3,
+    maxLines: Int = 2,
     content: @Composable () -> Unit,
 ) {
     if (text.isNullOrBlank()) {
@@ -47,39 +41,29 @@ fun HoverTooltip(
     }
     val source = remember(text) { MutableInteractionSource() }
     val hovered by source.collectIsHoveredAsState()
-    val density = LocalDensity.current
-    // Popup 的 offset 是「相對整個窗口」的像素座標，所以要先量元素在窗口裡的位置
-    var topLeft by remember(text) { mutableStateOf(Offset.Zero) }
-    var heightPx by remember(text) { mutableStateOf(0f) }
-    Box(
-        modifier
-            .onGloballyPositioned { node ->
-                val bounds = node.boundsInWindow()
-                topLeft = bounds.topLeft
-                heightPx = bounds.height
+    // zIndex：本 Box 在父層（訊息列的文字欄）裡要蓋住後面的兄弟節點，否則說明條會被
+    // 訊息本體那一段畫過去
+    Box(modifier.zIndex(4f).hoverable(source)) {
+        content()
+        if (hovered) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .offset(y = 6.dp)
+                    .background(MaterialTheme.colorScheme.inverseSurface, RoundedCornerShape(8.dp))
+                    .padding(horizontal = 9.dp, vertical = 5.dp),
+            ) {
+                Text(
+                    text,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.inverseOnSurface,
+                    maxLines = maxLines,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
-            .hoverable(source),
-        contentAlignment = Alignment.Center,
-    ) { content() }
-    if (!hovered) return
-    val gap = with(density) { 10.dp.toPx() }
-    Popup(
-        alignment = Alignment.TopStart,
-        offset = IntOffset((topLeft.x + gap).roundToInt(), (topLeft.y + heightPx + 4f).roundToInt()),
-        properties = PopupProperties(focusable = false),
-    ) {
-        Box(
-            Modifier
-                .background(MaterialTheme.colorScheme.inverseSurface, RoundedCornerShape(8.dp))
-                .padding(horizontal = 9.dp, vertical = 6.dp),
-        ) {
-            Text(
-                text,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.inverseOnSurface,
-                maxLines = maxLines,
-                overflow = TextOverflow.Ellipsis,
-            )
         }
     }
 }
+
+/** 沒有懸停說明時，直接沿用原來的容器。 */
+internal val NoTooltipColor: Color = Color.Transparent

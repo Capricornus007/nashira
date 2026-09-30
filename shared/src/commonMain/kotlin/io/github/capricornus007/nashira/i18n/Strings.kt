@@ -134,6 +134,7 @@ interface Strings {
     val mediaFetchTimeout: String
     val mediaNoFile: String
     val jumpToOriginal: String
+    val jumpBackToPrevious: String
     val attachPhoto: String
     val attachSticker: String
     val attachTitle: String

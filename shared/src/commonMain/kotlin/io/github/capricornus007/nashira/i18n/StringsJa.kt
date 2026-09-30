@@ -293,4 +293,5 @@ object JaStrings : Strings by EnStrings {
     override val mediaFetchTimeout = "30 秒以内に応答なし（接続または配信元サーバーが遅すぎます）"
     override val mediaNoFile = "サーバーからファイルが返されませんでした"
     override val jumpToOriginal = "元のメッセージへ移動"
+    override val jumpBackToPrevious = "元の位置へ戻る"
 }
