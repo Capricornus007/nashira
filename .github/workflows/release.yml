@@ -46,6 +46,39 @@ jobs:
           echo "Packages:"
           ls -la desktopApp/build/compose/binaries/main/ 2>/dev/null || true
 
+      - name: Verify release APK signature
+        # 收口：上面 Decode Keystore 帶 if 條件，RELEASE_KEYSTORE 那個 secret 一旦不見
+        # 就會靜默跳過、gradle 照跑、CI 照綠，而產物完全沒簽（moregramX 這樣連發了一個月）。
+        # 所以驗「產物」不驗「配置」：v1+v2+v3 要齊、憑證 SHA-256 要對得上基準值。
+        # --min-sdk-version 21 不可省：包 minSdk≥24 時 apksigner 會跳過 v1 檢查直接回 false。
+        run: |
+          set -euo pipefail
+          APK="$(ls androidApp/build/outputs/apk/release/*.apk | head -1)"
+          APKSIGNER="$(find "${ANDROID_HOME:-/opt/android-sdk}" -name apksigner -type f 2>/dev/null | head -1)"
+          if [ -z "$APKSIGNER" ]; then
+            echo "::error::找不到 apksigner，無法驗收公開發布包"
+            exit 1
+          fi
+          if ! OUT="$("$APKSIGNER" verify -v --min-sdk-version 21 "$APK" 2>&1)"; then
+            printf '%s\n' "$OUT"
+            echo "::error::產物簽名校驗失敗（很可能根本沒簽）"
+            exit 1
+          fi
+          printf '%s\n' "$OUT" | grep -E '^Verified using'
+          for scheme in v1 v2 v3; do
+            if ! printf '%s\n' "$OUT" | grep -q "Verified using ${scheme} scheme.*: true"; then
+              echo "::error::產物缺少 ${scheme} 簽名"
+              exit 1
+            fi
+          done
+          # keytool 回大寫十六進位，基準值是小寫——不統一大小寫會把好包判成壞包（本地實測踩到）。
+          SHA="$(keytool -printcert -jarfile "$APK" | grep -m1 -oE 'SHA256: [0-9A-F:]+' | cut -d' ' -f2 | tr -d ':' | tr 'A-Z' 'a-z')"
+          if [ "$SHA" != "67d935baa2ac5c8ee8733f180b38603af6f0ba268dc0bbd5436e5dc4840034cd" ]; then
+            echo "::error::簽名憑證與基準值不符（得到 $SHA）——可能退回 runner 隨機 debug 鑰"
+            exit 1
+          fi
+          echo "v1+v2+v3 齊全、憑證對得上基準值"
+
       - name: Determine release tag
         id: tag
         # dispatch 的 input 走 env 帶進來，不要直接插值進 shell（那樣等於讓
