@@ -927,6 +927,23 @@ class RoomRepository(val client: MatrixClient) {
     }
 
     /**
+     * 所有被靜音的房間 ID，全清單共用一份。
+     *
+     * 為什麼不逐間呼叫 [isMuted]：聊天室列表一屏就十几間，每間各發一次
+     * `GET /pushrules` 會把列表變成十几次往返；而徽章是每帧都要讀的東西。
+     * 啟動時由 ChatScreen 觸發一次 [refreshMutedRoomIds]，之後每次 [setMuted] 自己重讀。
+     */
+    val mutedRoomIds = kotlinx.coroutines.flow.MutableStateFlow<Set<String>>(emptySet())
+
+    suspend fun refreshMutedRoomIds() {
+        val rules = client.api.push.getPushRules().getOrNull() ?: return
+        mutedRoomIds.value = rules.global.room.orEmpty()
+            .filter { it.enabled && it.actions.none { action -> action is PushAction.Notify } }
+            .map { it.ruleId }
+            .toSet()
+    }
+
+    /**
      * 靜音／取消靜音。靜音＝新增一條 actions 為空的 room 規則；
      * 取消＝把那條規則刪掉（回到預設規則，該通知就通知）。
      */
@@ -941,6 +958,7 @@ class RoomRepository(val client: MatrixClient) {
         } else {
             client.api.push.deletePushRule("global", PushRuleKind.ROOM, roomId.full).getOrThrow()
         }
+        refreshMutedRoomIds()
         Unit
     }
 

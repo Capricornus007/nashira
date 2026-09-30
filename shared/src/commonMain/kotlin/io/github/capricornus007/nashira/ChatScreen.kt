@@ -309,7 +309,11 @@ fun ChatScreen(
     val unreadFlow = remember(roomRepository) { roomRepository.unreadByRoom() }
     val allUnread by unreadFlow.collectAsState(initial = emptyMap())
     // 關閉未讀提示時直接給空 map，白條與紅圈就都不畫
-    val unreadByRoom = if (showUnread) allUnread else emptyMap()
+    // 靜音的房間一律不進徽章（用戶 2026-09-30 #48/#50：設了靜音還冒紅點）。
+    // 在這裡一次攔掉，聊天室列、Space 總和、首頁格才會跟著一起少；逐處判斷遲早漏一處。
+    val mutedIds by roomRepository.mutedRoomIds.collectAsState()
+    LaunchedEffect(roomRepository) { roomRepository.refreshMutedRoomIds() }
+    val unreadByRoom = if (!showUnread) emptyMap() else allUnread.filterKeys { it.full !in mutedIds }
     val unreadBySpace = remember(snapshot, unreadByRoom) {
         snapshot.spaces.associate { space ->
             space.roomId to snapshot.rooms

@@ -83,6 +83,9 @@ internal suspend fun watchNotifications(client: MatrixClient, myUserId: UserId) 
                 MessageBody.Undecryptable -> strings.notifUndecryptable
             }
             val roomId = event.roomId
+            // 靜音的房間不彈系統通知（用戶 2026-09-30 #48：設了靜音還在通知）。
+            // 逐則查一次就好：通知本就稀有，為它展開整份推播規則流反而更貴。
+            if (rooms.isMuted(roomId)) return@collect
             // 單一房間查詢就好：每來一則通知都展開整份摘要流會炸記憶體
             val roomName = rooms.roomName(roomId) ?: roomId.full
             val senderName = rooms.memberName(roomId, event.sender)

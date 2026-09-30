@@ -239,3 +239,24 @@ P6-1 threads、P6-2 位置分享、P6-3 polls、P6-8 語音/視訊通話（無 W
 - `profile?.displayName` 需 `import de.connect2x.trixnity.clientserverapi.model.user.displayName`。
 - 訊息內容的 msgtype 分發寫死在 `RoomMessageEventContent.Serializer` → 帶不上 `m.voice` 這類自訂 msgtype。
 - 已讀標記：`setReadMarkers(roomId, fullyRead, read)`，兩個都給才是 Element 的「標記為已讀」。
+
+## v0.1.33（2026-09-30）
+- **時間線縮圖糊（#57）**：根因不是 filterQuality，是**要圖的框**。原本固定請伺服器給「長邊 800」，
+  直式照片的 800 花在高度上、寬度只剩三百多像素，擺進 264dp（本機 2 倍＝528 實體像素）的格子就是放大。
+  改成按顯示框的實體寬要圖、框高給 3 倍寬（`ThumbnailHeightFactor`），伺服器給的還是窄就退抓原檔
+  本機降採樣（`OriginalMaxMediaBytes` 8 MiB，原本沿用縮圖的 2 MiB 會直接拿不到檔）。
+  另：`ImageDecode.desktop.kt` 的 `drawImageRect` 沒給取樣模式＝**最近鄰**，長圖縮到 1024 會出鋸齒，
+  換成 `SamplingMode.MITCHELL`（用戶 2026-09-29「點開之後也沒多清楚」的元兇）。
+- **面板寬度拆兩欄**：懸浮寬與停靠寬原本共用 `stickerPanelWidth`，懸浮拖到最寬會把停靠永遠頂在上限、
+  停靠拖窄又把懸浮壓成一條。新增 `stickerPanelDockWidth`。懸浮上限 760→480（TG 彈窗的量），
+  停靠上限＝窗口寬 42%。
+- **托盤右鍵選單下方一大塊空白（#79）**：實測印出 `contentSize=400x236`，換算回來**正好等於窗口初始
+  200x118**——先前為根治「右側白線」把 Surface 改成 `fillMaxSize`，結果窗口尺寸變成內容的**最小約束**，
+  「照內容縮窗口」那圈永遠收不動。Column 外面加 `wrapContentSize(unbounded = true)` 让它量真實大小。
+- **右鍵選單錯位（#80）與開在中間（#52）**：`PointerInputScope` 的 `change.position` 是**視窗座標**，
+  被當成「列內局部位移」用，等於多疊一次該列在視窗裡的 y。改成先 `onGloballyPositioned` 記下該列視窗
+  原點與高度，再換算成「相對該列左下角」的位移，選單左上角才會落在指針上。
+  ⚠ 這條**建置通過但沒實測驗證过**（截圖時焦點在用戶工作區，不能動他的桌面）。
+- **靜音還冒紅點（#81）**：徽章原本完全不看靜音狀態。`RoomRepository.mutedRoomIds`（StateFlow，
+  啟動讀一次、`setMuted` 後重讀，不逐間問伺服器）→ ChatScreen 在 `unreadByRoom` 這一層就把靜音房間濾掉，
+  聊天室列／Space 總和／首頁格三處一起跟著少；`Notifications.kt` 也加 `isMuted` 跳過系統通知。

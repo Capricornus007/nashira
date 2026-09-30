@@ -25,6 +25,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
@@ -446,8 +448,13 @@ fun main(args: Array<String>) {
                             // 空白。Column 先按最長那條文字收緊，fillMaxWidth 填的才是內容寬。
                             // 注意要用 IntrinsicSize.**Max**：Min 會收到「最長那個詞」，
                             //「開啟 Nashira」就被掰成兩行（用戶 2026-09-29 照片）。
+                            // wrapContentSize(unbounded) 是「選單下方一大塊空白」的根治（用戶 2026-09-30 #49/#50）：
+                            // 上面 Surface 的 fillMaxSize 讓窗口尺寸變成 Column 的**最小約束**，
+                            // 實測 contentSize 永遠回報 400x236（＝窗口原尺寸 est 200x118 的兩倍實體 px），
+                            // 於是「照內容縮窗口」那圈永遠縮不下去。unbounded 讓它按真實內容量。
                             Column(
                                 modifier = Modifier
+                                    .wrapContentSize(Alignment.TopStart, unbounded = true)
                                     .width(IntrinsicSize.Max)
                                     .onSizeChanged { contentSize = it },
                             ) {
