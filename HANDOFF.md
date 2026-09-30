@@ -260,3 +260,11 @@ P6-1 threads、P6-2 位置分享、P6-3 polls、P6-8 語音/視訊通話（無 W
 - **靜音還冒紅點（#81）**：徽章原本完全不看靜音狀態。`RoomRepository.mutedRoomIds`（StateFlow，
   啟動讀一次、`setMuted` 後重讀，不逐間問伺服器）→ ChatScreen 在 `unreadByRoom` 這一層就把靜音房間濾掉，
   聊天室列／Space 總和／首頁格三處一起跟著少；`Notifications.kt` 也加 `isMuted` 跳過系統通知。
+
+## v0.1.34（2026-09-30）
+- **靜音房間的紅點還是留著**（用戶追問「本該靜音的未讀 1 什麼時候修理」）。查出來是 v0.1.33 那支
+  修補自己的洞：靜音清單只在 ChatScreen 啟動時讀一次 `GET /pushrules`，而那一刻同步還沒跑完、
+  這趟會失敗，我寫成 `?: return` → 清單永遠空集合，紅點照畫，要重啟才會好。
+  改成 `refreshMutedRoomIds(attempts = 6)` 退避重試；`setMuted` 先就地改快取再對帳。
+- **右鍵選單定位退回 820bda8 的行為**（`fbdceec`）。今天兩版都更糟，實測數據與下一輪入口寫在
+  待辦 #80；重點是「桌面端 Popup 的 anchorBounds／windowSize 語意未確認，別再憑猜改」。
