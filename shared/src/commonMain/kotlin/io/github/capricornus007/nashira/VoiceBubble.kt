@@ -56,6 +56,9 @@ fun VoiceBubble(
     modifier: Modifier = Modifier,
     fetchFailedLabel: String? = null,
     unsupportedLabel: String? = null,
+    /** 懸停說明的兩條備選文案（逾時／伺服器沒回檔），由呼叫端傳本地化字串。 */
+    fetchTimeoutLabel: String? = null,
+    noFileLabel: String? = null,
 ) {
     val player = remember(source) { AudioPlayer() }
     DisposableEffect(source) {
@@ -63,6 +66,8 @@ fun VoiceBubble(
     }
     var bytes by remember(source) { mutableStateOf(VoiceBytesCache.get(source)) }
     var failed by remember(source) { mutableStateOf(false) }
+    // 失敗的具體原因（懸停顯示）：只寫「下載失敗」分不清是來源伺服器掛了還是我們抓錯東西
+    var failReason by remember(source) { mutableStateOf<String?>(null) }
     var playing by remember(source) { mutableStateOf(false) }
     var position by remember(source) { mutableStateOf(0L) }
     var prepared by remember(source) { mutableStateOf(false) }
@@ -74,11 +79,22 @@ fun VoiceBubble(
     LaunchedEffect(source, retryToken) {
         if (bytes == null && !failed) {
             val fetched = withTimeoutOrNull(30_000) {
-                withContext(Dispatchers.Default) { fetchMediaBytes(client, source) }
+                withContext(Dispatchers.Default) { fetchMediaWithError(client, source) }
             }
-            if (fetched == null) failed = true else {
-                VoiceBytesCache.put(source, fetched)
-                bytes = fetched
+            if (fetched == null) {
+                failed = true
+                failReason = fetchTimeoutLabel
+            } else {
+                val (data, error) = fetched
+                if (data != null) {
+                    VoiceBytesCache.put(source, data)
+                    bytes = data
+                    failReason = null
+                } else {
+                    failed = true
+                    failReason = error?.let { io.github.capricornus007.nashira.i18n.friendlyError(it) }
+                        ?: noFileLabel
+                }
             }
         }
     }
@@ -110,29 +126,31 @@ fun VoiceBubble(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         when {
-            failed -> Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(10.dp))
-                    .clickable {
-                        // 點一下重試（VPN 恢復後手動補抓，不再要求重進房間）
-                        failed = false
-                        retryToken += 1
-                    }
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-            ) {
-                Icon(
-                    Icons.Filled.Refresh,
-                    contentDescription = null,
-                    modifier = Modifier.size(14.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    (if (bytes == null) fetchFailedLabel else unsupportedLabel) ?: formatVoiceDuration(total),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 6.dp),
-                )
+            failed -> HoverTooltip(text = failReason) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable {
+                            // 點一下重試（VPN 恢復後手動補抓，不再要求重進房間）
+                            failed = false
+                            retryToken += 1
+                        }
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.Refresh,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        (if (bytes == null) fetchFailedLabel else unsupportedLabel) ?: formatVoiceDuration(total),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 6.dp),
+                    )
+                }
             }
             bytes == null -> Row(
                 verticalAlignment = Alignment.CenterVertically,

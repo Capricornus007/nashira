@@ -167,6 +167,11 @@ import de.connect2x.trixnity.clientserverapi.model.user.displayName
 import de.connect2x.trixnity.client.room
 import io.github.capricornus007.nashira.i18n.stringsFor
 import io.github.capricornus007.nashira.theme.audioDeviceSettingsSupported
+import io.github.capricornus007.nashira.theme.horizontalResizeIcon
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlin.math.roundToInt
 import io.github.capricornus007.nashira.matrix.MatrixSession
 import io.github.capricornus007.nashira.matrix.RoomRepository
 import io.github.capricornus007.nashira.matrix.MediaSource
@@ -224,6 +229,11 @@ private val PaneSlideSpec: AnimationSpec<Float> =
     spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow, visibilityThreshold = 0.5f)
 private val DiscordMemberWidth = 224.dp
 private val MessageGutterWidth = 52.dp
+
+/** 桌面貼圖／表情面板的寬度範圍（dp）；使用者拖過就改用存起來的那個值。 */
+private const val DefaultStickerPanelWidthDp = 380
+private const val StickerPanelMinWidthDp = 260
+private const val StickerPanelMaxWidthDp = 760
 
 /** Discord／Matrix Spaces 式主畫面：Space 欄、聊天室欄、訊息區與成員欄。 */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1511,6 +1521,36 @@ private fun TimelinePane(
     // 變化都會觸發重組）。page 每次事件變動都是 copy 出来的新物件（見
     // RoomTimeline 的 pageFlow 註解），拿它當 remember 鑰匙不會卡在舊列表。
     val messages = remember(page, ignoredUsers) { page?.messages?.filter { it.sender !in ignoredUsers } }
+    // 回覆引用指向的那則**不在本機視窗**時（橋接過來的舊訊息），原本只能畫「原始訊息」
+    // 四個字。向伺服器補要發話人與一行預覽（用戶 2026-09-30 點名）。
+    var replyContexts by remember(room.roomId) { mutableStateOf<Map<String, Pair<String, String>>>(emptyMap()) }
+    val missingReplyIds = remember(messages, replyContexts) {
+        val list = messages.orEmpty()
+        list.asSequence()
+            .mapNotNull { it.replyToEventId?.full }
+            .filter { id -> list.none { it.eventId?.full == id } && id !in replyContexts }
+            .distinct()
+            .toList()
+    }
+    LaunchedEffect(missingReplyIds) {
+        missingReplyIds.forEach { id ->
+            roomRepository.replyContext(room.roomId, EventId(id)).onSuccess { pair ->
+                if (pair != null) replyContexts = replyContexts + (id to pair)
+            }
+        }
+    }
+    // 從引用列跳過去之後短暫標亮目標（沒有這個回饋，跳轉看起來像沒生效）
+    var highlightedEventId by remember(room.roomId) { mutableStateOf<String?>(null) }
+    LaunchedEffect(highlightedEventId) {
+        if (highlightedEventId != null) {
+            delay(1800)
+            highlightedEventId = null
+        }
+    }
+    // 與伺服器的連線狀態：待送訊息卡住時要分得清「還在送」與「根本送不出去」
+    val syncState by remember(roomRepository) { roomRepository.client.syncState }
+        .collectAsState(initial = SyncState.RUNNING)
+    val syncBroken = syncState == SyncState.ERROR || syncState == SyncState.TIMEOUT || syncState == SyncState.STOPPED
     val loadingMore = page?.loadingBefore == true
     // 標題副行與輸入框都用房間真正的別名，沒有別名就用房間名，不再假造 "#一般"
     val aliasFlow = remember(roomRepository, room.roomId) { roomRepository.canonicalAlias(room.roomId) }
@@ -1783,8 +1823,10 @@ private fun TimelinePane(
     val focusManager = LocalFocusManager.current
     var composerFocused by remember(room.roomId) { mutableStateOf(false) }
     LaunchedEffect(composerFocused) {
-        // 打字就收面板：64Gram／Telegram 都是這個行為，面板沒有「釘住」這種東西
-        if (composerFocused) stickerPanel = false
+        // 只有「軟鍵盤會頂起輸入列」的平台（手機）才互斥：那裡面板與鍵盤疊在一起會蓋住打字欄。
+        // 桌面用實體鍵盤，點輸入框只是要繼續打字，不該把面板收掉
+        // （用戶 2026-09-30：「爲什麼在顯示表情面板的時候點擊輸入框那個表情面板就要收回去？」）。
+        if (composerFocused && softKeyboardShiftsComposer) stickerPanel = false
     }
     // 「檢視原始碼」對話框：null = 關；內容是 JSON 或載入失敗訊息
     var viewSource by remember(room.roomId) { mutableStateOf<String?>(null) }
@@ -2346,12 +2388,20 @@ private fun TimelinePane(
                             if (stickerPanel) {
                                 // 面板開著→這顆是「叫回輸入法」：收面板、把焦點給文字欄並彈鍵盤
                                 stickerPanel = false
-                                runCatching { composerFocus.requestFocus() }
-                                keyboardController?.show()
+                                if (softKeyboardShiftsComposer) {
+                                    runCatching { composerFocus.requestFocus() }
+                                    keyboardController?.show()
+                                }
                             } else {
                                 stickerPanel = true
-                                keyboardController?.hide()
-                                focusManager.clearFocus()
+                                if (softKeyboardShiftsComposer) {
+                                    keyboardController?.hide()
+                                    focusManager.clearFocus()
+                                } else {
+                                    // 桌面：開面板時焦點留在打字框，才能邊打字邊篩貼圖／
+                                    // 打 :shortcode: 出候選（收掉焦點等於把這條路堵死）
+                                    runCatching { composerFocus.requestFocus() }
+                                }
                             }
                         },
                         modifier = Modifier.size(44.dp),
@@ -2647,12 +2697,23 @@ private fun TimelinePane(
                     // Discord 回覆上下文：目標事件在目前視窗內才拿得到名字/預覽；
                     // 不在視窗（更早的歷史）就只畫「回覆」不帶內容。
                     val replyTarget = msg.replyToEventId?.let { rid -> loaded.firstOrNull { it.eventId == rid } }
+                    val remoteReply = msg.replyToEventId?.full
+                        ?.takeIf { replyTarget == null }
+                        ?.let { replyContexts[it] }
                     MessageRow(
                         client = roomRepository.client,
                         msg = msg,
                         grouped = grouped,
-                        replyToName = replyTarget?.senderName,
-                        replyToPreview = replyTarget?.let { bodyPreview(it.body) },
+                        replyToName = replyTarget?.senderName ?: remoteReply?.first,
+                        replyToPreview = replyTarget?.let { bodyPreview(it.body) } ?: remoteReply?.second,
+                        syncBroken = syncBroken,
+                        highlighted = highlightedEventId != null && msg.eventId?.full == highlightedEventId,
+                        onJumpToReply = { id ->
+                            scope.launch {
+                                timeline.jumpTo(id)
+                                highlightedEventId = id.full
+                            }
+                        },
                         strings = strings,
                         isOwn = msg.sender == roomRepository.client.userId,
                         selected = msg.eventId in selectedEventIds,
@@ -2674,13 +2735,22 @@ private fun TimelinePane(
                             val tx = msg.outboxTransactionId
                             scope.launch {
                                 roomRepository.sendText(msg.roomId, text.text, text.formattedBody)
+                                    .onFailure { sendError = io.github.capricornus007.nashira.i18n.friendlyError(it) }
                                 // 重發成功後把卡住的那筆清掉，否則時間線會同時出現兩則
-                                tx?.let { roomRepository.dropPendingMessage(msg.roomId, it) }
+                                tx?.let { id ->
+                                    roomRepository.dropPendingMessage(msg.roomId, id)
+                                        .onFailure { sendError = strings.dropPendingFailed + "：" + (it.message ?: "") }
+                                }
                             }
                         },
                         onDropPending = {
                             msg.outboxTransactionId?.let { tx ->
-                                scope.launch { roomRepository.dropPendingMessage(msg.roomId, tx) }
+                                scope.launch {
+                                    // 失敗一定要講出來：他 2026-09-29「點刪除一點反應都木有」，
+                                    // 就是因為原本的程式把 Result 丟掉了
+                                    roomRepository.dropPendingMessage(msg.roomId, tx)
+                                        .onFailure { sendError = strings.dropPendingFailed + "：" + (it.message ?: "") }
+                                }
                             }
                         },
                         onIgnoreUser = {
@@ -2852,12 +2922,58 @@ private fun TimelinePane(
                     .zIndex(2f)
                     .padding(end = 12.dp, bottom = 12.dp),
             ) {
+                // 右側浮動面板：**寬度可以拖左緣調整**並存檔（用戶 2026-09-30：
+                // 「你還沒做那個可變寬度的右側邊表情面板形態嗎？」）。
+                // 同時照舊夾在窗口寬度內——半屏窗口時不準撐破畫面（#60 的教訓）。
+                val density = LocalDensity.current
+                val windowWidthPx = LocalWindowInfo.current.containerSize.width
+                val wantedDp = (
+                    if (uiState.stickerPanelWidthDp > 0) uiState.stickerPanelWidthDp
+                    else DefaultStickerPanelWidthDp
+                    ).dp
+                val maxDp = with(density) {
+                    (windowWidthPx - 40.dp.toPx()).toInt().coerceAtLeast(StickerPanelMinWidthDp).dp
+                }
+                val panelWidth = wantedDp.coerceIn(StickerPanelMinWidthDp.dp, maxDp)
                 Box(
                     Modifier
-                        .width(380.dp)
+                        .width(panelWidth)
                         .height(440.dp)
                 ) {
                     stickerPanelContent(Modifier.fillMaxSize())
+                    val handleSource = remember { MutableInteractionSource() }
+                    val handleHovered by handleSource.collectIsHoveredAsState()
+                    Box(
+                        Modifier
+                            .align(Alignment.CenterStart)
+                            .fillMaxHeight()
+                            .width(10.dp)
+                            .hoverable(handleSource)
+                            .pointerHoverIcon(horizontalResizeIcon)
+                            .pointerInput(Unit) {
+                                detectDragGestures { change, dragAmount ->
+                                    change.consume()
+                                    val base = uiState.stickerPanelWidthDp
+                                        .takeIf { it > 0 } ?: panelWidth.value.toInt()
+                                    // 面板釘在右緣：往左拖＝變寬，所以 dragAmount.x 取負
+                                    val next = base - (dragAmount.x / density.density).roundToInt()
+                                    uiState.stickerPanelWidthDp =
+                                        next.coerceIn(StickerPanelMinWidthDp, StickerPanelMaxWidthDp)
+                                }
+                            },
+                    ) {
+                        // 懸停才浮現的細線：告訴人這條邊拖得動（調整把手，不是自創按鈕）
+                        Box(
+                            Modifier
+                                .align(Alignment.CenterStart)
+                                .fillMaxHeight()
+                                .width(2.dp)
+                                .background(
+                                    if (handleHovered) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+                                    else Color.Transparent
+                                )
+                        )
+                    }
                 }
             }
         }
@@ -3344,6 +3460,12 @@ private fun MessageRow(
     /** 回覆上下文（Discord 式「↩ 名字: 預覽」）：目標在視窗內才有值。 */
     replyToName: String? = null,
     replyToPreview: String? = null,
+    /** 點引用列跳到被回覆的那則（用戶 2026-09-30：「點擊原始訊息無法跳轉到那個地方，爲什麼」）。 */
+    onJumpToReply: (EventId) -> Unit = {},
+    /** 剛跳轉過去時短暫標亮，否則使用者不知道跳到哪。 */
+    highlighted: Boolean = false,
+    /** 與伺服器的連線狀態異常：待送訊息要講清楚是「還在送」還是「送不出去」。 */
+    syncBroken: Boolean = false,
 )
 {
     // 選單狀態的 key 不能只用 eventId：**待送訊息的 eventId 是 null**，同一屏裡所有
@@ -3352,6 +3474,17 @@ private fun MessageRow(
     val rowKey = msg.eventId?.full ?: msg.outboxTransactionId ?: "${msg.sender.full}-${msg.timestamp}"
     var menuOpen by remember(rowKey) { mutableStateOf(false) }
     var menuAnchor by remember(rowKey) { mutableStateOf(Offset.Unspecified) }
+    // 待送訊息要有真狀態。Trixnity 對「憑證被拒／網路斷線」這類失敗**不寫 sendError**，
+    // 只在背後無限重試（2026-09-30 實測：三筆待送掛了一整天、資料庫裡連錯誤都是空的），
+    // 所以不能只等 sendError——超過 15 秒還沒被伺服器回音，就明講「未送達」。
+    var nowMs by remember(rowKey) { mutableStateOf(kotlin.time.Clock.System.now().toEpochMilliseconds()) }
+    LaunchedEffect(rowKey, msg.pending) {
+        while (msg.pending) {
+            delay(1000)
+            nowMs = kotlin.time.Clock.System.now().toEpochMilliseconds()
+        }
+    }
+    val pendingStale = msg.pending && msg.sendError == null && nowMs - msg.timestamp > 15_000
     // 反應選擇器：跟 action 選單分開兩個彈窗，從 hover 列的笑臉鈕或選單裡那列開
     var reactOpen by remember { mutableStateOf(false) }
     var reactAnchor by remember { mutableStateOf(Offset.Unspecified) }
@@ -3361,7 +3494,14 @@ private fun MessageRow(
     Box(
         Modifier
             .fillMaxWidth()
-            .background(if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.42f) else Color.Transparent)
+            .background(
+                when {
+                    selected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.42f)
+                    // 剛從引用列跳過來：標亮一下，否則使用者不知道跳到哪
+                    highlighted -> MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                    else -> Color.Transparent
+                }
+            )
             // hover 區掛在整個 Box（訊息列＋快捷列）：掛在 Row 上時，快捷列
             // 是疊在 Row 上的兄弟節點，指針移到列上 Row 收到 hover-exit →
             // 列卸載 → 指針落回 Row → 列重現——菜單和訊息列無限閃爍
@@ -3422,33 +3562,46 @@ private fun MessageRow(
                     }
                 }
                 // Discord 式回覆上下文：↩ 名字（主色）: 預覽（灰），單行截斷。
-                if (msg.replyToEventId != null) {
-                    Row(
-                        Modifier.padding(bottom = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            BarIcons.Reply,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(15.dp),
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text(
-                            buildAnnotatedString {
-                                withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)) {
-                                    append(replyToName ?: strings.replyOriginal)
-                                }
-                                if (replyToPreview != null) {
-                                    withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurfaceVariant)) {
-                                        append(": $replyToPreview")
+                // 整列可點→跳到被回覆的那則（用戶 2026-09-30：「點擊原始訊息無法跳轉到那個地方」；
+                // 原本這只是個純 Text，根本沒接點擊）。
+                val replyId = msg.replyToEventId
+                if (replyId != null) {
+                    HoverTooltip(text = strings.jumpToOriginal) {
+                        val quoteSource = remember(rowKey) { MutableInteractionSource() }
+                        val quoteHovered by quoteSource.collectIsHoveredAsState()
+                        Row(
+                            Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(if (quoteHovered) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent)
+                                .hoverable(quoteSource)
+                                .clickable { onJumpToReply(replyId) }
+                                .padding(vertical = 1.dp)
+                                .padding(bottom = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                BarIcons.Reply,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(15.dp),
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                buildAnnotatedString {
+                                    withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)) {
+                                        append(replyToName ?: strings.replyOriginal)
                                     }
-                                }
-                            },
-                            style = MaterialTheme.typography.labelMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                                    if (replyToPreview != null) {
+                                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurfaceVariant)) {
+                                            append(": $replyToPreview")
+                                        }
+                                    }
+                                },
+                                style = MaterialTheme.typography.labelMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                 }
                 // 送出中／送出失敗：Telegram 與 Element 都在本機先畫出來再標狀態，
@@ -3460,12 +3613,18 @@ private fun MessageRow(
                     isOwn = isOwn,
                     modifier = Modifier
                         .padding(top = if (grouped) 0.dp else 2.dp)
-                        .alpha(if (msg.pending && msg.sendError == null) 0.55f else 1f),
+                        .alpha(if (msg.pending && msg.sendError == null && !pendingStale) 0.55f else 1f),
                     onOpenImage = onOpenImage,
                 )
-                msg.sendError?.let {
-                    Text(
+                when {
+                    msg.sendError != null -> Text(
                         strings.messageSendFailed,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    // 沒有 sendError 不代表送得出去：超過 15 秒還沒被伺服器回音就照實講
+                    pendingStale -> Text(
+                        if (syncBroken) strings.messageNotDeliveredOffline else strings.messageNotDelivered,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.error,
                     )
@@ -4017,6 +4176,8 @@ private fun MessageBodyContent(
             isOwn = isOwn,
             modifier = modifier,
             fetchFailedLabel = strings.downloadFailed,
+            fetchTimeoutLabel = strings.mediaFetchTimeout,
+            noFileLabel = strings.mediaNoFile,
             unsupportedLabel = strings.voiceUnsupported,
         )
         is MessageBody.Attachment -> Text(

@@ -210,11 +210,23 @@ internal object MediaBitmapCache {
 }
 
 /** 抓原檔位元組（檢視器與「下載」選單共用；32MB 上限擋異常大檔）。 */
-internal suspend fun fetchMediaBytes(client: MatrixClient, source: MediaSource): ByteArray? {
-    val service = client.di.get<MediaService>()
-    val media = when (source) {
-        is MediaSource.Plain -> service.getMedia(source.mxcUrl, maxSize = 32L * 1024 * 1024)
-        is MediaSource.Encrypted -> service.getEncryptedMedia(source.file, maxSize = 32L * 1024 * 1024)
-    }.getOrNull() ?: return null
-    return kotlinx.coroutines.coroutineScope { runCatching { media.toByteArray(this) }.getOrNull() }
-}
+internal suspend fun fetchMediaBytes(client: MatrixClient, source: MediaSource): ByteArray? =
+    fetchMediaWithError(client, source).first
+
+/**
+ * 同上，但把失敗原因一起帶出來。原本失敗只回 null，界面只能寫一句「下載失敗」，
+ * 使用者分不清是「來源伺服器掛了」還是「我們抓錯東西」
+ * （用戶 2026-09-30 要的就是懸停看到具體原因）。
+ */
+internal suspend fun fetchMediaWithError(client: MatrixClient, source: MediaSource): Pair<ByteArray?, Throwable?> =
+    kotlinx.coroutines.coroutineScope {
+        val service = client.di.get<MediaService>()
+        val fetched = when (source) {
+            is MediaSource.Plain -> runCatching { service.getMedia(source.mxcUrl, maxSize = 32L * 1024 * 1024) }
+            is MediaSource.Encrypted -> runCatching { service.getEncryptedMedia(source.file, maxSize = 32L * 1024 * 1024) }
+        }
+        val inner = fetched.getOrNull() ?: return@coroutineScope null to fetched.exceptionOrNull()
+        val media = inner.getOrNull() ?: return@coroutineScope null to inner.exceptionOrNull()
+        val bytes = runCatching { media.toByteArray(this) }
+        bytes.getOrNull() to bytes.exceptionOrNull()
+    }

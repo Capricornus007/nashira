@@ -30,3 +30,6 @@ actual fun applyBackgroundSync(enabled: Boolean) {
 actual val platformDeviceDisplayName: String = "Nashira on Android"
 
 actual val audioDeviceSettingsSupported: Boolean = false
+
+actual val horizontalResizeIcon: androidx.compose.ui.input.pointer.PointerIcon
+    get() = androidx.compose.ui.input.pointer.PointerIcon.Default

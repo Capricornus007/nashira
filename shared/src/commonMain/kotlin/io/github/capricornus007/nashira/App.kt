@@ -184,6 +184,13 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
     /** 貼圖面板上次停在哪一頁（true = 表情）。同一個來源：MoregramX 存 `emoji_vp_position`。 */
     var stickerTabEmoji by mutableStateOf(stored["stickerTab"] == "emoji")
 
+    /**
+     * 桌面貼圖／表情面板的寬度（dp）。拖面板左緣調整、當場存檔：
+     * 用戶 2026-09-30 要的就是這個「可變寬度的右側邊面板形態」。
+     * 0 = 沒調過，由介面給預設寬。
+     */
+    var stickerPanelWidthDp by mutableIntStateOf(stored["stickerPanelWidth"]?.toIntOrNull() ?: 0)
+
     init {
         AudioSelection.input = audioInput
         AudioSelection.output = audioOutput
@@ -214,6 +221,7 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
             "emojiRecents" to emojiRecents.joinToString("\n"),
             "imeHeight" to imeHeightPx.toString(),
             "stickerTab" to if (stickerTabEmoji) "emoji" else "sticker",
+            "stickerPanelWidth" to stickerPanelWidthDp.toString(),
             "pureBlack" to pureBlack.toString(),
         ) + mapOf(
             "audioInput" to (audioInput ?: ""),

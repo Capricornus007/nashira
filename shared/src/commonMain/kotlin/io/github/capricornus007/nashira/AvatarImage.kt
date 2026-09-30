@@ -38,6 +38,7 @@ fun AvatarImage(
     var bitmap by remember(client, mxcUrl) { mutableStateOf(mxcUrl?.let { cache.get(it) }) }
     LaunchedEffect(client, mxcUrl) {
         if (bitmap != null || mxcUrl.isNullOrBlank() || !mxcUrl.startsWith("mxc://")) return@LaunchedEffect
+        if (AvatarCache.inFailureCooldown(mxcUrl)) return@LaunchedEffect
         // 啟動初期 Trixnity 還不知道伺服器支援認證媒體（ServerData 尚未從資料庫載入），
         // 那段時間的請求會走舊版 /_matrix/media 端點，較新上傳的媒體一律 404。
         // 失敗必須重試：一次就放棄會讓頭像整個工作階段都空著（自己的頭像最常中）。
@@ -53,6 +54,10 @@ fun AvatarImage(
                 return@LaunchedEffect
             }
         }
+        // 四輪都拿不到就冷卻：列表每次重組都重掛同一顆頭像時，原本會變成
+        // 「對同一個壞掉的 URL 無限重打」（2026-09-30 trace 日誌實測同一個 502 位址
+        // 在 25 秒內被打 40 次）
+        AvatarCache.markFailure(mxcUrl)
     }
     val loaded = bitmap
     if (loaded != null) {
@@ -84,18 +89,33 @@ internal const val MediaFetchAttempts = 4
 /** 重試間隔基數（毫秒），第 n 次等 n 倍，避免離線時空轉。 */
 internal const val MediaRetryDelayMillis = 1200L
 
+/** 一個 mxc 全部嘗試都失敗後，多久之內不再重試（冷卻期）。 */
+internal const val MediaFailureCooldownMillis = 60_000L
+
 /** 進程內頭像位圖快取：房間清單與 Space 圖示會反覆掛載同一個 mxc URL。 */
 private object AvatarCache {
     private const val MAX_ENTRIES = 256
     private val entries = LinkedHashMap<String, ImageBitmap>()
+    private val failedAt = HashMap<String, Long>()
+
+    private fun nowMs(): Long = kotlin.time.Clock.System.now().toEpochMilliseconds()
 
     fun get(mxcUrl: String): ImageBitmap? = entries[mxcUrl]
 
     fun put(mxcUrl: String, bitmap: ImageBitmap) {
         entries[mxcUrl] = bitmap
+        failedAt.remove(mxcUrl)
         if (entries.size > MAX_ENTRIES) {
             val oldest = entries.keys.firstOrNull() ?: return
             entries.remove(oldest)
         }
+    }
+
+    /** 剛失敗過：冷卻期內不再對同一個位址發包（來源伺服器掛掉時這能省掉幾十倍的無效請求）。 */
+    fun inFailureCooldown(mxcUrl: String): Boolean =
+        (failedAt[mxcUrl] ?: 0L) + MediaFailureCooldownMillis > nowMs()
+
+    fun markFailure(mxcUrl: String) {
+        failedAt[mxcUrl] = nowMs()
     }
 }

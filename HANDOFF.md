@@ -1,8 +1,32 @@
 # Nashira 交接文檔
 
-更新：2026-09-29（本輪 0.1.25 → **0.1.26**）。
+更新：2026-09-30（本輪 0.1.26 → **0.1.27**）。
 
-## 本輪狀態：2026-09-29（0.1.26）
+## 本輪狀態：2026-09-30（0.1.27）
+
+- **待送訊息的真相查清了**：三筆卡住的訊息**從未送出去**（資料庫 `RoomOutboxMessage2` 裡 `sendError`
+  與 `sentAt` 欄位根本不存在，兩張圖的 `mxc://` 卻已在＝上傳成功、卡在發送）。根因在 Trixnity 的
+  `OutboxMessageEventHandler`：它只在拿到 `MatrixServerException` 時寫 `sendError`，
+  **401 被 ktor 的 Auth 攔下去刷 token，刷失敗時例外一路冒到 `retryLoop`** → 只留一行日誌、
+  資料庫不動、無限重試。今天實測重現：啟動時 `/sync`、`/versions`、`/capabilities` 與測試 `/send`
+  全部先吃 401，接著 `/refresh` 成功、重試即送達。
+  → 客戶端這側補上真狀態：待送超過 15 秒沒被回音就標「未送達·仍在自動重試」（連線異常時另說），
+  **不再永久 0.55 透明**；`dropPendingMessage` 的失敗也不再被丟掉（原本他點刪除「一點反應都木有」）。
+- **回覆引用可點**：那列原本只是純 `Text`，沒有任何 clickable。現在整列可點 → `timeline.jumpTo()`
+  ＋跳過去短暫標亮；引用的事件不在本機視窗時，改用 `RoomRepository.replyContext()` 向伺服器
+  補要「發話人＋一行預覽」（不再只能顯示「原始訊息」四個字）。
+- **媒體下載失敗要有原因**：新增 `HoverTooltip`（桌面 Compose 1.12 **沒有** tooltip API，
+  自己用 Popup 畫），語音氣泡的失敗膠囊懸停會顯示真正原因（逾時／`friendlyError` 過後的伺服器訊息）。
+  順帶修掉一個實測缺陷：頭像對同一個壞掉的 mxc **無退避地反覆重打**（trace 日誌 25 秒內同一個
+  502 位址被打 40 次）→ 加 60 秒失敗冷卻期。
+- **桌面貼圖／表情面板：可拖左緣調寬並存檔**（`UiState.stickerPanelWidthDp`，260–760dp，
+  同時夾在窗口寬度內）；游標用 `PointerIcon(java.awt.Cursor(E_RESIZE_CURSOR))` 走 expect/actual。
+  另外**桌面點輸入框不再收面板**（`softKeyboardShiftsComposer` 才互斥——那裡沒有軟鍵盤會蓋住打字欄），
+  開面板時焦點留在打字框，才能邊打字邊篩貼圖。
+- 新字串 6 條（`messageNotDelivered`／`messageNotDeliveredOffline`／`dropPendingFailed`／
+  `mediaFetchTimeout`／`mediaNoFile`／`jumpToOriginal`）en／ja／ko／zh-TW／zh-CN 五語系全補。
+
+## 歷史：2026-09-29（0.1.26）
 
 - **主題顏色改成「色號制」**：`ThemeAccent` 16 色 enum 拿掉，改存 `accentHex`（`#RRGGBB`）。
   色票 57 顆＝19 個色系 × HCT tone 30/50/70，**明度一律用 material-kolor 的 `TonalPalette` 算**，

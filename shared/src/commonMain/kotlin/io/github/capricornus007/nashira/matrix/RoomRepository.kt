@@ -33,6 +33,7 @@ import de.connect2x.trixnity.core.model.events.m.room.VideoInfo
 import de.connect2x.trixnity.core.model.events.m.room.FileBasedInfo
 import de.connect2x.trixnity.utils.toByteArrayFlow
 import io.github.capricornus007.nashira.PickedImage
+import io.github.capricornus007.nashira.bodyPreview
 import de.connect2x.trixnity.core.model.UserId
 import kotlinx.coroutines.flow.MutableStateFlow
 import de.connect2x.trixnity.core.model.events.m.room.CanonicalAliasEventContent
@@ -714,6 +715,22 @@ class RoomRepository(val client: MatrixClient) {
 
     suspend fun sendSticker(roomId: RoomId, sticker: StickerItem): Result<String> =
         StickerRepository(client).sendSticker(roomId, sticker)
+
+    /**
+     * 回覆引用的那則事件不在本機視窗時，向伺服器補要「發話人＋一行預覽」。
+     * 沒這條就只能顯示「原始訊息」四個字，看不出在回誰的什麼
+     * （用戶 2026-09-30 點名；Element 也是當場補要那則事件）。
+     */
+    suspend fun replyContext(roomId: RoomId, eventId: EventId): Result<Pair<String, String>?> = runCatching {
+        val event = client.api.room.getEvent(roomId, eventId).getOrThrow()
+            as? ClientEvent.RoomEvent.MessageEvent<*>
+            ?: return@runCatching null
+        val preview = event.content.messageBodyOrNull()?.let { bodyPreview(it) } ?: return@runCatching null
+        val member = client.user.getById(roomId, event.sender).firstOrNull()
+        val name = member?.name.visibleNameOrNull()
+            ?: event.sender.full.removePrefix("@").substringBefore(':')
+        name to preview
+    }
 
     /** 回覆某則訊息（m.in_reply_to）。 */
     suspend fun sendReply(roomId: RoomId, replyTo: EventId, body: String, formattedBody: String? = null): Result<String> =

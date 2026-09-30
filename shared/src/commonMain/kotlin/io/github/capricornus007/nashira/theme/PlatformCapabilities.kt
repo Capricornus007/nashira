@@ -1,5 +1,7 @@
 package io.github.capricornus007.nashira.theme
 
+import androidx.compose.ui.input.pointer.PointerIcon
+
 /** 平台能力：Android 支援動態取色；桌面（Linux）不支援（也無需） */
 expect val dynamicColorSupported: Boolean
 
@@ -14,6 +16,12 @@ expect val backgroundSyncSupported: Boolean
  * 手機上 Enter 行為由輸入法自己決定，面板位置也固定，顯示這兩項只會誤導。
  */
 expect val keyboardLayoutSettingsSupported: Boolean
+
+/**
+ * 「拖拽調寬」那條邊界該用的滑鼠游標。桌面是左右雙箭頭（拖得動寬度的明確訊號）；
+ * 手機沒有滑鼠，用預設。
+ */
+expect val horizontalResizeIcon: PointerIcon
 
 /** 套用背景同步設定（Android 啟動／停止前台服務；桌面 no-op）。 */
 expect fun applyBackgroundSync(enabled: Boolean)

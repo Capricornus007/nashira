@@ -289,4 +289,10 @@ object KoStrings : Strings by EnStrings {
     override val presenceOnline = "온라인"
     override val replyOriginal = "원본 메시지"
     override val noPreviewAvailable = "표시할 메시지 없음"
+    override val messageNotDelivered = "전달되지 않음 · 계속 재시도 중"
+    override val messageNotDeliveredOffline = "전달되지 않음: 서버 연결이 끊어졌습니다. 복구되면 자동으로 재시도합니다"
+    override val dropPendingFailed = "대기 중인 메시지를 삭제하지 못했습니다"
+    override val mediaFetchTimeout = "30초 내 응답 없음 (연결 또는 원본 서버가 너무 느립니다)"
+    override val mediaNoFile = "서버가 파일을 반환하지 않았습니다"
+    override val jumpToOriginal = "원본 메시지로 이동"
 }

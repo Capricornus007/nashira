@@ -128,6 +128,12 @@ interface Strings {
     val messagePreviewHint: String
     val sessionLogoutViaAccountPage: String
     val messageSendFailed: String
+    val messageNotDelivered: String
+    val messageNotDeliveredOffline: String
+    val dropPendingFailed: String
+    val mediaFetchTimeout: String
+    val mediaNoFile: String
+    val jumpToOriginal: String
     val attachPhoto: String
     val attachSticker: String
     val attachTitle: String
