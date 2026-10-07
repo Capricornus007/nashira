@@ -218,7 +218,9 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.foundation.layout.FlowRow
 import de.connect2x.trixnity.core.model.EventId
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 
 private val DiscordRailWidth = 64.dp
 private val DiscordChannelWidth = 286.dp
@@ -3767,6 +3769,8 @@ private fun MessageRow(
     val hoverSource = remember { MutableInteractionSource() }
     val hovered by hoverSource.collectIsHoveredAsState()
     var boxOrigin by remember { mutableStateOf(Offset.Zero) }
+    // drawBehind 的 lambda 不是 @Composable，MaterialTheme 只能在外面取好帶進去
+    val highlightBarColor = MaterialTheme.colorScheme.primary
     Box(
         Modifier
             .fillMaxWidth()
@@ -3782,6 +3786,17 @@ private fun MessageRow(
             // 是疊在 Row 上的兄弟節點，指針移到列上 Row 收到 hover-exit →
             // 列卸載 → 指針落回 Row → 列重現——菜單和訊息列無限閃爍
             //（2026-09-14 bspwm 桌面實測回報）。
+            // 左側豎條：用戶 2026-10-07 在「整列淡色／左側豎條」之間選了**兩個都要**。
+            // 淡色在長訊息上不夠明確，豎條能一眼指出起點；用 drawBehind 畫，
+            // 不佔版位、不動佈局，也就不會把文字推歪。
+            .drawBehind {
+                if (highlighted) {
+                    drawRect(
+                        color = highlightBarColor,
+                        size = Size(4.dp.toPx(), size.height),
+                    )
+                }
+            }
             .hoverable(hoverSource)
             .onGloballyPositioned { boxOrigin = it.positionInRoot() },
     ) {
