@@ -377,7 +377,7 @@ private const val MEDIA_TIMEOUT_MS = 120_000L
  * 「圖拿不到是對方伺服器的 nginx 壞了」的說法（兩個網域都通、70ms）——
  * 我不能再靠猜。每一次失敗的真實例外都寫下來，我自己讀得到，不用麻煩他截圖。
  */
-private fun mediaProbe(line: String) {
+internal fun mediaProbe(line: String) {
     runCatching {
         java.io.File("/tmp/nashira-media.log")
             .appendText("${System.currentTimeMillis()} $line\n")
@@ -476,6 +476,18 @@ private suspend fun loadMediaBitmap(
     var reason: String? = null
     var animatedFrames: List<DecodedFrame> = emptyList()
     val deadlineMs = System.currentTimeMillis() + MediaTotalBudgetMs
+    // 影片**先問原站**：家伺服器多半根本沒存橋來的媒體（實測
+    // mxc://t2bot.io/b2d7100c… 走 matrix.org 回 404、走 t2bot.io 本尊回
+    // 200／9.69MiB video/mp4）。先跑家伺服器那條只是白等 20 秒再轉圈
+    //（用戶 2026-10-07 #126「先縮略圖都不行嗎」）。
+    if (isVideo && source is MediaSource.Plain) {
+        val direct = fetchMediaFromOrigin(source.mxcUrl, boxPx, isVideo = true)
+        if (direct != null) {
+            mediaProbe("影片直接問原站成功 $key")
+            return MediaLoad(direct, null, emptyList())
+        }
+        mediaProbe("影片問原站失敗，改走家伺服器 $key")
+    }
     // 啟動初期伺服器版本還沒讀進來，請求會走舊版媒體端點被 404，所以失敗要重試幾次
     for (attempt in 0 until MediaFetchAttempts) {
         if (attempt > 0) delay(MediaRetryDelayMillis * attempt)

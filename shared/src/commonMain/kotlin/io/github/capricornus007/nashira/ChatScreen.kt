@@ -1810,6 +1810,15 @@ private fun TimelinePane(
     val awayFromLive by remember {
         derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0 }
     }
+    // 上一輪把門檻從「超過 4 條」改成「偏離底部」之後他說鈕依舊不出現（#125）。
+    // 靜態讀程式碼找不出原因，那就把真值寫進日誌：翻一下就能看到 index/offset 到底怎麼動。
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+            .distinctUntilChanged()
+            .collect { (index, offset) ->
+                mediaProbe("捲動 index=$index offset=$offset away=$awayFromLive")
+            }
+    }
     LaunchedEffect(messages?.firstOrNull()?.eventId) {
         // 這條與上面那條都以 messages 為鍵，跳轉時**兩條會同時重跑**，而 Compose 按
         // 宣告順序啟動 → 上面剛捲到目標，這裡又 scrollToItem(0) 把人拽回底部。
