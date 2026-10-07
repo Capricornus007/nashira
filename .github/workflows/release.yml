@@ -70,7 +70,9 @@ jobs:
           grep -q 'JetBrains' "$RUNNER_TEMP/debchk"/opt/*/lib/runtime/release \
             || { echo "::error::.deb 裡的 runtime 不是 JBR"; exit 1; }
           echo "--- createDistributable 內捆的執行期（Arch 包吃這個）---"
-          DIST=desktopApp/build/compose/binaries/main/app/nashira/runtime/release
+          # 注意路徑裡有 lib/：實測是 app/nashira/lib/runtime/release，
+          # 少寫一层會 head 不到檔、set -e 直接把 CI 打紅（本地踩過）。
+          DIST=desktopApp/build/compose/binaries/main/app/nashira/lib/runtime/release
           head -4 "$DIST"
           grep -q 'JetBrains' "$DIST" \
             || { echo "::error::distributable 的 runtime 不是 JBR，Arch 包會拿到 OpenJDK"; exit 1; }

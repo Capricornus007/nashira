@@ -20,6 +20,12 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Check translations coverage
+        # 放在 Build 之前：這是純文字檢查、幾毫秒，而建置要幾分鐘。
+        # 存在的理由：`object JaStrings : Strings by EnStrings` 這種委派會**無聲退回**——
+        # 少翻一條編譯照過、界面看起來沒問題，實測過日文缺 7 條、簡中缺 37 條而沒人發現。
+        run: python3 tools/check-l10n.py
+
       - name: Build
         run: ./gradlew :androidApp:assembleDebug :desktopApp:packageDistributionForCurrentOS --no-daemon
 

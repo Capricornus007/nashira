@@ -296,4 +296,11 @@ object JaStrings : Strings by EnStrings {
     override val jumpBackToPrevious = "元の位置へ戻る"
     override val stickerPanelResizeHint = "ドラッグで幅変更・ダブルクリックで右カラムに固定"
     override val stickerPanelHeightHint = "ドラッグで高さ変更"
+    override val showSecret = "表示"
+    override val actionDownload = "ダウンロード"
+    override val syncConnecting = "接続中…メッセージは自動的に反映されます"
+    override val connectionFailed = "サーバーに接続できませんでした"
+    override val connectionFailedHint =
+        "セッションは保存されています。一時的な通信またはプロキシの問題がほとんどです。復旧後に再試行してください。"
+    override val retry = "再試行"
 }

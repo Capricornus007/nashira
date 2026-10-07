@@ -298,4 +298,9 @@ object KoStrings : Strings by EnStrings {
     override val jumpBackToPrevious = "이전 위치로 돌아가기"
     override val stickerPanelResizeHint = "드래그로 너비 조절 · 두 번 클릭하면 오른쪽 열에 고정"
     override val stickerPanelHeightHint = "드래그로 높이 조절"
+    override val syncConnecting = "연결 중… 메시지는 자동으로 반영됩니다"
+    override val connectionFailed = "서버에 연결할 수 없습니다"
+    override val connectionFailedHint =
+        "세션은 저장되어 있습니다. 일시적인 네트워크 또는 프록시 문제일 가능성이 높습니다. 복구 후 다시 시도해 주세요."
+    override val retry = "다시 시도"
 }
