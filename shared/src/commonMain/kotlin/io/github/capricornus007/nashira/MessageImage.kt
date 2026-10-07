@@ -5,10 +5,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -22,6 +24,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.platform.LocalDensity
@@ -119,17 +122,7 @@ fun MessageImage(
         .then(if (isSticker) Modifier else Modifier.clip(RoundedCornerShape(12.dp)))
     // 動態貼圖：有多格就照每一格自帶的停留時間輪播（Telegram 的貼圖就是動的，
     // 用戶 2026-10-07 點名「為什麼貼紙是靜態的」）。
-    val animated = frames?.takeIf { it.size > 1 }
-    var frameIndex by remember(key, animated) { mutableStateOf(0) }
-    if (animated != null) {
-        LaunchedEffect(animated) {
-            while (true) {
-                delay(animated[frameIndex].durationMs.toLong())
-                frameIndex = (frameIndex + 1) % animated.size
-            }
-        }
-    }
-    val loaded = animated?.getOrNull(frameIndex)?.bitmap ?: bitmap
+    val loaded = animatedFrameOrNull(key, frames) ?: bitmap
     when {
         // 隱藏的圖片：佔位可點擊恢復（Element 的「隱藏」也是可逆的）
         hiddenLabel != null -> Box(
@@ -142,18 +135,35 @@ fun MessageImage(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        loaded != null -> Image(
-            bitmap = loaded,
-            contentDescription = caption.takeIf { it.isNotBlank() },
-            modifier = frame
+        loaded != null -> Box(
+            frame
                 .fillMaxWidth()
                 .aspectRatio(ratio)
                 .then(if (onOpen != null) Modifier.clickable(onClick = onOpen) else Modifier),
-            contentScale = if (isSticker) ContentScale.Fit else ContentScale.Crop,
-            // 一定要明寫 High：預設是 Low（最近鄰），縮放時直接糊成一團或鋸齒
-            //（用戶 2026-09-29 對照 Telegram：「tg 無論點開之前還是點開之後都沒那麼糊」）。
-            filterQuality = FilterQuality.High,
-        )
+        ) {
+            Image(
+                bitmap = loaded,
+                contentDescription = caption.takeIf { it.isNotBlank() },
+                modifier = Modifier.fillMaxSize(),
+                contentScale = if (isSticker) ContentScale.Fit else ContentScale.Crop,
+                // 一定要明寫 High：預設是 Low（最近鄰），縮放時直接糊成一團或鋸齒
+                //（用戶 2026-09-29 對照 Telegram：「tg 無論點開之前還是點開之後都沒那麼糊」）。
+                filterQuality = FilterQuality.High,
+            )
+            if (isVideo) {
+                // 影片一律是「第一格當poster＋中間一顆播放鈕」（Element 也這樣），
+                // 否則看起來就是一張普通照片，沒人知道點下去會怎樣。
+                Box(
+                    Modifier
+                        .align(Alignment.Center)
+                        .size(44.dp)
+                        .background(Color.Black.copy(alpha = 0.55f), CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("▶", color = Color.White, style = MaterialTheme.typography.titleMedium)
+                }
+            }
+        }
         // 貼圖的佔位不畫灰底：多數貼圖有透明背景，灰塊會在載入前一閃，看起來
         // 像是「貼圖壞了」。圖片訊息保留灰底（裁切圓角需要一個可見的版位）。
         else -> if (isSticker) {
@@ -170,6 +180,24 @@ fun MessageImage(
             }
         }
     }
+}
+
+/**
+ * 多格動畫（GIF／動態 WebP）的輪播：有多格就照每一格自帶的停留時間推進，
+ * 回傳目前該顯示的那格；只有一格或沒解出格數就回 null，呼叫端退回靜態圖。
+ * 時間線主圖與貼圖面板縮圖共用這一份（用戶 2026-10-07：「爲什麼貼紙是靜態的」）。
+ */
+@Composable
+internal fun animatedFrameOrNull(key: String, frames: List<DecodedFrame>?): ImageBitmap? {
+    val animated = frames?.takeIf { it.size > 1 } ?: return null
+    var frameIndex by remember(key, animated) { mutableStateOf(0) }
+    LaunchedEffect(animated) {
+        while (true) {
+            delay(animated[frameIndex].durationMs.toLong())
+            frameIndex = (frameIndex + 1) % animated.size
+        }
+    }
+    return animated.getOrNull(frameIndex)?.bitmap
 }
 
 /** 沒有尺寸資訊時給 4:3，載入後改用真實比例。極端長圖夾在 0.5–2.0 之間，避免一張圖佔滿整頁。 */
@@ -213,8 +241,12 @@ private fun MediaSource.mxcHost(): String = when (this) {
     is MediaSource.Encrypted -> file.url.substringAfter("mxc://", "").substringBefore("/", "")
 }
 
-/** 退而抓原檔時的上限：原圖普遍 3–6 MiB，卡在同一個 2 MiB 會直接拿不到檔案。 */
-internal const val OriginalMaxMediaBytes = 8L * 1024 * 1024
+/**
+ * 退而抓原檔時的上限。原本 8 MiB：實測橋來（t2bot.io）的一條影片 9.69 MiB，
+ * 被我們自己的上限擋死（`DownloadLimitExceededException`），於是不停重試、永遠轉圈
+ * （用戶 2026-10-07 #103「爲什麼有的行有的不行」）。Element 對原檔沒有這種小氣上限。
+ */
+internal const val OriginalMaxMediaBytes = 40L * 1024 * 1024
 
 private fun MediaSource.cacheKey(): String = when (this) {
     is MediaSource.Plain -> mxcUrl
@@ -305,7 +337,7 @@ private const val MediaTotalBudgetMs = 20_000L
  * 存在的理由見 `loadMediaBitmap` 那段：Trixnity 的 `toByteArray(scope)` 會在給它的那個
  * scope 裡完成讀取，所以**不能**把「正在 await 結果的那個協程」交給它，否則自己等自己。
  */
-private val MediaReadScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
+internal val MediaReadScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
 
 private val MediaIoScope = kotlinx.coroutines.CoroutineScope(
     // ⚠️ 必須是 IO，**不能是 Default**。用戶 2026-10-07 反問「爲什麼頭像正常圖片不行」，
@@ -536,17 +568,6 @@ private suspend fun loadMediaBitmap(
             mediaProbe("動畫 ${animatedFrames.size} 格 $key")
         }
         best = frame
-    // 最後一著：**繞過自家伺服器的轉手**，直接跟「圖原本那臺」要。
-    // 這次是 matrix.org 自己過載回 502，而原站其實是好的；原站若已關掉舊版免認證
-    // 端點就會回 404，這條路自然作廢，不會多卡時間。
-    if (best == null && source is MediaSource.Plain) {
-        val direct = fetchMediaFromOrigin(source.mxcUrl, boxPx)
-        if (direct != null) {
-            mediaProbe("改問原站成功 $key")
-            best = direct
-            reason = null
-        }
-    }
         mediaProbe("成功 $key 第 ${attempt + 1} 次 ${bytes?.size ?: 0}B → ${frame.width}x${frame.height}")
         // **抓過原檔就到此為止**：上一版只比「寬度夠不夠 boxPx」，小圖（橫幅、貼紙、
         // 低解析照片）明明已拿到完整原檔還被判不合格，同一個 3295B／309x59 被抓了四遍。
@@ -555,6 +576,21 @@ private suspend fun loadMediaBitmap(
         // 但**糊到不能看的不算**：這些伺服器只預生成 32×32，把它放大成五百像素的
         // 一團色塊比轉圈更難看（用戶 2026-10-07 #86 對照 #88「不能直接這張嗎」）。
         if (frame.width >= ProgressiveMinWidth) onProgress(frame)
+    }
+    // 最後一著：**繞過自家伺服器的轉手**，直接跟「檔案原本那臺」要。
+    // 實測兩類都會遇到：① matrix.org 過載回 Cloudflare 502、原站其實是好的；
+    // ② 橋來的媒體（t2bot.io）家伺服器根本沒有、回 404，但 t2bot.io 本尊 200 給檔。
+    // 上一版這段被放在迴圈**裡面**、而且放在 `best = frame` 之後（那时 best 永不為 null），
+    // 等於完全沒生效——用戶 2026-10-07 #101「依舊卡着」就是這個。
+    if (best == null && source is MediaSource.Plain) {
+        val direct = fetchMediaFromOrigin(source.mxcUrl, boxPx, isVideo)
+        if (direct != null) {
+            mediaProbe("改問原站成功 $key")
+            best = direct
+            reason = null
+        } else {
+            mediaProbe("改問原站也拿不到 $key")
+        }
     }
     return MediaLoad(best, reason ?: if (best == null) "抓完了但沒有可用的一張" else null, animatedFrames)
 }
@@ -566,7 +602,7 @@ private suspend fun loadMediaBitmap(
  * 為什麼要有這條：圖片 normally 是經自己家伺服器「轉手」去取的，那臺過載時
  * （實測 matrix.org 回 Cloudflare 502）圖就永遠進不來，而原站其實是好的。
  */
-private suspend fun fetchMediaFromOrigin(mxcUrl: String, boxPx: Int): ImageBitmap? =
+private suspend fun fetchMediaFromOrigin(mxcUrl: String, boxPx: Int, isVideo: Boolean): ImageBitmap? =
     withContext(kotlinx.coroutines.Dispatchers.IO) {
         runCatching {
             val rest = mxcUrl.removePrefix("mxc://")
@@ -597,6 +633,10 @@ private suspend fun fetchMediaFromOrigin(mxcUrl: String, boxPx: Int): ImageBitma
                 }
             }
             input.close()
-            decodeImageBitmap(buffer.toByteArray(), maxDimension = boxPx * 2)
+            val bytes = buffer.toByteArray()
+            withContext(kotlinx.coroutines.Dispatchers.Default) {
+                if (isVideo) decodeVideoFrame(bytes, maxDimension = boxPx * 2)
+                else decodeImageBitmap(bytes, maxDimension = boxPx * 2)
+            }
         }.getOrNull()
     }

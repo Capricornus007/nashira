@@ -339,6 +339,7 @@ internal fun StickerThumb(
 ) {
     val key = remember(sticker) { sticker.mxcUrl ?: sticker.file?.url ?: sticker.shortcode }
     var bitmap by remember(key) { mutableStateOf(MediaBitmapCache.get(key)) }
+    var frames by remember(key) { mutableStateOf(MediaFramesCache.get(key)) }
     var failed by remember(key) { mutableStateOf(false) }
     var reloadToken by remember(key) { mutableStateOf(0) }
     val isVideo = remember(sticker.mimeType) { sticker.mimeType?.startsWith("video/") == true }
@@ -368,12 +369,20 @@ internal fun StickerThumb(
                 }
                 null -> null
             }
-            val mediaBytes = media?.toByteArray(this)
+            val mediaBytes = media?.toByteArray(MediaReadScope)
             if (mediaBytes == null) return@repeat
-            val decoded = if (isVideo) {
-                decodeVideoFrame(mediaBytes, maxDimension = 256)
-            } else {
-                decodeImageBitmap(mediaBytes, maxDimension = 256)
+            // 面板縮圖也要動：先試動畫格，解不出多格才退回靜態那張。
+            // 兩道記憶體閘：① 只解 160px（面板一顆格子約 72dp，再大是浪費）；
+            // ② 格數上限 48——一頁幾十顆貼圖，每顆解 200 格會把記憶體吃光。
+            val anim = if (isVideo) emptyList() else decodeAnimatedFrames(mediaBytes, maxDimension = 160)
+            if (anim.size in 2..48) {
+                MediaFramesCache.put(key, anim)
+                frames = anim
+            }
+            val decoded = when {
+                anim.isNotEmpty() -> anim.first().bitmap
+                isVideo -> decodeVideoFrame(mediaBytes, maxDimension = 256)
+                else -> decodeImageBitmap(mediaBytes, maxDimension = 256)
             }
             if (decoded != null) {
                 MediaBitmapCache.put(key, decoded)

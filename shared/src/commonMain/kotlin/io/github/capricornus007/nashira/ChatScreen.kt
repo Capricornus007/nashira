@@ -2976,7 +2976,27 @@ private fun TimelinePane(
                                 }
                             }
                         },
-                        onOpenImage = { viewerTarget = it },
+                        onOpenImage = { img ->
+                            if (img.mimeType?.startsWith("video/") == true) {
+                                // 影片：內沒有解碼器（Skia 只解得動 GIF／WebP 圖，mp4、webm
+                                // 要另外掛播放器），所以點一下＝把檔抓下來交給系統預設程式。
+                                // 用戶 2026-10-07 #90「爲什麼不支持視頻」→ 至少先看得到內容。
+                                scope.launch {
+                                    val bytes = fetchMediaBytes(roomRepository.client, img.source)
+                                    if (bytes != null) {
+                                        openMediaExternally(
+                                            bytes,
+                                            img.caption.ifBlank { "nashira-video" },
+                                            img.mimeType ?: "video/mp4",
+                                        )
+                                    } else {
+                                        downloadNotice = strings.downloadFailed
+                                    }
+                                }
+                            } else {
+                                viewerTarget = img
+                            }
+                        },
                         onDownloadImage = { img ->
                             scope.launch {
                                 val bytes = fetchMediaBytes(roomRepository.client, img.source)
