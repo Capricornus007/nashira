@@ -27,11 +27,16 @@ DEFAULT_ALLOW = {'appName'}
 
 # 已知**整個語系還沒翻**的物件：豁免是為了讓檢查能進 CI（否則一上線就紅），
 # 不是為了忘掉這筆帳。**補完後把名字從這裡拿掉。**
-# ZhHkStrings 現況是 `object ZhHkStrings : Strings by ZhTwStrings`（連 body 都沒有）
-# ＝287 條全退回繁中，等於「港式中文」這個選單項目存在但沒有內容。
-# 見待辦 #86：要的是「儲存／登入／訊息／群組／貼紙／軟件／資料夾」這套港式慣用語，
-# 不是把繁中檔複製一份就完事。
-DEFAULT_ALLOW_INCOMPLETE = {'ZhHkStrings'}
+DEFAULT_ALLOW_INCOMPLETE: set[str] = set()
+
+# 「刻意只覆寫一部分」的語系：父物件與它用同一套中文，多數條目兩地寫法相同，
+# 抄一份完全一樣的 287 條只會讓兩邊各自漂移、還看不出誰對。
+# 這類語系的價值全在**那幾條差異詞**，所以記下預期的覆寫數：
+#   少於這個數字 → 有人把差異詞刪掉了／合併掉了 → 紅。
+#   多於這個數字 → 有人加了覆寫 → 不紅，但請把數字更新（順帶確認是新差異、不是誤抄）。
+# ZhHkStrings 的 18 條＝貼圖→貼紙、搜尋→搜索、轉寄→轉發、私人訊息→私訊、
+# 使用者→用戶、網路→網絡 這六組詞的落點（2026-10-07 逐條對繁中檔盤出來的）。
+DEFAULT_EXPECT_PARTIAL = {'ZhHkStrings': 18}
 
 
 def interface_members(src: str) -> set[str]:
@@ -92,12 +97,14 @@ def parse_objects(i18n_dir: pathlib.Path):
 def main() -> int:
     allow = set(DEFAULT_ALLOW)
     allow_incomplete = set(DEFAULT_ALLOW_INCOMPLETE)
+    expect_partial = dict(DEFAULT_EXPECT_PARTIAL)
     argv = sys.argv[1:]
     # --strict：無視所有預設豁免。沒有這個旗標，`--allow-incomplete` 是並集、
     # 清不掉預設值 → 「拿掉豁免應該就紅」這條反向測試根本測不了（實測踩過）。
     if '--strict' in argv:
         allow = set()
         allow_incomplete = set()
+        expect_partial = {}
     for i, a in enumerate(argv):
         if a == '--allow-fallback' and i + 1 < len(argv):
             allow |= {k.strip() for k in argv[i + 1].split(',') if k.strip()}
@@ -132,6 +139,20 @@ def main() -> int:
                 failures.append(('EnStrings', None, sorted(missing)))
             print(f'  EnStrings  覆寫 {total - len(missing)}/{total}（基準）')
             continue
+        # 「刻意部分覆寫」型：判準是覆寫數有沒有掉到預期以下，不是「缺幾條」。
+        expected = expect_partial.get(name)
+        if expected is not None:
+            got = len(overridden - {m for m in overridden if m not in members})
+            mark = '⚠' if got < expected else '✓'
+            print(f'  {mark} {name:<14} 覆寫 {got}/{total}　'
+                  f'刻意只翻兩地有差異的條目，其餘同形委派 {parent}')
+            if got < expected:
+                failures.append((name, parent, sorted(members - overridden)[:0] or
+                                 [f'（覆寫數 {got} < 預期 {expected}，差異詞被刪掉了？）']))
+            elif got > expected:
+                print(f'   （比預期的 {expected} 多，若是有新的港式差異請更新 '
+                      f'DEFAULT_EXPECT_PARTIAL 的數字）')
+            continue
         # 有父物件的才靠委派退回；沒父物件又缺條目 = 靠介面預設實作，同樣要報。
         real_missing = sorted(m for m in missing if m not in allow)
         pct = total - len(missing)
@@ -155,7 +176,11 @@ def main() -> int:
             print(f'⚠ 未豁免的語系都完整，但**仍有欠債在豁免清單裡**：{debt}')
             print('  （CI 不紅是刻意的；欠債內容見 DEFAULT_ALLOW_INCOMPLETE 上方的說明）')
         else:
-            print('✅ 所有語系覆寫完整')
+            # 「覆寫完整」這句話在有 partial 型語系時是誤導的（ZhHk 只翻 18 條是設計，
+            # 不是完整），所以措辭要跟著實際判準走。
+            partial_note = ('；其中 ' + '、'.join(f'{n} 為刻意部分覆寫（{c} 條）'
+                                                  for n, c in sorted(expect_partial.items()))) if expect_partial else ''
+            print(f'✅ 各語系都符合其覆寫政策{partial_note}')
         return 0
 
     print()

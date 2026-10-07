@@ -617,17 +617,35 @@ object ZhCnStrings : Strings by ZhTwStrings {
     override val targetDeviceIdExample = "例如 ABCDEFGHIJ"
     override val acceptSas = "接受 SAS"
     override val jumpToLatest = "跳到最新"
-    override val syncConnecting = "连接中…消息会自动补齐"
-    override val connectionFailed = "无法连接到服务器"
-    override val connectionFailedHint =
-        "你的登录信息仍然保存。这通常是临时的网络或代理问题，恢复后重试即可。"
-    override val retry = "重试"
-    override val showSecret = "显示"
-    override val actionDownload = "下载"
 }
 
 /**
- * 繁體中文（香港）：委派 zh-TW，目前無已知用語差異；先佔位，
- * 之後按香港慣用語（「軟件」「資料夾」等）逐鍵覆寫。
+ * 繁體中文（香港）。委派 zh-TW，只覆寫**兩地確有用語差異**的條目；
+ * 其餘（聊天室、裝置、帳戶、訊息、伺服器、連結、安全性…）港台式寫法相同，
+ * 刻意不覆寫——抄一份 287 條的相同內容只會讓兩邊各自漂移、還看不出誰對。
+ *
+ * 覆寫依據是詞層面的慣用差異，不是繁簡轉換：
+ *   貼圖→貼紙、搜尋→搜索、轉寄→轉發、私人訊息→私訊、使用者→用戶、網路→網絡
+ * 禁 opencc 那套紀律同樣適用（見 tools/ 與記憶裡的翻譯方法）。
  */
-object ZhHkStrings : Strings by ZhTwStrings
+object ZhHkStrings : Strings by ZhTwStrings {
+    override val privateMessage = "私訊"
+    override val search = "搜索"
+    override val searchMessages = "搜索訊息"
+    override val searchMessagesHint = "搜索這個聊天室的訊息"
+    override val messageSearchFailed = "訊息搜索失敗"
+    override val clearSearch = "清除搜索"
+    override val emojiSearchHint = "搜索表情"
+    override val sticker = "貼紙"
+    override val stickerEmpty = "還沒有貼紙包"
+    override val stickerMessage = "貼紙"
+    override val attachSticker = "貼紙"
+    override val notifSticker = "[貼紙]"
+    override val chatListHint = "Space 圖示、未讀提示、訊息預覽與貼紙面板"
+    override val actionForward = "轉發"
+    override val forwardTo = "轉發至…"
+    override val forwardUnsupported = "這種訊息未支援轉發"
+    override val loginUsername = "用戶名稱"
+    override val connectionFailedHint =
+        "登入憑證仍保留。多半是網絡或代理暫時不通，恢復後重試即可。"
+}
