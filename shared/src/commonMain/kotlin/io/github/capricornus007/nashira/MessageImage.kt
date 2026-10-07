@@ -86,15 +86,21 @@ fun MessageImage(
         // 寫快取與狀態留回主緒：MediaBitmapCache 是普通 LinkedHashMap，不是執行緒安全的。
         val decoded = withContext(kotlinx.coroutines.Dispatchers.Default) {
             var best: ImageBitmap? = null
+            // 整個載入一個**總預算**，不是每輪各給一個逾時：
+            // MediaFetchAttempts 是 4、退避 1.2s×(1+2+3)，若每輪 20 秒就是 80 秒＋7.2 秒
+            // 才認輸——用戶 2026-10-07 截圖 #30 的評語是「根本沒見要加載甚至重試的樣子」。
+            val deadlineMs = System.currentTimeMillis() + MediaTotalBudgetMs
             // 啟動初期伺服器版本還沒讀進來，請求會走舊版媒體端點被 404，所以失敗要重試幾次
             for (attempt in 0 until MediaFetchAttempts) {
                 if (attempt > 0) delay(MediaRetryDelayMillis * attempt)
+                val leftMs = deadlineMs - System.currentTimeMillis()
+                if (leftMs <= 0L) break
                 val small = best?.let { it.width < boxPx } == true
                 // 整段包逾時：Trixnity 的 getMedia／getThumbnail／toByteArray 都沒有時間上限，
                 // 來源伺服器不回時這個協程就永久掛著——用戶 2026-10-07 截圖 #23 那張
                 // 「以前載得出來、現在轉沒完了」的圖片（mxc 來自 nichi.co）就是這樣。
                 // 順帶把 toByteArray 的例外接住：原本只包了取 media 那段，它一拋就整輪報銷。
-                val bytes = kotlinx.coroutines.withTimeoutOrNull(MEDIA_TIMEOUT_MS) {
+                val bytes = kotlinx.coroutines.withTimeoutOrNull(leftMs) {
                     val media = client.di.get<MediaService>().let { service ->
                         when (source) {
                             is MediaSource.Plain ->
@@ -280,5 +286,17 @@ internal suspend fun fetchMediaWithError(client: MatrixClient, source: MediaSour
         bytes to null
     }
 
-/** 媒體下載的單次上限：慢伺服器也要在可預期的時間內認輸，好讓界面能給出「重試」。 */
-private const val MEDIA_TIMEOUT_MS = 20_000L
+/**
+ * 媒體載入的總預算（含重試與退避）：慢伺服器要在可預期的時間內認輸，
+ * 界面才給得出「重試」。單次逾時不再單獨設定——4 輪各給 20 秒會變成 87 秒。
+ *
+ * 用毫秒 Long 不用 kotlin.time.Duration：Duration 的比較運算子與 `seconds()`
+ * 在這套 commonMain 下要額外 import，實測一口氣踩了三個編譯錯誤。
+ */
+private const val MediaTotalBudgetMs = 18_000L
+
+/**
+ * 「檢視器／另存圖片」那條路的單次上限：它只抓一次、不重試，
+ * 所以用得上獨立的逾時，而不是上面那個含退避的總預算。
+ */
+private const val MEDIA_TIMEOUT_MS = 15_000L

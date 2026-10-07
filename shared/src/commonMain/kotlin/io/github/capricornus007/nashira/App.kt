@@ -296,12 +296,13 @@ fun rememberNashiraColorScheme(defaultDark: Boolean? = null): ColorScheme {
     // 桌面沒有桌布取色（dynamicColorSupported=false），一律走色票這條。
     val dynamic = dynamicColorSupported && ui.dynamicColor
     val seed = if (dynamic) wallpaperSeedColor(enabled = true) else ui.accentHex?.let { parseAccentHex(it) }
-    // 風格現在**兩端都由 ui.paletteStyle 決定**（用戶 2026-10-07 點名「桌面上也放出這個選項」）。
-    // 但預設值一併從 Expressive 改成 TonalSpot：Expressive 會把色相轉掉，實測拿純藍 #2196F3
-    // 當種子生出**綠色** UI、Space 頭像圈變粉紅（用戶 2026-09-29 連兩輪點名）。
-    // 也就是說「寫死 TonalSpot」當時是對的修法，錯的是「不給桌面選」——
-    // 現在保留 TonalSpot 為預設，讓他可以自己調到別的風格。
-    val style = ui.paletteStyle
+    // 桌面**無條件走 TonalSpot**，不讀 ui.paletteStyle。
+    // 2026-10-07 我一度把這個選項放到桌面，結果使用者看到「調色盤樣式 Expressive」
+    // 直接要求撤掉（「為什麼要在電腦端留下這些莫名其妙的東西」）。
+    // ⚠️ 關鍵不是「預設值」：他機器上存的 paletteStyle 本來就是 Expressive（舊預設留下的），
+    // 所以只要桌面讀這個欄位，配色就會被 Expressive 轉色相——
+    // 實測過純藍 #2196F3 生出綠色 UI、Space 頭像圈變粉紅（2026-09-29 連兩輪點名）。
+    val style = if (dynamicColorSupported) ui.paletteStyle else PaletteStyle.TonalSpot
     val generated = rememberDynamicColorScheme(
         seedColor = seed ?: androidx.compose.ui.graphics.Color(0xFF1F1E33),
         isDark = dark,

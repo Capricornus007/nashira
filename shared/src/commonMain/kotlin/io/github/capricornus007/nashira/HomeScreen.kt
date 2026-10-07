@@ -381,10 +381,11 @@ private fun AppearancePage(onBack: () -> Unit) {
                     }
                 }
             }
-            // 調色盤樣式與顏色規格（M3 / Expressive 2025）：原本只在 Android 顯示，
-            // 理由是「桌面沒有桌布取色」。但桌面的種子來自手選色票、一樣走動態生成，
-            // 所以這兩項在桌面**同樣有效**——用戶 2026-10-07 點名「桌面上也放出這個選項」。
-            item { shape ->
+            // 調色盤樣式與顏色規格：**只在 Android 顯示**（用戶 2026-10-07 撤回了
+            // 前一天「桌面上也放出這個選項」的要求：「為什麼要在電腦端留下這些莫名其妙的東西」）。
+            // 桌面不是「放了沒用」，是放了會壞事——桌面存檔裡的 paletteStyle 本來就是
+            // Expressive，一放出就生效，配色會被轉色相（見 App.kt 的 style 那段）。
+            if (dynamicColorSupported) item { shape ->
                 SettingsDropdownItem(
                     shape = shape,
                     title = strings.paletteStyle,
@@ -397,7 +398,7 @@ private fun AppearancePage(onBack: () -> Unit) {
                     }
                 }
             }
-            item { shape ->
+            if (dynamicColorSupported) item { shape ->
                 SettingsDropdownItem(
                     shape = shape,
                     title = strings.colorSpec,

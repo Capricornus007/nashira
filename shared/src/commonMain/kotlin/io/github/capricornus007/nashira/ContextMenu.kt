@@ -93,6 +93,10 @@ fun ContextMenuItem(
         onClick = onClick,
         modifier = Modifier.height(36.dp),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp),
+        // 右側那塊空白不是寬度問題，是它默認給「加速鍵」留了一個 trailingIcon 槽。
+        // 給空的 composable 才收得掉——上一輪只把寬度釘到 240dp，所以他看著「空白依舊」
+        //（用戶 2026-10-07 截圖 #27/#28）。
+        trailingIcon = { },
     )
 }
 
