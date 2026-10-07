@@ -21,4 +21,4 @@ expect fun openMediaExternally(bytes: ByteArray, fileName: String, mimeType: Str
  * 畫面上看起來就是「點了沒反應」。給網址則是由播放器自己邊抓邊播，秒開。
  * 回 `false` 代表這臺做不到，呼叫端退回「下載→暫存檔→開」。
  */
-expect fun openMediaUrlExternally(url: String): Boolean
+expect fun openMediaUrlExternally(url: String, mimeType: String): Boolean

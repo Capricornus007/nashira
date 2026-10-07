@@ -3004,7 +3004,7 @@ private fun TimelinePane(
                                     // 先給網址、讓播放器自己串流：圖片是立刻開的，影片沒有理由
                                     // 要先等整檔下載完（用戶 2026-10-08「憑什麼視頻非得那麼久」）。
                                     val publicUrl = (img.source as? MediaSource.Plain)?.let { mxcToPublicUrl(it.mxcUrl) }
-                                    if (publicUrl != null && openMediaUrlExternally(publicUrl)) {
+                                    if (publicUrl != null && openMediaUrlExternally(publicUrl, img.mimeType ?: "video/mp4")) {
                                         mediaProbe("播放：網址已交給系統播放器（串流）")
                                         return@launch
                                     }
