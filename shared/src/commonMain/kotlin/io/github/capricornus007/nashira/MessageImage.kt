@@ -12,7 +12,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -151,8 +154,10 @@ fun MessageImage(
                 filterQuality = FilterQuality.High,
             )
             if (isVideo) {
-                // 影片一律是「第一格當poster＋中間一顆播放鈕」（Element 也這樣），
+                // 影片一律是「第一格當 poster＋中間一顆播放鈕」（Element 也這樣），
                 // 否則看起來就是一張普通照片，沒人知道點下去會怎樣。
+                // 用 PlayArrow 圖示，不要拿字型裡的 "▶" 湊：那個字元在這套字型下是
+                // **空心輪廓**，擺在圓裡像沒渲染完（用戶 2026-10-07 #137「播放按鈕好抽象」）。
                 Box(
                     Modifier
                         .align(Alignment.Center)
@@ -160,7 +165,12 @@ fun MessageImage(
                         .background(Color.Black.copy(alpha = 0.55f), CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("▶", color = Color.White, style = MaterialTheme.typography.titleMedium)
+                    Icon(
+                        imageVector = Icons.Filled.PlayArrow,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(26.dp),
+                    )
                 }
             }
         }

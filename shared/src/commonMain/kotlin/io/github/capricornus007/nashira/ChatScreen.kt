@@ -2997,16 +2997,24 @@ private fun TimelinePane(
                                 // 要另外掛播放器），所以點一下＝把檔抓下來交給系統預設程式。
                                 // 用戶 2026-10-07 #90「爲什麼不支持視頻」→ 至少先看得到內容。
                                 scope.launch {
+                                    // 這條路徑原本一行日誌都沒有，所以「點不開」時我無法區分
+                                    // 是沒觸發、抓不到檔、還是系統那邊開不起來（用戶 2026-10-07
+                                    // #137「根本無法點開播放」）。三個關卡各留一行。
+                                    mediaProbe("點擊影片 ${'$'}{img.source} mime=${'$'}{img.mimeType}")
                                     val bytes = fetchMediaBytes(roomRepository.client, img.source)
-                                    if (bytes != null) {
-                                        openMediaExternally(
-                                            bytes,
-                                            img.caption.ifBlank { "nashira-video" },
-                                            img.mimeType ?: "video/mp4",
-                                        )
-                                    } else {
+                                    if (bytes == null) {
+                                        mediaProbe("影片抓檔失敗（0 位元組或網路錯）${'$'}{img.source}")
                                         downloadNotice = strings.downloadFailed
+                                        return@launch
                                     }
+                                    mediaProbe("影片抓到 ${'$'}{bytes.size} 位元組，交給系統播放器")
+                                    val opened = openMediaExternally(
+                                        bytes,
+                                        img.caption.ifBlank { "nashira-video" },
+                                        img.mimeType ?: "video/mp4",
+                                    )
+                                    mediaProbe("系統播放器回執 opened=${'$'}opened")
+                                    if (!opened) downloadNotice = strings.downloadFailed
                                 }
                             } else {
                                 viewerTarget = img
@@ -3117,13 +3125,13 @@ private fun TimelinePane(
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     shadowElevation = 4.dp,
                     modifier = Modifier
-                        .align(Alignment.BottomCenter)
+                        .align(Alignment.BottomEnd)
                         .zIndex(1.5f)
                         // 這層 Box 是 fillMaxSize、**沒有**內距（內距只加在裡面的 LazyColumn 上），
                         // 所以 BottomCenter 落在整個面板的最下緣——正好被輸入框那條蓋住。
                         // 日誌證明條件是對的（用戶 2026-10-07 #128 翻了之後 index=0 offset=509
                         // away=true 一路到 offset=0 away=false），鈕一直存在，只是被壓在後面。
-                        .padding(bottom = padding.calculateBottomPadding() + 12.dp)
+                        .padding(end = 16.dp, bottom = padding.calculateBottomPadding() + 12.dp)
                         .size(40.dp),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
