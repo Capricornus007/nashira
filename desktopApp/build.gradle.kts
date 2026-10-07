@@ -29,9 +29,41 @@ compose.desktop {
         // X11Platform 需要反射 sun.awt.X11.XWM 修正非重親 WM（bspwm/dwm/i3…）下
         // AWT 假邊框造成的「視窗被平鋪、內容卻停在左上角小方塊」。
         // gradle run 與打包產物都要帶，否則只在其中一種情況生效。
-        jvmArgs += listOf("--add-opens=java.desktop/sun.awt.X11=ALL-UNNAMED")
+        //
+        // jb.awt.newXimClient.enabled 是 JBR 的「新 XIM 客戶端」開關：它才會在 XIM 回調之內
+        // 把游標矩形報給 fcitx5（配合上面的 --add-opens 才拿得到 sun.awt.X11）。
+        // 在非 JBR 的執行期上這個屬性只是個沒人讀的字串，無害，所以不必條件加。
+        jvmArgs += listOf(
+            "--add-opens=java.desktop/sun.awt.X11=ALL-UNNAMED",
+            "-Djb.awt.newXimClient.enabled=true",
+        )
         nativeDistributions {
             targetFormats(TargetFormat.Deb, TargetFormat.Rpm)
+            // 捆進安裝包的 Java 執行期要哪些模組。這份清單是**抄現有公開發布包的實測結果**
+            // （v0.1.36 的 .deb 內 lib/runtime/release 的 MODULES 欄就是這 7 個，而 app 跑得起來），
+            // 不是我挑的——多寫會變大、少寫會啟動失敗，照抄已被證明夠用的那一份。
+            //
+            // 為什麼要明寫而不是讓 plugin 自己算：`modules()` 控制的是共用的那個 jlink task
+            // （`getCreateRuntimeImage`），所以 .deb／.rpm 與 createDistributable（Arch 包吃這個）
+            // 三條路才會用同一份執行期。
+            // ⚠️ 不要改用 `runtimeImage` 去指向外部 jlink 產物：jpackage 的 runtimeImage 是
+            //    plugin 內部接給那個 jlink task 的輸出，手動覆蓋會繞過它的 task 圖、
+            //    而且管不到 distributable 那條路（1.12.0 反編譯 ConfigureJvmApplicationKt 查實）。
+            //
+            // 執行期本身必須是 JetBrains Runtime：只有 JBR 會在 XIM 回調之內上報光標矩形
+            // （sun.awt.X11.XInputMethod$ClientComponentCaretPositionTracker；OpenJDK 沒這個類，
+            // 實測 ClassNotFoundException）→ 少了它 fcitx5 的候選窗只能退回「焦點窗口幾何」，
+            // 永遠釘在視窗左下角。JBR 由 CI 的 setup-java `distribution: jetbrains` 提供，
+            // 所以這裡只列模組、不指定 JDK。
+            modules(
+                "java.base",
+                "java.datatransfer",
+                "java.xml",
+                "java.prefs",
+                "java.desktop",
+                "java.logging",
+                "jdk.crypto.ec",
+            )
             packageName = "nashira"
             // 版號單一來源＝gradle.properties 的 nashiraVersion（release.yml 打 tag 讀同一行）
             packageVersion = providers.gradleProperty("nashiraVersion").get()

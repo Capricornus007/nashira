@@ -22,10 +22,28 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Set up JDK 21
+        # JetBrains Runtime，不是 temurin：只有 JBR 會在 XIM 回調之內上報光標矩形
+        # （sun.awt.X11.XInputMethod$ClientComponentCaretPositionTracker；OpenJDK 那個類
+        # 根本不存在，實測 ClassNotFoundException）→ 少了它 fcitx5 候選窗永遠釘在視窗左下角。
+        #
+        # 這一條就足夠改變安裝包裡捆的執行期：打包用的 runtime 由「跑 gradle 的那個 JDK 的
+        # jmods」jlink 出來（desktopApp 的 nativeDistributions.modules(...) 只決定模組清單），
+        # 所以不需要另外下載 JBR、也不需要碰 jpackage 的 runtimeImage。
         uses: actions/setup-java@v5
         with:
-          distribution: temurin
+          distribution: jetbrains
           java-version: "21"
+
+      - name: Show which runtime will be bundled
+        run: |
+          set -euo pipefail
+          "$JAVA_HOME/bin/java" -version 2>&1 | head -3
+          echo "jmods 數量：$(ls "$JAVA_HOME/jmods" 2>/dev/null | wc -l)"
+          # runtime-only 的 JBR 有 0 個 jmods，那樣 jlink 生不出東西、包會退回沒執行期。
+          if [ ! -d "$JAVA_HOME/jmods" ] || [ -z "$(ls -A "$JAVA_HOME/jmods" 2>/dev/null)" ]; then
+            echo "::error::JAVA_HOME 裡沒有 jmods（$JAVA_HOME）——換成含 jmods 的 JBR 變體，別讓它靜默降级"
+            exit 1
+          fi
 
       - name: Decode Keystore
         env:
@@ -41,6 +59,22 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           ./gradlew :androidApp:assembleRelease :desktopApp:packageDistributionForCurrentOS :desktopApp:createDistributable --no-daemon
+          # 驗產物、不驗配置：DSL 寫了不等於套得上（moregramX 的簽名就是配置在、產物卻沒簽，
+          # 還連紅一個月的 CI）。兩條路都要驗，因為 .deb/.rpm 走 jpackage、
+          # 而 Arch 包吃的是 createDistributable 的產物，兩者的 runtime 不一定是同一份。
+          echo "--- .deb 內捆的執行期 ---"
+          DEB="$(find desktopApp/build/compose/binaries/main -name '*.deb' | head -1)"
+          test -n "$DEB"
+          dpkg-deb -x "$DEB" "$RUNNER_TEMP/debchk"
+          head -4 "$RUNNER_TEMP/debchk"/opt/*/lib/runtime/release
+          grep -q 'JetBrains' "$RUNNER_TEMP/debchk"/opt/*/lib/runtime/release \
+            || { echo "::error::.deb 裡的 runtime 不是 JBR"; exit 1; }
+          echo "--- createDistributable 內捆的執行期（Arch 包吃這個）---"
+          DIST=desktopApp/build/compose/binaries/main/app/nashira/runtime/release
+          head -4 "$DIST"
+          grep -q 'JetBrains' "$DIST" \
+            || { echo "::error::distributable 的 runtime 不是 JBR，Arch 包會拿到 OpenJDK"; exit 1; }
+          echo "確認：兩條路捆的都是 JetBrains Runtime"
           echo "APK built:"
           ls -la androidApp/build/outputs/apk/release/*.apk
           echo "Packages:"
@@ -129,7 +163,7 @@ jobs:
           gh release create "$TAG" "${ASSETS[@]}" \
             --target "$GITHUB_SHA" \
             --title "Nashira $TAG" \
-            --notes "自用分發版（debug 簽章）。Android APK + Linux .deb/.rpm/.pkg.tar.zst（.pkg.tar.zst 由 arch job 稍後補傳）。"
+            --notes "自用分發版。Android APK（**正式自訂簽章**，CN=Nashira／OU=Capricornus007，v1+v2+v3；由下方 Verify 步驟把關，未簽名或憑證不符這個 workflow 會紅）+ Linux .deb/.rpm/.pkg.tar.zst（.pkg.tar.zst 由 arch job 稍後補傳）。"
 
   arch:
     name: Arch package (.pkg.tar.zst)
