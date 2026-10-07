@@ -349,26 +349,18 @@ fun ChatScreen(
         PlatformBackHandler(enabled = directoryOpen) { directoryOpen = false }
         PlatformBackHandler(enabled = settingsOpen) { settingsOpen = false }
         AnimatedContent(
-            targetState = settingsOpen,
-            // 原本進與出**兩頁都在位移**（一個整頁滑入、另一個滑 1/8 再淡出），
-            // 結果轉場期間兩頁重疊穿插，用戶 2026-10-07 的評語是「動畫缺失，很醜」——
-            // 缺的不是動畫，是「誰蓋住誰」。改成標準推入：底下的原地淡出，新頁滑入覆蓋。
+            targetState = directoryOpen,
+            // 設定頁**不再 participate 在這個換頁裡**（改畫成下面的覆蓋層）：
+            // AnimatedContent 換頁時「要進場的那一棵」是**第一次組合**——聊天主畫面是
+            // 三欄＋60 則訊息＋頭貼，組合一次就吃掉整段 220ms，他看到的就是硬切。
+            // 用戶 2026-10-07 兩輪都說「動畫依舊（缺失）」，病根在這裡，不在位移量。
             transitionSpec = {
-                val enter = slideInVertically(tween(220)) { it } + fadeIn(tween(160))
-                val leaveInPlace = fadeOut(tween(140))
-                val leaveDown = slideOutVertically(tween(220)) { it } + fadeOut(tween(200))
-                // 返回時主畫面要「明顯」滑回來：先前給 -it/12（約 1/12 高）實測
-                // 等於沒有動畫（用戶 2026-10-07：「為什麼從設定返回的動畫消失了」）。
-                val enterUp = slideInVertically(tween(220)) { -it / 3 } + fadeIn(tween(220))
-                if (targetState) enter togetherWith leaveInPlace
-                else enterUp togetherWith leaveDown
+                fadeIn(tween(140)) togetherWith fadeOut(tween(140))
             },
-            label = "settings_navigation",
-        ) { showSettings ->
-            if (directoryOpen) {
+            label = "directory_navigation",
+        ) { showDirectory ->
+            if (showDirectory) {
                 PublicRoomDirectory(roomRepository, strings) { directoryOpen = false }
-            } else if (showSettings) {
-                SettingsScreen(session, { settingsOpen = false }, onLogout, initialPage = if (settingsInitialPage == ACCOUNT_PAGE) io.github.capricornus007.nashira.SettingsPage.ACCOUNT else io.github.capricornus007.nashira.SettingsPage.ROOT)
             } else if (compact) {
                 MobileChatShell(
                     roomRepository = roomRepository,
@@ -509,6 +501,26 @@ fun ChatScreen(
                     }
                 }
             }
+        }
+        // 設定頁蓋在主畫面**上面**，不是跟主畫面互換：主畫面全程保持已組合，
+        // 進出兩次動畫才不會被「重新組合三欄＋60 則訊息」吃掉（用戶 2026-10-07
+        // 連續兩輪點名「從設定返回的動畫消失了」，位移量改過兩次都沒用就是这个原因）。
+        AnimatedVisibility(
+            visible = settingsOpen,
+            modifier = Modifier.fillMaxSize(),
+            enter = slideInVertically(tween(240)) { it } + fadeIn(tween(160)),
+            exit = slideOutVertically(tween(240)) { it } + fadeOut(tween(160)),
+        ) {
+            SettingsScreen(
+                session,
+                { settingsOpen = false },
+                onLogout,
+                initialPage = if (settingsInitialPage == ACCOUNT_PAGE) {
+                    io.github.capricornus007.nashira.SettingsPage.ACCOUNT
+                } else {
+                    io.github.capricornus007.nashira.SettingsPage.ROOT
+                },
+            )
         }
     }
 }
@@ -1769,12 +1781,19 @@ private fun TimelinePane(
     var pendingJumpEventId by remember(room.roomId) { mutableStateOf<String?>(null) }
     LaunchedEffect(pendingJumpEventId, messages) {
         val pid = pendingJumpEventId ?: return@LaunchedEffect
-        val list = messages ?: return@LaunchedEffect
-        val index = list.indexOfFirst { it.eventId?.full == pid }
-        if (index >= 0) {
-            listState.scrollToItem(index)
-            pendingJumpEventId = null
+        val list = messages
+        if (list != null) {
+            val index = list.indexOfFirst { it.eventId?.full == pid }
+            if (index >= 0) {
+                listState.scrollToItem(index)
+                pendingJumpEventId = null
+                return@LaunchedEffect
+            }
         }
+        // 目標不在這一頁（視窗還在重建、或那則被忽略清單濾掉）：給個退路，
+        // 否則「跳轉中」會永久壓住下面那條「跟隨最新消息」的邏輯。
+        delay(JumpGiveUpMillis)
+        if (pendingJumpEventId == pid) pendingJumpEventId = null
     }
 
     // reverseLayout 下 index 0 就是最新訊息（畫在最底部）。新訊息到達時只在
@@ -1782,6 +1801,11 @@ private fun TimelinePane(
     // 也只在貼底時跟隨）；回底部交給「跳到最新」按鈕。
     val awayFromLive by remember { derivedStateOf { listState.firstVisibleItemIndex > LiveEdgeItemThreshold } }
     LaunchedEffect(messages?.firstOrNull()?.eventId) {
+        // 這條與上面那條都以 messages 為鍵，跳轉時**兩條會同時重跑**，而 Compose 按
+        // 宣告順序啟動 → 上面剛捲到目標，這裡又 scrollToItem(0) 把人拽回底部。
+        // 用戶 2026-10-07 的「點了不跳轉、但跳轉標記有亮」就是這個：標記設到了、
+        // 捲動被後啟動的這條蓋掉。（上一版只加了捲動、沒處理這個競態。）
+        if (pendingJumpEventId != null) return@LaunchedEffect
         if (messages?.isNotEmpty() == true && listState.firstVisibleItemIndex <= LiveEdgeItemThreshold) {
             listState.scrollToItem(0)
         }
@@ -3669,7 +3693,8 @@ private fun AttachRow(icon: androidx.compose.ui.graphics.vector.ImageVector, lab
 
 /** 回覆預覽的一段文字：文字取前 60 字（換行摺疊），媒體給類型名。 */
 internal fun bodyPreview(body: MessageBody): String? = when (body) {
-    is MessageBody.Text -> body.text.lineSequence().firstOrNull { it.isNotBlank() }?.take(60)
+    // 預覽列也要 pangu：它是「↩ 名字: 預覽」那一行的內容來源
+    is MessageBody.Text -> body.text.lineSequence().firstOrNull { it.isNotBlank() }?.take(60)?.let { pangu(it) }
     is MessageBody.Image -> if (body.isSticker) "貼圖" else "圖片"
     is MessageBody.Voice -> "語音訊息"
     is MessageBody.Attachment -> body.name
@@ -3711,6 +3736,9 @@ private const val PrefetchThreshold = 10
 
 /** 距活邊緣超過幾個項目算「離開底部」：新訊息不跟隨＋顯示跳到最新鈕。 */
 private const val LiveEdgeItemThreshold = 4
+
+/** 跳轉等視窗重建的退路時間；超過就承認找不到、把「跟隨最新消息」還給使用者。 */
+private const val JumpGiveUpMillis = 2_500L
 
 /** Discord 式日期分隔線：兩側細線、中央日期。 */
 @Composable
@@ -4462,8 +4490,11 @@ private fun MessageBodyContent(
                     }
                 }
             } else {
+                // 純文字訊息**也要** pangu 化：這一輪實查（讀他的 DB）確認他點名那則
+                // 「红色的R当图标的」根本沒有 formatted_body，走的就是這條分支，
+                // 所以上一版只在 htmlToRichText 裡插空格，他看到的就是「依舊沒有實現」。
                 Text(
-                    body.text,
+                    pangu(body.text),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = modifier,

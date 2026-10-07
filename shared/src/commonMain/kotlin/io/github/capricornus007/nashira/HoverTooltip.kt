@@ -5,7 +5,6 @@ import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -16,6 +15,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
@@ -49,7 +49,12 @@ fun HoverTooltip(
             Box(
                 Modifier
                     .align(Alignment.BottomStart)
-                    .offset(y = 6.dp)
+                    // `align(BottomStart)` 是把說明的**下緣**對到元素下緣，於是它往上蓋住
+                    // 元素自己（用戶 2026-10-07 截圖 #41/#42：「跳到原始訊息」那條提示壓在
+                    // 引用列上、看不清被蓋住的內容）。往下推「自己那個高度」才真正落到下方。
+                    // 用 graphicsLayer 而不是 offset＋量尺寸：尺寸在繪製時才拿得到，
+                    // 這樣第一幀就在對的位置，不會先閃一下重疊。
+                    .graphicsLayer { translationY = size.height + 6.dp.toPx() }
                     .background(MaterialTheme.colorScheme.inverseSurface, RoundedCornerShape(8.dp))
                     .padding(horizontal = 9.dp, vertical = 5.dp),
             ) {

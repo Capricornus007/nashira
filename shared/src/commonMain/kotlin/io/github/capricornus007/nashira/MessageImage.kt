@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import de.connect2x.trixnity.client.MatrixClient
 import de.connect2x.trixnity.client.media.MediaService
 import de.connect2x.trixnity.utils.toByteArray
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import io.github.capricornus007.nashira.matrix.MediaSource
@@ -100,7 +101,12 @@ fun MessageImage(
                 // 來源伺服器不回時這個協程就永久掛著——用戶 2026-10-07 截圖 #23 那張
                 // 「以前載得出來、現在轉沒完了」的圖片（mxc 來自 nichi.co）就是這樣。
                 // 順帶把 toByteArray 的例外接住：原本只包了取 media 那段，它一拋就整輪報銷。
-                val bytes = kotlinx.coroutines.withTimeoutOrNull(leftMs) {
+                //
+                // ⚠️ 上一版這裡直接寫 `withTimeoutOrNull(leftMs) { ... }`，實測**仍然永久轉圈**
+                //（用戶 2026-10-07 截圖 #43/#45）。原因是 withTimeout 要等裡面的協程**真的收到
+                // 取消**才返回：卡在 DNS 查詢／socket 讀取這種不可中斷的阻塞呼叫時，逾時形同虛設。
+                // 所以改成丟到獨立作用域，只 await 它、等不到就自己走——那個協程留在背景死。
+                val bytes = mediaCallWithin(leftMs) {
                     val media = client.di.get<MediaService>().let { service ->
                         when (source) {
                             is MediaSource.Plain ->
@@ -118,7 +124,7 @@ fun MessageImage(
                                 }
                             is MediaSource.Encrypted -> service.getEncryptedMedia(source.file, maxSize = OriginalMaxMediaBytes)
                         }
-                    }.getOrNull() ?: return@withTimeoutOrNull null
+                    }.getOrNull() ?: return@mediaCallWithin null
                     runCatching { media.toByteArray(this@withContext) }.getOrNull()
                 } ?: continue
                 val frame = if (isVideo) {
@@ -294,6 +300,33 @@ internal suspend fun fetchMediaWithError(client: MatrixClient, source: MediaSour
  * 在這套 commonMain 下要額外 import，實測一口氣踩了三個編譯錯誤。
  */
 private const val MediaTotalBudgetMs = 18_000L
+
+/**
+ * 抓媒體用的獨立作用域。
+ *
+ * 存在的唯一理由：`withTimeoutOrNull { 網路請求 }` 在裡面的協程**不肯响应取消**時
+ * 一樣不會返回（DNS 查詢、socket 讀取都是這種），界面就永久停在轉圈。
+ * 把請求丟到這個作用域、外面只 `await` 它，逾時時放棄 await 即可立刻返回；
+ * 那個卡住的協程留在這裡自己結束，不再擋在畫面上。
+ */
+private val MediaIoScope = kotlinx.coroutines.CoroutineScope(
+    kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default,
+)
+
+/** 在 `timeoutMs` 內要一個結果；拿不到就回 null，**一定**會返回。 */
+private suspend fun <T> mediaCallWithin(timeoutMs: Long, block: suspend () -> T): T? =
+    mediaCallResultWithin(timeoutMs, block)?.getOrNull()
+
+/** 同上，但把失敗原因一起帶出來（「檢視／下載」那條路要寫出人話）。 */
+private suspend fun <T> mediaCallResultWithin(timeoutMs: Long, block: suspend () -> T): Result<T>? {
+    val task = MediaIoScope.async { runCatching { block() } }
+    return try {
+        kotlinx.coroutines.withTimeout(timeoutMs) { task.await() }
+    } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+        task.cancel()
+        null
+    }
+}
 
 /**
  * 「檢視器／另存圖片」那條路的單次上限：它只抓一次、不重試，

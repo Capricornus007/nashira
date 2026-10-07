@@ -1,17 +1,29 @@
 package io.github.capricornus007.nashira
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -73,8 +85,11 @@ fun Modifier.contextMenuGestures(
 /**
  * 選單的一列；`destructive` 用錯誤色（離開房間、刪除訊息這類）。
  *
- * 高度壓到 36dp：Material 預設 48dp 在這臺 2x 縮放的機器上等於 96 實體像素，
- * 六項就撐出一屏高的空白（用戶 2026-10-07：「看起來依舊有點多餘空白」）。
+ * **自己畫，不用 `DropdownMenuItem`**（用戶 2026-10-07 截圖 #44「實際並沒有收回空白」）：
+ * 那個元件內部固定留了 leading/trailing 兩個圖示槽與 48dp 項高，
+ * 上一輪試著用空的 `trailingIcon = { }` 收右側，實測收不掉——它還是在那裡占了寬度。
+ * 高度 36dp 對齊 Telegram 桌面；底色只在懸停時出現，不靠水波紋（這臺沒有合成器，
+ * Popup 窗口裡的 ripple 本來就畫不好）。
  */
 @Composable
 fun ContextMenuItem(
@@ -82,23 +97,30 @@ fun ContextMenuItem(
     destructive: Boolean = false,
     onClick: () -> Unit,
 ) {
-    DropdownMenuItem(
-        text = {
-            Text(
-                label,
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
-            )
-        },
-        onClick = onClick,
-        modifier = Modifier.height(36.dp),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp),
-        // 右側那塊空白不是寬度問題，是它默認給「加速鍵」留了一個 trailingIcon 槽。
-        // 給空的 composable 才收得掉——上一輪只把寬度釘到 240dp，所以他看著「空白依舊」
-        //（用戶 2026-10-07 截圖 #27/#28）。
-        trailingIcon = { },
-    )
+    val source = remember { MutableInteractionSource() }
+    val hovered by source.collectIsHoveredAsState()
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(MenuItemHeight)
+            .clip(RoundedCornerShape(6.dp))
+            .background(if (hovered) MaterialTheme.colorScheme.surfaceContainerHighest else Color.Transparent)
+            .hoverable(source)
+            .clickable(interactionSource = source, indication = null, onClick = onClick)
+            .padding(horizontal = 14.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
 }
+
+private val MenuItemHeight = 36.dp
 
 /**
  * 分組線。危險動作（離開、刪除）一定要跟普通動作隔開——
@@ -130,19 +152,18 @@ fun ContextMenuSurface(
         properties = PopupProperties(focusable = true, usePlatformDefaultWidth = false),
     ) {
         Surface(
-            // 寬度要釘在 **Surface** 上，不是裡面的 Column：
-            // Popup 的窗口尺寸取決於它最外層內容的約束，釘 Column 時 Surface 仍會被撐開，
-            // 用戶 2026-10-07 因此看到「依舊沒收掉」。
-            modifier = Modifier.width(200.dp),
+            // 寬度**不釘死**：釘 200dp 時「邀請」這種兩字項右邊就是一大片空白
+            //（用戶 2026-10-07 截圖 #44）。改成跟著最長那項收，兩側留下限與上限。
+            modifier = Modifier.widthIn(min = 148.dp, max = 320.dp),
             shape = MaterialTheme.shapes.extraSmall,
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 3.dp,
             shadowElevation = 8.dp,
         ) {
-            // 寬度必須自己釘死。Popup 在桌面端是一顆獨立窗口，它的尺寸取自內容的「期望尺寸」，
-            // 而 DropdownMenuItem 內部是 fillMaxWidth——不給上限就會一路撐到父窗口那麼寬
-            //（用戶 2026-10-07 換成 Popup 後當場點名「右鍵明顯過大」）。
-            Column { content() }
+            // IntrinsicSize.Max：Popup 是獨立窗口，寬度取自內容的「期望尺寸」。
+            // 每項各自 fillMaxWidth 會一路撐到父窗口那麼寬（上一版實測「右鍵明顯過大」），
+            // 用內在校寬讓整欄收成「最長那一項的寬度」，短標籤就不會掛著空右側。
+            Column(Modifier.width(IntrinsicSize.Max).padding(vertical = 4.dp)) { content() }
         }
     }
 }
