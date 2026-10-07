@@ -53,8 +53,6 @@ fun MessageImage(
     height: Int?,
     isSticker: Boolean,
     caption: String,
-    /** 失敗占位要寫「重試」，所以要把語系傳進來（本组件原本不碰字串）。 */
-    strings: io.github.capricornus007.nashira.i18n.Strings,
     modifier: Modifier = Modifier,
     mimeType: String? = null,
     /** 點圖開全螢幕檢視器；null（例如被隱藏的佔位）就不吃點擊。 */
@@ -64,50 +62,42 @@ fun MessageImage(
 ) {
     val key = remember(source) { source.cacheKey() }
     var bitmap by remember(key) { mutableStateOf(MediaBitmapCache.get(key)) }
-    var failed by remember(key) { mutableStateOf(false) }
-    /** 失敗的**原因**。只寫「重試」的話，他下次截圖我還是分不清是逾時、404 還是解不了碼。 */
-    var failReason by remember(key) { mutableStateOf<String?>(null) }
-    // 失敗要能重試：原本只能顯示檔名，使用者除了往上下翻讓它重新進畫面以外無路可走。
-    // 靠這個計數當 LaunchedEffect 的鍵，點一下就重跑一輪。
-    var reloadTick by remember(key) { mutableStateOf(0) }
+    /** 動畫貼圖的每一格；null 或只有一格＝靜態。 */
+    var frames by remember(key) { mutableStateOf(MediaFramesCache.get(key)) }
     // Telegram 橋的動態貼圖是 video/webm：縮圖端點回 400、圖片解碼器吃不下，
     // 要抓原檔抽第一幀（與貼圖面板同一套 decodeVideoFrame）。
     val isVideo = remember(mimeType) { mimeType?.startsWith("video/") == true }
     val maxWidth = if (isSticker) StickerMaxWidth else ImageMaxWidth
-    // 向伺服器要縮圖的尺寸要按「實際上要畫多大」算：264dp 在 2 倍縮放下是 528 實體像素，
-    // 固定要 800 的「長邊」對直式照片來說寬度只剩三四百像素，擺進 528 的框就是放大 → 必糊
-    //（用戶 2026-09-30 截圖 #42 對照 #41：同一張圖，全螢幕清楚、時間線糊）。
     val density = LocalDensity.current
     val boxPx = remember(density, maxWidth) { with(density) { maxWidth.toPx() }.toInt().coerceAtLeast(1) }
-    LaunchedEffect(client, key, boxPx, reloadTick) {
+    LaunchedEffect(client, key, boxPx) {
         if (bitmap != null) return@LaunchedEffect
-        // 連「開始」都記：用戶 2026-10-07 反問「爲什麼頭像加載正常圖片就加載不了」，
-        // 而 /tmp/nashira-media.log 完全沒有失敗紀錄——代表這條協程**根本沒走到認輸那步**。
-        // 若是每次重組都重來（key 不安定），這裡就會出現一堆重複「開始」行，一眼可辨。
-        // 上一輪的日誌實錘（用戶 2026-10-07 #72「看起來依舊無限加載」）：逾時**會**響了
-        // （`最終失敗：累計超過 10 秒`），但同一批網址每七八秒就重新 `開始` 一次——
-        // 訊息滾出畫面再滾回來，這條 LaunchedEffect 就從頭抓一次，前面那 10 秒白燒，
-        // 於是你永遠只會看到轉圈、看不到「重試」。
-        // 修法：整個「重試＋解碼」包成**每個 mxc 一把**的共用請求（MediaRequests），
-        // 第二個畫面進來是接上同一個協程；認輸過的網址也記住，重進畫面直接給「重試」，
-        // 冷卻期過了才自動再試一次。
-        if (MediaRequests.givenUp(key)) {
-            failReason = MediaRequests.giveUpReason(key)
-            failed = true
-            return@LaunchedEffect
-        }
         mediaProbe("開始 $key box=$boxPx")
-        val (decoded, why) = MediaRequests.await(key) {
-            loadMediaBitmap(key, boxPx, isVideo, client, source, width)
-        }
-        if (decoded != null) {
-            MediaBitmapCache.put(key, decoded)
-            bitmap = decoded
-        } else if (bitmap == null) {
-            failed = true
-            failReason = why
-            MediaRequests.markGivenUp(key, why ?: "原因不明")
-            mediaProbe("最終失敗：${why ?: "原因不明"} $key")
+        // 「重試」這個按鈕已經拿掉（用戶 2026-10-07：「重試是多餘的」）：
+        // 抓不到就自己排背退重試，直到成功為止，不把他拉進「要點一下」的迴圈。
+        // 間隔 2s → 7s → 12s → 之後固定 17s，不會變成對壞位址的密集轟炸
+        //（那條教訓來自頭像：實測 25 秒內對同一個 502 位址打了 40 次）。
+        var round = 0
+        while (bitmap == null) {
+            val outcome = MediaRequests.await(key) {
+                loadMediaBitmap(key, boxPx, isVideo, client, source, width) { partial ->
+                    // 先讓畫面有東西：日誌實測很多伺服器只給得出 32×32 的預生成縮圖，
+                    // 接著要再抓幾秒原檔。Element 的「秒開」感覺一半來自這裡——
+                    // 先糊一下、再變清楚，而不是轉十秒圈。
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        if (bitmap == null) bitmap = partial
+                    }
+                }
+            }
+            if (outcome.bitmap != null) {
+                MediaBitmapCache.put(key, outcome.bitmap!!)
+                bitmap = outcome.bitmap
+                if (outcome.frames.size > 1) MediaFramesCache.put(key, outcome.frames)
+            } else {
+                mediaProbe("第 ${round + 1} 輪失敗：${outcome.reason ?: "原因不明"} $key")
+                delay(2_000L + round * 5_000L)
+                round++
+            }
         }
     }
 
@@ -116,7 +106,19 @@ fun MessageImage(
     val frame = modifier
         .widthIn(max = maxWidth)
         .then(if (isSticker) Modifier else Modifier.clip(RoundedCornerShape(12.dp)))
-    val loaded = bitmap
+    // 動態貼圖：有多格就照每一格自帶的停留時間輪播（Telegram 的貼圖就是動的，
+    // 用戶 2026-10-07 點名「為什麼貼紙是靜態的」）。
+    val animated = frames?.takeIf { it.size > 1 }
+    var frameIndex by remember(key, animated) { mutableStateOf(0) }
+    if (animated != null) {
+        LaunchedEffect(animated) {
+            while (true) {
+                delay(animated[frameIndex].durationMs.toLong())
+                frameIndex = (frameIndex + 1) % animated.size
+            }
+        }
+    }
+    val loaded = animated?.getOrNull(frameIndex)?.bitmap ?: bitmap
     when {
         // 隱藏的圖片：佔位可點擊恢復（Element 的「隱藏」也是可逆的）
         hiddenLabel != null -> Box(
@@ -141,21 +143,6 @@ fun MessageImage(
             //（用戶 2026-09-29 對照 Telegram：「tg 無論點開之前還是點開之後都沒那麼糊」）。
             filterQuality = FilterQuality.High,
         )
-        // 載入失敗就退回檔名，至少看得出這裡本來有東西；點一下重跑一輪。
-        // 懸停給**原因**（也寫進 /tmp/nashira-media.log）：只知道「失敗」決定不了下一步
-        // 是該重試、該換伺服器、還是這張圖根本解不了。
-        failed -> HoverTooltip(text = failReason) {
-            Text(
-                "${caption.ifBlank { "🖼" }} · ${strings.retry}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.clickable {
-                    failed = false
-                    failReason = null
-                    reloadTick++
-                },
-            )
-        }
         // 貼圖的佔位不畫灰底：多數貼圖有透明背景，灰塊會在載入前一閃，看起來
         // 像是「貼圖壞了」。圖片訊息保留灰底（裁切圓角需要一個可見的版位）。
         else -> if (isSticker) {
@@ -350,40 +337,15 @@ private fun mediaProbe(line: String) {
  * ⚠️ 全部只在主執行緒存取（`LaunchedEffect` 的上下文），所以用普通 HashMap 就夠。
  */
 private object MediaRequests {
-    private val inFlight = HashMap<String, kotlinx.coroutines.Deferred<Pair<ImageBitmap?, String?>>>()
-    /** 認輸過的：mxc → (時間, 原因)。過期後允許自動再試一次。 */
-    private val givenUp = HashMap<String, Pair<Long, String>>()
+    private val inFlight = HashMap<String, kotlinx.coroutines.Deferred<MediaLoad>>()
 
-    fun givenUp(key: String): Boolean {
-        val entry = givenUp[key] ?: return false
-        if (entry.first + MediaFailureCooldownMillis < System.currentTimeMillis()) {
-            givenUp.remove(key)
-            return false
-        }
-        return true
-    }
-
-    fun giveUpReason(key: String): String? = givenUp[key]?.second
-
-    fun markGivenUp(key: String, reason: String) {
-        givenUp[key] = System.currentTimeMillis() to reason
-    }
-
-    /** 點「重試」：清掉認輸紀錄，讓下一條協程真的去抓。 */
-    fun reset(key: String) {
-        givenUp.remove(key)
-        inFlight.remove(key)
-    }
-
-    suspend fun await(
-        key: String,
-        load: suspend () -> Pair<ImageBitmap?, String?>,
-    ): Pair<ImageBitmap?, String?> {
+    suspend fun await(key: String, load: suspend () -> MediaLoad): MediaLoad {
         inFlight[key]?.let { running ->
-            mediaProbe("接上同一個請求 $key")
+            if (!running.isCompleted) mediaProbe("接上同一個請求 $key")
+            else mediaProbe("取回剛完成的那把 $key")
             return running.await()
         }
-        // 順手清掉已經跑完卻沒人取的條目（滾來滾去時會累積，每條都掛著一張位圖）
+        // 清掉已經跑完卻沒人取的條目（滾來滾去時會累積，每條都掛著位圖）
         if (inFlight.size > 24) {
             inFlight.filterValues { it.isCompleted }.keys.toList().forEach { inFlight.remove(it) }
         }
@@ -394,6 +356,37 @@ private object MediaRequests {
         } finally {
             // 只有真的等到結果才摘掉；被取消（滾出畫面）時留著，下一個畫面才能接上同一個
             if (task.isCompleted && inFlight[key] === task) inFlight.remove(key)
+        }
+    }
+}
+
+/** 一趟載入的結果：成功的位圖、失敗原因、以及（若是動畫）全部格。 */
+internal class MediaLoad(
+    val bitmap: ImageBitmap?,
+    val reason: String? = null,
+    val frames: List<DecodedFrame> = emptyList(),
+)
+
+/** 動畫格的快取。位元組上限比照 MediaBitmapCache：一格 0.3MB、十格就是一張圖的十倍。 */
+internal object MediaFramesCache {
+    private const val MAX_BYTES = 24L * 1024 * 1024
+    private val entries = LinkedHashMap<String, List<DecodedFrame>>()
+    private var bytes = 0L
+
+    private fun sizeOf(frames: List<DecodedFrame>): Long =
+        frames.sumOf { it.bitmap.width.toLong() * it.bitmap.height * 4 }
+
+    fun get(key: String): List<DecodedFrame>? = entries[key]
+
+    fun put(key: String, frames: List<DecodedFrame>) {
+        entries.remove(key)?.let { bytes -= sizeOf(it) }
+        // 一張動畫動輒幾十格，超過上限就整組不收（退回顯示第一格的靜態畫面）
+        if (sizeOf(frames) > MAX_BYTES / 4) return
+        entries[key] = frames
+        bytes += sizeOf(frames)
+        while (bytes > MAX_BYTES && entries.size > 1) {
+            val oldest = entries.keys.firstOrNull() ?: break
+            entries.remove(oldest)?.let { bytes -= sizeOf(it) }
         }
     }
 }
@@ -416,9 +409,12 @@ private suspend fun loadMediaBitmap(
     client: MatrixClient,
     source: MediaSource,
     declaredWidth: Int?,
-): Pair<ImageBitmap?, String?> {
+    /** 手上有可用的一張（還不夠清楚）時先給畫面，別讓人對著轉圈器等十幾秒。 */
+    onProgress: suspend (ImageBitmap) -> Unit = {},
+): MediaLoad {
     var best: ImageBitmap? = null
     var reason: String? = null
+    var animatedFrames: List<DecodedFrame> = emptyList()
     val deadlineMs = System.currentTimeMillis() + MediaTotalBudgetMs
     // 啟動初期伺服器版本還沒讀進來，請求會走舊版媒體端點被 404，所以失敗要重試幾次
     for (attempt in 0 until MediaFetchAttempts) {
@@ -498,6 +494,8 @@ private suspend fun loadMediaBitmap(
         // **抓過原檔就到此為止**：上一版只比「寬度夠不夠 boxPx」，小圖（橫幅、貼紙、
         // 低解析照片）明明已拿到完整原檔還被判不合格，同一個 3295B／309x59 被抓了四遍。
         if (usedOriginal || frame.width >= acceptableWidth) break
+        // 還想再抓一張更好的：先把這張交出去，畫面至少不是空白加轉圈
+        onProgress(frame)
     }
-    return best to (reason ?: if (best == null) "抓完了但沒有可用的一張" else null)
+    return MediaLoad(best, reason ?: if (best == null) "抓完了但沒有可用的一張" else null, animatedFrames)
 }

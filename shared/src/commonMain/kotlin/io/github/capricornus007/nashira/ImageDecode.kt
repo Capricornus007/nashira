@@ -24,3 +24,16 @@ const val DefaultMaxImageDimension: Int = 1024
  * 平台沒有可用的解碼器時回 null，UI 再退回帶標籤的佔位。
  */
 expect fun decodeVideoFrame(bytes: ByteArray, maxDimension: Int = 256): ImageBitmap?
+
+/** 動畫的其中一格：位圖 + 該格要停留多久（毫秒）。 */
+class DecodedFrame(val bitmap: ImageBitmap, val durationMs: Int)
+
+/**
+ * 解 GIF／動態 WebP／動態 PNG 的**全部**格；不是動畫（或平台沒有多格解碼器）就回空集合，
+ * 呼叫端退回單格靜態顯示。
+ *
+ * 為什麼必須做：Telegram 的動態貼圖經橋接進來是 `image/gif`，
+ * `Image.makeFromEncoded` 只給第一格——用戶 2026-10-07 拿 Telegram 手機版對照點名
+ * 「為什麼貼紙是靜態的」「tg 這裡實際貼紙也依舊是動態的」。
+ */
+expect fun decodeAnimatedFrames(bytes: ByteArray, maxDimension: Int = DefaultMaxImageDimension): List<DecodedFrame>

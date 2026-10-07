@@ -4386,7 +4386,6 @@ private fun MessageBodyContent(
                 height = body.height,
                 isSticker = body.isSticker,
                 caption = body.caption,
-                strings = strings,
                 modifier = modifier,
                 mimeType = body.mimeType,
                 onOpen = if (hidden) {

@@ -20,3 +20,10 @@ actual fun decodeImageBitmap(bytes: ByteArray, maxDimension: Int): ImageBitmap? 
     val options = BitmapFactory.Options().apply { inSampleSize = sample }
     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)?.asImageBitmap()
 }.getOrNull()
+
+/**
+ * 手機端的多格解碼還沒做（要換 `ImageDecoder`/`AnimatedImageDrawable`，
+ * 那是另一套繪製管線，Compose 的 `Image` 吃不進 drawable）。
+ * 回空集合＝退回單格靜態顯示，不影響其他功能。
+ */
+actual fun decodeAnimatedFrames(bytes: ByteArray, maxDimension: Int): List<DecodedFrame> = emptyList()
