@@ -52,6 +52,8 @@ fun MessageImage(
     height: Int?,
     isSticker: Boolean,
     caption: String,
+    /** 失敗占位要寫「重試」，所以要把語系傳進來（本组件原本不碰字串）。 */
+    strings: io.github.capricornus007.nashira.i18n.Strings,
     modifier: Modifier = Modifier,
     mimeType: String? = null,
     /** 點圖開全螢幕檢視器；null（例如被隱藏的佔位）就不吃點擊。 */
@@ -62,6 +64,9 @@ fun MessageImage(
     val key = remember(source) { source.cacheKey() }
     var bitmap by remember(key) { mutableStateOf(MediaBitmapCache.get(key)) }
     var failed by remember(key) { mutableStateOf(false) }
+    // 失敗要能重試：原本只能顯示檔名，使用者除了往上下翻讓它重新進畫面以外無路可走。
+    // 靠這個計數當 LaunchedEffect 的鍵，點一下就重跑一輪。
+    var reloadTick by remember(key) { mutableStateOf(0) }
     // Telegram 橋的動態貼圖是 video/webm：縮圖端點回 400、圖片解碼器吃不下，
     // 要抓原檔抽第一幀（與貼圖面板同一套 decodeVideoFrame）。
     val isVideo = remember(mimeType) { mimeType?.startsWith("video/") == true }
@@ -71,7 +76,7 @@ fun MessageImage(
     //（用戶 2026-09-30 截圖 #42 對照 #41：同一張圖，全螢幕清楚、時間線糊）。
     val density = LocalDensity.current
     val boxPx = remember(density, maxWidth) { with(density) { maxWidth.toPx() }.toInt().coerceAtLeast(1) }
-    LaunchedEffect(client, key, boxPx) {
+    LaunchedEffect(client, key, boxPx, reloadTick) {
         if (bitmap != null) return@LaunchedEffect
         // 抓取與解碼**挪出主執行緒**：Skia 沒有解碼期降採樣，一張 2560 的原圖是「先整張解開、再縮」，
         // 而 LaunchedEffect 跑在桌面端的 UI 執行緒上——來回翻時間線時，每張新進畫面的圖都在主緒
@@ -85,25 +90,31 @@ fun MessageImage(
             for (attempt in 0 until MediaFetchAttempts) {
                 if (attempt > 0) delay(MediaRetryDelayMillis * attempt)
                 val small = best?.let { it.width < boxPx } == true
-                val media = client.di.get<MediaService>().let { service ->
-                    when (source) {
-                        is MediaSource.Plain ->
-                            if (isVideo || attempt > 0 || small) {
-                                // 影片沒有縮圖端點；縮圖不夠大（或第一輪失敗）就改抓原檔本機降採樣
-                                service.getMedia(source.mxcUrl, maxSize = OriginalMaxMediaBytes)
-                            } else {
-                                // 高度給 3 倍寬：scale 是「塞進這個框」，框不夠高會讓直式圖的寬度被壓掉
-                                service.getThumbnail(
-                                    source.mxcUrl,
-                                    boxPx.toLong(),
-                                    boxPx.toLong() * ThumbnailHeightFactor,
-                                    maxSize = MaxMediaBytes,
-                                )
-                            }
-                        is MediaSource.Encrypted -> service.getEncryptedMedia(source.file, maxSize = OriginalMaxMediaBytes)
-                    }
-                }.getOrNull()
-                val bytes = media?.toByteArray(this) ?: continue
+                // 整段包逾時：Trixnity 的 getMedia／getThumbnail／toByteArray 都沒有時間上限，
+                // 來源伺服器不回時這個協程就永久掛著——用戶 2026-10-07 截圖 #23 那張
+                // 「以前載得出來、現在轉沒完了」的圖片（mxc 來自 nichi.co）就是這樣。
+                // 順帶把 toByteArray 的例外接住：原本只包了取 media 那段，它一拋就整輪報銷。
+                val bytes = kotlinx.coroutines.withTimeoutOrNull(MEDIA_TIMEOUT_MS) {
+                    val media = client.di.get<MediaService>().let { service ->
+                        when (source) {
+                            is MediaSource.Plain ->
+                                if (isVideo || attempt > 0 || small) {
+                                    // 影片沒有縮圖端點；縮圖不夠大（或第一輪失敗）就改抓原檔本機降採樣
+                                    service.getMedia(source.mxcUrl, maxSize = OriginalMaxMediaBytes)
+                                } else {
+                                    // 高度給 3 倍寬：scale 是「塞進這個框」，框不夠高會讓直式圖的寬度被壓掉
+                                    service.getThumbnail(
+                                        source.mxcUrl,
+                                        boxPx.toLong(),
+                                        boxPx.toLong() * ThumbnailHeightFactor,
+                                        maxSize = MaxMediaBytes,
+                                    )
+                                }
+                            is MediaSource.Encrypted -> service.getEncryptedMedia(source.file, maxSize = OriginalMaxMediaBytes)
+                        }
+                    }.getOrNull() ?: return@withTimeoutOrNull null
+                    runCatching { media.toByteArray(this@withContext) }.getOrNull()
+                } ?: continue
                 val frame = if (isVideo) {
                     decodeVideoFrame(bytes, maxDimension = boxPx * 2)
                 } else {
@@ -155,11 +166,15 @@ fun MessageImage(
             //（用戶 2026-09-29 對照 Telegram：「tg 無論點開之前還是點開之後都沒那麼糊」）。
             filterQuality = FilterQuality.High,
         )
-        // 載入失敗就退回檔名，至少看得出這裡本來有東西
+        // 載入失敗就退回檔名，至少看得出這裡本來有東西；點一下重跑一輪
         failed -> Text(
-            caption.ifBlank { "🖼" },
+            "${caption.ifBlank { "🖼" }} · ${strings.retry}",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.clickable {
+                failed = false
+                reloadTick++
+            },
         )
         // 貼圖的佔位不畫灰底：多數貼圖有透明背景，灰塊會在載入前一閃，看起來
         // 像是「貼圖壞了」。圖片訊息保留灰底（裁切圓角需要一個可見的版位）。
@@ -239,17 +254,31 @@ internal suspend fun fetchMediaBytes(client: MatrixClient, source: MediaSource):
 /**
  * 同上，但把失敗原因一起帶出來。原本失敗只回 null，界面只能寫一句「下載失敗」，
  * 使用者分不清是「來源伺服器掛了」還是「我們抓錯東西」
- * （用戶 2026-09-30 要的就是懸停看到具體原因）。
+ * （用戶 2026-10-07 要的就是懸停看到具體原因）。
+ *
+ * ⚠️ 一定要有逾時：`getMedia` 自己沒有時間上限，來源伺服器不回時這個協程就永久掛著，
+ * 而畫面上「還在抓」跟「已經死了」長得一模一樣——用戶截圖那張來自 nichi.co 的圖片
+ * 「以前載得出來、現在轉沒完了」就是這個。
  */
 internal suspend fun fetchMediaWithError(client: MatrixClient, source: MediaSource): Pair<ByteArray?, Throwable?> =
     kotlinx.coroutines.coroutineScope {
         val service = client.di.get<MediaService>()
-        val fetched = when (source) {
-            is MediaSource.Plain -> runCatching { service.getMedia(source.mxcUrl, maxSize = 32L * 1024 * 1024) }
-            is MediaSource.Encrypted -> runCatching { service.getEncryptedMedia(source.file, maxSize = 32L * 1024 * 1024) }
+        val fetched = runCatching {
+            kotlinx.coroutines.withTimeoutOrNull(MEDIA_TIMEOUT_MS) {
+                when (source) {
+                    is MediaSource.Plain -> service.getMedia(source.mxcUrl, maxSize = 32L * 1024 * 1024)
+                    is MediaSource.Encrypted -> service.getEncryptedMedia(source.file, maxSize = 32L * 1024 * 1024)
+                }
+            } ?: throw java.net.SocketTimeoutException("來源伺服器 $((MEDIA_TIMEOUT_MS / 1000)) 秒內沒有回應")
         }
         val inner = fetched.getOrNull() ?: return@coroutineScope null to fetched.exceptionOrNull()
         val media = inner.getOrNull() ?: return@coroutineScope null to inner.exceptionOrNull()
-        val bytes = runCatching { media.toByteArray(this) }
-        bytes.getOrNull() to bytes.exceptionOrNull()
+        val bytes = runCatching {
+            kotlinx.coroutines.withTimeoutOrNull(MEDIA_TIMEOUT_MS) { media.toByteArray(this@coroutineScope) }
+        }.getOrNull() ?: return@coroutineScope null to
+            java.net.SocketTimeoutException("下載中斷或太慢（>$MEDIA_TIMEOUT_MS ms）")
+        bytes to null
     }
+
+/** 媒體下載的單次上限：慢伺服器也要在可預期的時間內認輸，好讓界面能給出「重試」。 */
+private const val MEDIA_TIMEOUT_MS = 20_000L
