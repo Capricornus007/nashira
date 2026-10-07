@@ -355,7 +355,9 @@ internal fun StickerThumb(
                     // 第一輪縮圖失敗後立刻退回原圖，不要一直卡 spinner。
                     val preferThumbnail = !isVideo && attempt == 0
                     val result = if (preferThumbnail) {
-                        service.getThumbnail(source.mxcUrl, 240, 240 * ThumbnailHeightFactor, maxSize = MaxMediaBytes)
+                        // 640×480 是 Synapse 內建快取清單裡的大小之一，命中率高；
+                        // 自訂的 240×720 每張都要家伺服器現場生成（同 MessageImage 那條註解）。
+                        service.getThumbnail(source.mxcUrl, 640, 480, maxSize = MaxMediaBytes)
                     } else {
                         service.getMedia(source.mxcUrl, maxSize = MaxMediaBytes)
                     }

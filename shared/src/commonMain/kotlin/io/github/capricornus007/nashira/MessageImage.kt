@@ -186,11 +186,19 @@ private fun ratioOf(width: Int?, height: Int?, bitmap: ImageBitmap?): Float {
 internal const val MaxMediaBytes = 2L * 1024 * 1024
 
 /**
- * 縮圖請求框的高度倍數：伺服器的 `method=scale` 是「把圖塞進這個框」，
- * 框給 800×800 時一張直式照片的**寬度**會被壓到 400 以下，擺進 528 實體像素的
- * 顯示框就得放大 → 糊。高度給 3 倍寬，直式圖才能保住整條寬度。
+ * 縮圖請求框：**與 Element／SchildiChat 相同**的 800×600。
+ * Synapse 按尺寸分別快取縮圖，這個組合命中率最高（別人已經生成過了），
+ * 自訂比例會讓每張圖都變成「家伺服器現場生成」，慢到 20 秒不回應。
  */
-internal const val ThumbnailHeightFactor = 3L
+internal const val ThumbnailWidth = 800L
+internal const val ThumbnailHeight = 600L
+
+/**
+ * 縮圖寬度至少要達到顯示框的這個比例才算「夠清楚」，否則再抓原檔。
+ * 直式手機照片塞進 800×600 後寬度約 450，對 528 實體像素的框是 0.85 倍，
+ * 與 Element 畫面一致；只有極端長圖才會多跑一趟原檔。
+ */
+private const val AcceptableThumbnailFraction = 3
 
 /** 退而抓原檔時的上限：原圖普遍 3–6 MiB，卡在同一個 2 MiB 會直接拿不到檔案。 */
 internal const val OriginalMaxMediaBytes = 8L * 1024 * 1024
@@ -413,6 +421,7 @@ private suspend fun loadMediaBitmap(
         // 事件本身就寫了原圖尺寸時，比顯示框還小的圖**不必先問縮圖**：縮圖端點最多也只
         // 給到原圖大小，白跑一趟（日誌實測 kimiblock.top 對 528 的請求回 32×32）。
         val declaredSmall = declaredWidth != null && declaredWidth in 1 until boxPx
+        val acceptableWidth = boxPx / AcceptableThumbnailFraction
         val usedOriginal = isVideo || attempt > 0 || small || declaredSmall
         val outcome = mediaCallResultWithin(leftMs) {
             val fetched = client.di.get<MediaService>().let { service ->
@@ -422,11 +431,17 @@ private suspend fun loadMediaBitmap(
                             // 影片沒有縮圖端點；縮圖不夠大（或第一輪失敗）就改抓原檔本機降採樣
                             service.getMedia(source.mxcUrl, maxSize = OriginalMaxMediaBytes)
                         } else {
-                            // 高度給 3 倍寬：scale 是「塞進這個框」，框不夠高會讓直式圖的寬度被壓掉
+                            // ⚠️ 尺寸要跟 Element／SchildiChat **一模一样**（800×600 scale），
+                            // 不是按我們的顯示框算。Synapse 是「按尺寸分別快取」縮圖的：
+                            // 800×600 這種常用組合早就被前幾個客戶端生成過、直接命中快取；
+                            // 我們之前要 528×1584（為了直式圖不糊自己發明的比例）
+                            // **每個都是冷檔**，家伺服器得先跟來源伺服器要原圖再生成，
+                            // 實測動輒 20 秒不回應——這就是「別人秒開、我們轉圈」的原因
+                            //（用戶 2026-10-07 #77「就必須加載出來，而且秒開秒出」）。
                             service.getThumbnail(
                                 source.mxcUrl,
-                                boxPx.toLong(),
-                                boxPx.toLong() * ThumbnailHeightFactor,
+                                ThumbnailWidth,
+                                ThumbnailHeight,
                                 maxSize = MaxMediaBytes,
                             )
                         }
@@ -440,7 +455,7 @@ private suspend fun loadMediaBitmap(
         }
         val bytes = when {
             outcome == null -> {
-                reason = "來源伺服器 $((leftMs / 1000).coerceAtLeast(0)) 秒內沒有回應"
+                reason = "來源伺服器 ${(leftMs / 1000).coerceAtLeast(0L)} 秒內沒有回應"
                 mediaProbe("$reason（第 ${attempt + 1} 次）$key")
                 continue
             }
@@ -469,7 +484,7 @@ private suspend fun loadMediaBitmap(
         mediaProbe("成功 $key 第 ${attempt + 1} 次 ${bytes?.size ?: 0}B → ${frame.width}x${frame.height}")
         // **抓過原檔就到此為止**：上一版只比「寬度夠不夠 boxPx」，小圖（橫幅、貼紙、
         // 低解析照片）明明已拿到完整原檔還被判不合格，同一個 3295B／309x59 被抓了四遍。
-        if (usedOriginal || frame.width >= boxPx) break
+        if (usedOriginal || frame.width >= acceptableWidth) break
     }
     return best to (reason ?: if (best == null) "抓完了但沒有可用的一張" else null)
 }

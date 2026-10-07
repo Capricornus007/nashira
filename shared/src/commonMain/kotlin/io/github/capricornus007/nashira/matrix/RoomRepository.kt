@@ -1187,12 +1187,17 @@ private fun imageBody(
     info: ImageInfo?,
     isSticker: Boolean,
 ): MessageBody {
-    val source = info?.thumbnailFile?.let(MediaSource::Encrypted)
+    val poster = info?.thumbnailFile?.let(MediaSource::Encrypted)
         ?: info?.thumbnailUrl?.let(MediaSource::Plain)
+    val source = poster
         ?: file?.let(MediaSource::Encrypted)
         ?: url?.let(MediaSource::Plain)
         ?: return MessageBody.Attachment(caption)
-    return MessageBody.Image(caption, source, info?.width, info?.height, isSticker, info?.mimeType)
+    // 拿到的是**縮圖**時，mimeType 不能沿用原檔的 `video/…`：
+    // MessageImage 靠這個欄位決定要不要走「抽影片第一幀」，
+    // 對一張 JPEG 縮圖抽幀只會失敗（用戶 2026-10-07 #73「視頻依舊」）。
+    val mime = if (poster != null) null else info?.mimeType
+    return MessageBody.Image(caption, source, info?.width, info?.height, isSticker, mime)
 }
 
 /**
@@ -1207,8 +1212,9 @@ private fun videoBody(
     file: EncryptedFile?,
     info: VideoInfo?,
 ): MessageBody {
-    val source = info?.thumbnailFile?.let(MediaSource::Encrypted)
+    val poster = info?.thumbnailFile?.let(MediaSource::Encrypted)
         ?: info?.thumbnailUrl?.let(MediaSource::Plain)
+    val source = poster
         ?: file?.let(MediaSource::Encrypted)
         ?: url?.let(MediaSource::Plain)
         ?: return MessageBody.Attachment(caption)
@@ -1218,7 +1224,9 @@ private fun videoBody(
         width = info?.width,
         height = info?.height,
         isSticker = false,
-        mimeType = info?.mimeType,
+        // 同 imageBody：用縮圖當畫面時，mimeType 不能還是 `video/*`，
+        // 否則 MessageImage 會對一張 JPEG 去抽影片第一幀。
+        mimeType = if (poster != null) null else info?.mimeType,
     )
 }
 
