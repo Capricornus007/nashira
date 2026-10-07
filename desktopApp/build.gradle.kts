@@ -41,9 +41,12 @@ compose.desktop {
             //（13GB 機器＝3.3GB），GC 又是 G1，會先把地盤圈起來。
             // 實測 v0.1.62 開著兩個房間閒置 RSS = 606MB（用戶 2026-10-07 點名「運行佔用也要小」）。
             // 512MB 軟上限對一個聊天客戶是夠的（媒體快取本身另有 24MB 上限），
-            // 超過時 SoftMaxHeapSize 讓 GC 先努力回收，真需要才長到 768MB 硬頂。
-            "-XX:SoftMaxHeapSize=512m",
-            "-Xmx768m",
+            // 超過 SoftMaxHeapSize 時 GC 先努力回收，真需要才長到上面那個硬頂。
+            // 256m 軟頂／384m 硬頂是**量出來的**：同一組 G1，上限從 512/768 收到 256/384，
+            // 實測 RSS 593MB → 452MB（NMT committed 387MB → 257MB），流暢度沒變。
+            // 堆裡放的是資料模型，圖片的像素在 skia 那側（不吃 Java 堆），所以 384m 綽有餘。
+            "-XX:SoftMaxHeapSize=256m",
+            "-Xmx384m",
             "-XX:MaxMetaspaceSize=256m",
             "-XX:ReservedCodeCacheSize=96m",
             "-Xss512k",
@@ -53,6 +56,9 @@ compose.desktop {
             //   分代 ZGC → 826／866／873MB 還在爬，比出廠預設還差，淘汰。
             //   G1＋限量 → 600MB 級，翻頁實測「順暢了」→ 留這個。
             "-XX:+UseG1GC",
+            // 閒置時主動回收並把記憶體「還給作業系統」。G1 預設回收完仍占著不放手，
+            // 掛著當常駐客戶端時這筆很虛：加了這個，閒置一輪之後 RSS 會自己落下來。
+            "-XX:G1PeriodicGCInterval=60000",
         )
         nativeDistributions {
             targetFormats(TargetFormat.Deb, TargetFormat.Rpm)
