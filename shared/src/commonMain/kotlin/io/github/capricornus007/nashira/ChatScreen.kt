@@ -1,7 +1,6 @@
 package io.github.capricornus007.nashira
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.AnchoredDraggableDefaults
@@ -935,21 +934,18 @@ private fun RailSlot(
 @Composable
 private fun UnreadBadge(count: Int, muted: Boolean = false, modifier: Modifier = Modifier) {
     if (count <= 0) {
-        // 靜音房的計數拿不到（Trixnity 對「已停用通知」的房間恆回 0，實測在其
-        // NotificationState 裡：notificationsDisabled=true + expectedMaxNotificationCount=0），
-        // 但「有未讀」這件事它知道，所以給一顆點。
-        // ⚠️ 顏色不能用 surfaceVariant：那比選單/列表底色還暗，實測「看不清、可見性極爛」
-        //（用戶 2026-10-07 截圖 #29）。改用 onSurfaceVariant（前景灰）＋加大到 11dp，
-        // 再補一圈同色描邊，淺底深底都看得見。
+        // 用戶 2026-10-07 決定：不要數字（Element 對靜音房也只給一顆點），但點要看得見。
+        // ⚠️ 顏色用**主題強調色 primary**，不是固定灰：我先前寫「照 Element 做成亮灰」
+        // 被他當場點名「誰跟你說要灰色了，如果有人設定主題顏色是灰色那怎麼辦」——
+        // 固定灰在灰色主題下又會隱形，等於沒修。
+        // 靜音與否的分別由「紅／主題色」承擔，房間列本來另有靜音鈴鐺圖示。
+        // 也不加描邊：多一圈邊在深色底上只會讓它看起來髒。
         Box(
             modifier
-                .padding(4.dp)
-                .size(11.dp)
+                .padding(5.dp)
+                .size(10.dp)
                 .clip(CircleShape)
-                .background(
-                    if (muted) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f) else UnreadRed
-                )
-                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape),
+                .background(if (muted) MaterialTheme.colorScheme.primary else UnreadRed),
         )
         return
     }
