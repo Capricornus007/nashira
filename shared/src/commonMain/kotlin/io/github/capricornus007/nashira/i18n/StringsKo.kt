@@ -87,6 +87,7 @@ object KoStrings : Strings by EnStrings {
     override val dynamicColor = "동적 색상"
     override val dynamicColorHint = "배경화면 기반 테마 색상(Material You)"
     override val paletteStyle = "팔레트 스타일"
+    override val chatFontSize = "글자 크기"
     override val expressive = "Expressive"
     override val colorSpec = "색상 사양"
     override val specM3 = "Material 3(2021)"

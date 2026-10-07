@@ -86,7 +86,9 @@ object JaStrings : Strings by EnStrings {
     override val pureBlackHint = "ダークモードの背景を完全な黒にして OLED の電力を節約"
     override val dynamicColor = "ダイナミックカラー"
     override val dynamicColorHint = "壁紙を基にしたテーマカラー（Material You）"
+    // 用「文字サイズ」不是「フォントサイズ」：AOSP 日文對這類設定就是這麼寫的
     override val paletteStyle = "パレットスタイル"
+    override val chatFontSize = "文字サイズ"
     override val expressive = "Expressive"
     override val colorSpec = "カラースペック"
     override val specM3 = "Material 3（2021）"

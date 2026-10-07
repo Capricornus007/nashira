@@ -68,6 +68,11 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
     var paletteStyle by mutableStateOf(stored.enumOr("paletteStyle", PaletteStyle.TonalSpot))
     var specVersion by mutableStateOf(stored.enumOr("specVersion", ColorSpec.SpecVersion.SPEC_2025))
     /**
+     * 介面文字大小，存百分比（100＝預設）。只乘字級與行高，**不動 LocalDensity**，
+     * 所以選單寬度、托盤圖示這類 dp 尺寸不會跟著變（理由見 Theme.kt scaledTypography）。
+     */
+    var chatTextPercent by mutableStateOf(stored["chatTextPercent"]?.toIntOrNull() ?: 100)
+    /**
      * 手選強調色，存成 `#RRGGBB`；null＝預設（動態取色或品牌 Arcaea 色板）。
      * 色票圓點與「自己打色號」寫的是同一個欄位，所以不必兩套狀態再比較誰優先。
      * 舊版存的是 `accent`（色系 enum 名），載入時轉換成同一顆色。
@@ -232,6 +237,7 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
             "dynamicColor" to dynamicColor.toString(),
             "paletteStyle" to paletteStyle.name,
             "specVersion" to specVersion.name,
+            "chatTextPercent" to chatTextPercent.toString(),
             "accentHex" to (accentHex ?: ""),
             "spaceIconMode" to spaceIconMode.name,
             "showUnreadIndicators" to showUnreadIndicators.toString(),
@@ -325,7 +331,10 @@ fun App(defaultDark: Boolean? = null) {
     androidx.compose.runtime.LaunchedEffect(Unit) { MatrixEngine.restoreFromDisk() }
     val animatedScheme = rememberNashiraColorScheme(defaultDark)
 
-    NashiraTheme(colorScheme = animatedScheme) {
+    NashiraTheme(
+        colorScheme = animatedScheme,
+        textScale = ui.chatTextPercent / 100f,
+    ) {
         val current = session
         when {
             current != null -> {

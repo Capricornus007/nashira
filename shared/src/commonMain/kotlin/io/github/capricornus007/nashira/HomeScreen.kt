@@ -366,6 +366,21 @@ private fun AppearancePage(onBack: () -> Unit) {
                     )
                 }
             }
+            // 介面文字大小：離散四檔，不做滑桿——倉裡沒有現成滑桿元件，
+            // 而且百分比本身就是不需要翻譯的字串，省掉一輪六語系的機器味。
+            item { shape ->
+                SettingsDropdownItem(
+                    shape = shape,
+                    title = strings.chatFontSize,
+                    current = "${ui.chatTextPercent}%",
+                ) { close ->
+                    listOf(90, 100, 115, 130).forEach { percent ->
+                        SettingsMenuOption("$percent%", ui.chatTextPercent == percent) {
+                            ui.chatTextPercent = percent; close()
+                        }
+                    }
+                }
+            }
             // 調色盤樣式與顏色規格（M3 / Expressive 2025）：原本只在 Android 顯示，
             // 理由是「桌面沒有桌布取色」。但桌面的種子來自手選色票、一樣走動態生成，
             // 所以這兩項在桌面**同樣有效**——用戶 2026-10-07 點名「桌面上也放出這個選項」。

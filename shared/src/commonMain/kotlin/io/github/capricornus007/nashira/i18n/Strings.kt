@@ -106,6 +106,7 @@ interface Strings {
     val dynamicColor: String
     val dynamicColorHint: String
     val paletteStyle: String
+    val chatFontSize: String
     val expressive: String
     val colorSpec: String
     val specM3: String

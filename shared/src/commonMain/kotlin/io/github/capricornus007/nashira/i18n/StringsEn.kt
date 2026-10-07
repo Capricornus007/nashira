@@ -88,6 +88,7 @@ object EnStrings : Strings {
     override val dynamicColor = "Dynamic color"
     override val dynamicColorHint = "Wallpaper-based theme colors (Material You)"
     override val paletteStyle = "Palette style"
+    override val chatFontSize = "Font size"
     override val expressive = "Expressive"
     override val colorSpec = "Color spec"
     override val specM3 = "Material 3 (2021)"

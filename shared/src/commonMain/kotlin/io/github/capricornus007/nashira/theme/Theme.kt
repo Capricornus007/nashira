@@ -136,17 +136,54 @@ internal val NashiraPureBlackColors = NashiraDarkColors.copy(
  * 設定列標題不另加粗：它已經是 `titleMedium`（比說明的 `bodyMedium` 大一號）且用 onSurface，
  * 說明用 onSurfaceVariant —— 再看顏色與尺寸就分得出來，加粗只會糊。
  */
+/**
+ * 把字級乘上一個倍數（用戶 2026-10-07 點名的「聊天文字大小」）。
+ *
+ * 只動字級與行高，**不動 LocalDensity**：動密度會連帶改掉所有 dp→px，
+ * 這一輪剛改的選單寬度（240dp）、托盤圖示尺寸、面板位置都會跟著變，
+ * 那是另一整輪回歸測試的代價。
+ *
+ * 基準值從 `Typography()` 現值讀出來再乘，不寫死數字——寫死就要跟著 Material
+ * 版本的預設值走，而它本來就調過。
+ * 行高只在「有指定」時才乘：`TextUnit` 是編碼過的 value class，
+ * 我沒實測過對 Unspecified 做算術會得到什麼，不去賭。
+ */
+private fun scaledTypography(scale: Float): Typography {
+    val base = Typography()
+    if (scale == 1f) return base
+    fun androidx.compose.ui.text.TextStyle.scaled() = copy(
+        fontSize = fontSize * scale,
+        // 行高只在「有指定」時才乘：TextUnit 是編碼過的 value class，
+        // 對 Unspecified 做算術我沒有實測過它的結果，不去賭
+        lineHeight = if (lineHeight == androidx.compose.ui.unit.TextUnit.Unspecified) {
+            lineHeight
+        } else {
+            lineHeight * scale
+        },
+    )
+    return base.copy(
+        titleLarge = base.titleLarge.scaled(),
+        titleMedium = base.titleMedium.scaled(),
+        bodyLarge = base.bodyLarge.scaled(),
+        bodyMedium = base.bodyMedium.scaled(),
+        bodySmall = base.bodySmall.scaled(),
+        labelLarge = base.labelLarge.scaled(),
+        labelMedium = base.labelMedium.scaled(),
+    )
+}
+
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun NashiraTheme(
     colorScheme: ColorScheme,
+    textScale: Float = 1f,
     content: @Composable () -> Unit,
 ) {
     MaterialExpressiveTheme(
         colorScheme = colorScheme,
         shapes = Shapes(),
         motionScheme = remember { MotionScheme.expressive() },
-        typography = Typography(),
+        typography = scaledTypography(textScale),
     ) {
         // MaterialTheme 不設 LocalContentColor（預設黑）。包一層 Surface 讓沒有顯式
         // 指定顏色的 Text/Icon 拿到 onBackground，深色主題下才不會變成黑字。
