@@ -911,7 +911,7 @@ private fun RailSlot(
             ) {
                 content(shape)
             }
-            if (unread.count > 0) {
+            if (unread.count > 0 || (unread.unread && unread.muted)) {
                 UnreadBadge(
                     count = unread.count,
                     muted = unread.muted,
@@ -933,6 +933,16 @@ private fun RailSlot(
  */
 @Composable
 private fun UnreadBadge(count: Int, muted: Boolean = false, modifier: Modifier = Modifier) {
+    if (count <= 0) {
+        // 靜音房的計數拿不到（Trixnity 對「已停用通知」的房間恆回 0，實測在其
+        // NotificationState 裡：notificationsDisabled=true + expectedMaxNotificationCount=0），
+        // 但「有未讀」這件事它知道。寧可給一顆灰點，也不要什麼都不畫——
+        // 那樣用戶分不清是「沒訊息」還是「被吞了」（用戶 2026-10-07 點名）。
+        Box(modifier.padding(5.dp).size(9.dp).clip(CircleShape).background(
+            if (muted) MaterialTheme.colorScheme.surfaceVariant else UnreadRed
+        ))
+        return
+    }
     Box(
         modifier
             .clip(CircleShape)
@@ -1424,7 +1434,8 @@ private fun RoomListItem(
                         color = if (room.isInvite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f),
                     )
-                    if (unread.count > 0 && !room.isInvite) {
+                    // 靜音房拿不到計數也要給訊號：有未讀就畫（count 為 0 時是灰點）
+                    if (!room.isInvite && (unread.count > 0 || (unread.unread && unread.muted))) {
                         Spacer(Modifier.width(8.dp))
                         // 靜音房照樣顯示計數、只是變灰（對齊 64gram 桌面版）
                         UnreadBadge(unread.count, muted = unread.muted)
