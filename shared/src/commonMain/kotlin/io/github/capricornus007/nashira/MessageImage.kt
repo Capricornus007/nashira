@@ -101,7 +101,12 @@ fun MessageImage(
                 if (outcome.frames.size > 1) MediaFramesCache.put(key, outcome.frames)
             } else {
                 mediaProbe("第 ${round + 1} 輪失敗：${outcome.reason ?: "原因不明"} $key")
-                delay(2_000L + round * 5_000L)
+                // 5xx 是**它那側**過載（matrix.org 的 Cloudflare 502 直接在錯誤內容裡寫了
+                // 「retry_after: 60」），這種要退 60 秒；不然就是對著壞掉的來源一直打。
+                val serverBusy = outcome.reason?.contains("502") == true ||
+                    outcome.reason?.contains("503") == true ||
+                    outcome.reason?.contains("504") == true
+                delay(if (serverBusy) 60_000L else 2_000L + round * 5_000L)
                 round++
             }
         }
@@ -494,7 +499,9 @@ private suspend fun loadMediaBitmap(
             }
             outcome.isFailure -> {
                 val t = outcome.exceptionOrNull()
-                reason = "${t?.javaClass?.simpleName} ${t?.message ?: ""}".trim()
+                reason = ("${t?.javaClass?.simpleName} ${t?.message ?: ""}")
+                    // 整包 Cloudflare 的 502 JSON 有 1.5KB，會淹掉日誌與懸停 → 壓成一行截短
+                    .replace(Regex("\\s+"), " ").trim().take(180)
                 // Synapse 關掉動態縮圖時的原文是「Cannot find any thumbnails for the
                 // requested media … Dynamic thumbnails are disabled on this server」。
                 if (!usedOriginal && reason.contains("thumbnail", ignoreCase = true)) {
@@ -519,7 +526,27 @@ private suspend fun loadMediaBitmap(
             mediaProbe("第 ${attempt + 1} 次：$reason $key")
             continue
         }
+        // 動畫（GIF／動態 WebP／動態 PNG）：同一份位元組再多解一次，拿每一格與停留時間。
+        // ⚠️ 這一段上一版「以為加了、其實字串沒替換到」，所以他 2026-10-07 #90 看到
+        // 貼紙依舊是靜態的。現在有下面那行格數紀錄，能不能解出多格一看就知道。
+        if (bytes != null && !isVideo) {
+            animatedFrames = withContext(kotlinx.coroutines.Dispatchers.Default) {
+                decodeAnimatedFrames(bytes, boxPx * 2)
+            }
+            mediaProbe("動畫 ${animatedFrames.size} 格 $key")
+        }
         best = frame
+    // 最後一著：**繞過自家伺服器的轉手**，直接跟「圖原本那臺」要。
+    // 這次是 matrix.org 自己過載回 502，而原站其實是好的；原站若已關掉舊版免認證
+    // 端點就會回 404，這條路自然作廢，不會多卡時間。
+    if (best == null && source is MediaSource.Plain) {
+        val direct = fetchMediaFromOrigin(source.mxcUrl, boxPx)
+        if (direct != null) {
+            mediaProbe("改問原站成功 $key")
+            best = direct
+            reason = null
+        }
+    }
         mediaProbe("成功 $key 第 ${attempt + 1} 次 ${bytes?.size ?: 0}B → ${frame.width}x${frame.height}")
         // **抓過原檔就到此為止**：上一版只比「寬度夠不夠 boxPx」，小圖（橫幅、貼紙、
         // 低解析照片）明明已拿到完整原檔還被判不合格，同一個 3295B／309x59 被抓了四遍。
@@ -531,3 +558,45 @@ private suspend fun loadMediaBitmap(
     }
     return MediaLoad(best, reason ?: if (best == null) "抓完了但沒有可用的一張" else null, animatedFrames)
 }
+
+
+/**
+ * 直接跟 mxc 裡那臺伺服器要原檔（**不帶**登入憑證，走舊版免認證端點）。
+ *
+ * 為什麼要有這條：圖片 normally 是經自己家伺服器「轉手」去取的，那臺過載時
+ * （實測 matrix.org 回 Cloudflare 502）圖就永遠進不來，而原站其實是好的。
+ */
+private suspend fun fetchMediaFromOrigin(mxcUrl: String, boxPx: Int): ImageBitmap? =
+    withContext(kotlinx.coroutines.Dispatchers.IO) {
+        runCatching {
+            val rest = mxcUrl.removePrefix("mxc://")
+            val host = rest.substringBefore("/", "")
+            val id = rest.substringAfter("/", "")
+            if (host.isEmpty() || id.isEmpty()) return@runCatching null
+            val connection = java.net.URL("https://$host/_matrix/media/v3/download/$host/$id")
+                .openConnection()
+            if (connection !is java.net.HttpURLConnection) return@runCatching null
+            connection.connectTimeout = 8_000
+            connection.readTimeout = 15_000
+            connection.instanceFollowRedirects = true
+            // 不帶 UA 會被一些站台的機器人防護直接擋掉（實測 tophub 那類 403/503）
+            connection.setRequestProperty("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) Nashira/1.0")
+            if (connection.responseCode !in 200..299) return@runCatching null
+            val input = connection.inputStream
+            val buffer = java.io.ByteArrayOutputStream()
+            val chunk = ByteArray(64 * 1024)
+            var total = 0
+            while (true) {
+                val read = input.read(chunk)
+                if (read <= 0) break
+                buffer.write(chunk, 0, read)
+                total += read
+                if (total > OriginalMaxMediaBytes) {
+                    input.close()
+                    return@runCatching null   // 太大，跟原本的限制一樣丟掉
+                }
+            }
+            input.close()
+            decodeImageBitmap(buffer.toByteArray(), maxDimension = boxPx * 2)
+        }.getOrNull()
+    }

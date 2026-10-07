@@ -2846,8 +2846,12 @@ private fun TimelinePane(
                         CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
                     }
                 }
-                // 還在往回撈歷史時不要先寫「房間開始」，那句會被下一頁打臉
-                loaded.isEmpty() && !loadingMore -> item {
+                // 「這裡是 ○○ 的開始」要**真的翻到頭**才敢說。
+                // 上一版只排除了「正在撈歷史」，結果第一頁剛好被過濾空（治理房、
+                // 只有 state 事件的倉庫房）或伺服器還沒回第二頁時，就搶先講了這句話，
+                // 自帶一大片空白——用戶 2026-10-07 #91：「能不能直接去加載訊息時間線」。
+                // 現在還可能有更多就顯示載入中，交給上面那個自動往前翻的協程去要。
+                loaded.isEmpty() && !loadingMore && page?.canLoadMore != true -> item {
                     Text(
                         strings.roomBeginning.format(room.name),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
