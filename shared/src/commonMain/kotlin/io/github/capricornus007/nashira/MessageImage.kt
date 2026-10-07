@@ -92,7 +92,7 @@ fun MessageImage(
         var round = 0
         while (bitmap == null) {
             val outcome = MediaRequests.await(key) {
-                loadMediaBitmap(key, boxPx, isVideo, client, source, width) { partial ->
+                loadMediaBitmap(key, boxPx, isVideo, client, source, width, loopVideoFrames = isSticker) { partial ->
                     // 先讓畫面有東西：日誌實測很多伺服器只給得出 32×32 的預生成縮圖，
                     // 接著要再抓幾秒原檔。Element 的「秒開」感覺一半來自這裡——
                     // 先糊一下、再變清楚，而不是轉十秒圈。
@@ -295,6 +295,29 @@ internal suspend fun fetchMediaBytes(client: MatrixClient, source: MediaSource):
     fetchMediaWithError(client, source).first
 
 /**
+ * 「要整份檔來播／存」用的版本：**先問原站**，問不到才回家伺服器。
+ *
+ * 為什麼要分開：封面那條已經改成先問原站了，播放這條卻還走 `fetchMediaBytes`
+ * （家伺服器）。實測 `mxc://t2bot.io/b2d7100c…` 家伺服器回 404，
+ * 於是點播放＝在 404 那條上等到逾時，畫面看起來就是「點了沒反應」
+ *（用戶 2026-10-08 #140、#144）。
+ */
+internal suspend fun fetchMediaBytesForPlayback(
+    client: MatrixClient,
+    source: MediaSource,
+): ByteArray? {
+    if (source is MediaSource.Plain) {
+        val direct = downloadBytesFromOrigin(source.mxcUrl)
+        if (direct != null) {
+            mediaProbe("播放用：原站抓到 ${direct.size} 位元組 ${source.mxcUrl}")
+            return direct
+        }
+        mediaProbe("播放用：原站拿不到，改問家伺服器 ${source.mxcUrl}")
+    }
+    return fetchMediaBytes(client, source)
+}
+
+/**
  * 同上，但把失敗原因一起帶出來。原本失敗只回 null，界面只能寫一句「下載失敗」，
  * 使用者分不清是「來源伺服器掛了」還是「我們抓錯東西」
  * （用戶 2026-10-07 要的就是懸停看到具體原因）。
@@ -376,9 +399,11 @@ private suspend fun <T> mediaCallResultWithin(timeoutMs: Long, block: suspend ()
  * 「檢視器／另存圖片」那條路的單次上限：它只抓一次、不重試，
  * 所以用得上獨立的逾時，而不是上面那個含退避的總預算。
  */
-// 15 秒是「不說出口的容量上限」：一條 50MB 的影片在本機那條 ~100KB/s 的鏈路上要跑好幾分鐘。
-// 用戶 2026-10-07「請不要設定上限謝謝」→ 這裡改成 2 分鐘，只當「完全沒反應」的保命線。
-private const val MEDIA_TIMEOUT_MS = 120_000L
+// 20 秒。上一輪我把它放到 120 秒，理由是「15 秒是一道不說出口的容量上限」——
+// 那個判斷是錯的：容量不該由逾時管（上限已經拿掉了），逾時只該管「對方完全沒反應」。
+// 代價是用戶點了影片要乾等兩分鐘才看到失敗（2026-10-08「他媽的有病啊等兩分鐘」）。
+// 大檔該由「先問原站」那條路解決，不是靠把等待時間拉長。
+private const val MEDIA_TIMEOUT_MS = 20_000L
 
 /**
  * 媒體載入的診斷紀錄，寫在 `/tmp/nashira-media.log`。
@@ -459,8 +484,12 @@ internal object MediaFramesCache {
 
     fun put(key: String, frames: List<DecodedFrame>) {
         entries.remove(key)?.let { bytes -= sizeOf(it) }
-        // 一張動畫動輒幾十格，超過上限就整組不收（退回顯示第一格的靜態畫面）
-        if (sizeOf(frames) > MAX_BYTES / 4) return
+        // 一張動畫動輒幾十格，超過上限就整組不收（退回顯示第一格的靜態畫面）。
+        // 單條上限原本是 6MB（MAX/4），但 TG 橋的 webm 貼紙是 256×256×36 格 ≈ 9.4MB，
+        // 卡在這條之外 → 封面有快取、格數沒快取，於是「滾出去再滾回來就不動了」
+        // （載入那條看到封面已在就直接 return，永遠不再解格）。放到 12MB 讓一條貼紙進得來，
+        // 總量仍是 24MB、LRU 照樣淘汰最舊的。
+        if (sizeOf(frames) > MAX_BYTES / 2) return
         entries[key] = frames
         bytes += sizeOf(frames)
         while (bytes > MAX_BYTES && entries.size > 1) {
@@ -488,6 +517,12 @@ private suspend fun loadMediaBitmap(
     client: MatrixClient,
     source: MediaSource,
     declaredWidth: Int?,
+    /**
+     * 影片要不要解成多格循環播放。只有**貼圖**該給 true：
+     * TG 橋的動態貼紙是 webm/mp4，Skia 解不出格數（用戶 2026-10-08「動態貼紙依舊沒實現」）；
+     * 一般影片解 36 格只覆蓋前兩秒，播到一半停住比一張封面更誤導。
+     */
+    loopVideoFrames: Boolean = false,
     /** 手上有可用的一張（還不夠清楚）時先給畫面，別讓人對著轉圈器等十幾秒。 */
     onProgress: suspend (ImageBitmap) -> Unit = {},
 ): MediaLoad {
@@ -594,9 +629,16 @@ private suspend fun loadMediaBitmap(
         // 動畫（GIF／動態 WebP／動態 PNG）：同一份位元組再多解一次，拿每一格與停留時間。
         // ⚠️ 這一段上一版「以為加了、其實字串沒替換到」，所以他 2026-10-07 #90 看到
         // 貼紙依舊是靜態的。現在有下面那行格數紀錄，能不能解出多格一看就知道。
-        if (bytes != null && !isVideo) {
+        if (bytes != null) {
             animatedFrames = withContext(kotlinx.coroutines.Dispatchers.Default) {
-                decodeAnimatedFrames(bytes, boxPx * 2)
+                if (isVideo) {
+                    // 影片檔只有「貼圖」才解多格：TG 橋把 TGS 貼紙轉成 webm/mp4，
+                    // Skia 的 Codec 對影片一律回 0 格（用戶 2026-10-08「動態貼紙依舊沒實現」）。
+                    // 長影片不解多格——36 格只覆蓋前兩秒，播一半停住比一張封面更誤導。
+                    if (loopVideoFrames) decodeAnimatedVideoFrames(bytes, (boxPx * 2).coerceAtMost(256), 36) else emptyList()
+                } else {
+                    decodeAnimatedFrames(bytes, boxPx * 2)
+                }
             }
             mediaProbe("動畫 ${animatedFrames.size} 格 $key")
         }
@@ -635,6 +677,48 @@ private suspend fun loadMediaBitmap(
  * 為什麼要有這條：圖片 normally 是經自己家伺服器「轉手」去取的，那臺過載時
  * （實測 matrix.org 回 Cloudflare 502）圖就永遠進不來，而原站其實是好的。
  */
+/**
+ * 直接跟 mxc 裡那臺要**整份位元組**（不帶登入憑證，走舊版免認證端點）。
+ * 播放要的就是這個：家伺服器常常根本沒有橋來的媒體（實測 matrix.org 對
+ * `mxc://t2bot.io/b2d7100c…` 回 404），走它那條只会乾等。
+ */
+/**
+ * mxc → **免認證的下載網址**（舊版 v3 端點）。
+ * 加密媒體沒有這種網址（金鑰在事件裡），回 null。
+ */
+internal fun mxcToPublicUrl(mxcUrl: String): String? {
+    val rest = mxcUrl.removePrefix("mxc://")
+    val host = rest.substringBefore("/", "")
+    val id = rest.substringAfter("/", "")
+    if (host.isEmpty() || id.isEmpty()) return null
+    return "https://$host/_matrix/media/v3/download/$host/$id"
+}
+
+internal suspend fun downloadBytesFromOrigin(mxcUrl: String): ByteArray? =
+    withContext(kotlinx.coroutines.Dispatchers.IO) {
+        runCatching {
+            val url = mxcToPublicUrl(mxcUrl) ?: return@runCatching null
+            val connection = java.net.URL(url).openConnection()
+            if (connection !is java.net.HttpURLConnection) return@runCatching null
+            connection.connectTimeout = 8_000
+            connection.readTimeout = 15_000
+            connection.instanceFollowRedirects = true
+            connection.setRequestProperty("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) Nashira/1.0")
+            if (connection.responseCode !in 200..299) return@runCatching null
+            val input = connection.inputStream
+            val buffer = java.io.ByteArrayOutputStream()
+            val chunk = ByteArray(64 * 1024)
+            while (true) {
+                val read = input.read(chunk)
+                if (read <= 0) break
+                buffer.write(chunk, 0, read)
+            }
+            input.close()
+            val bytes = buffer.toByteArray()
+            if (bytes.isEmpty()) null else bytes
+        }.getOrNull()
+    }
+
 private suspend fun fetchMediaFromOrigin(mxcUrl: String, boxPx: Int, isVideo: Boolean): ImageBitmap? =
     withContext(kotlinx.coroutines.Dispatchers.IO) {
         runCatching {

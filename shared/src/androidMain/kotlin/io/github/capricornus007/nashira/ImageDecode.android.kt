@@ -27,3 +27,7 @@ actual fun decodeImageBitmap(bytes: ByteArray, maxDimension: Int): ImageBitmap? 
  * 回空集合＝退回單格靜態顯示，不影響其他功能。
  */
 actual fun decodeAnimatedFrames(bytes: ByteArray, maxDimension: Int): List<DecodedFrame> = emptyList()
+
+/** 手機不用 ffmpeg：系統自己有解碼器。這輪先保持靜態，真正的內嵌播放列在 #96。 */
+actual fun decodeAnimatedVideoFrames(bytes: ByteArray, maxDimension: Int, maxFrames: Int): List<DecodedFrame> =
+    emptyList()

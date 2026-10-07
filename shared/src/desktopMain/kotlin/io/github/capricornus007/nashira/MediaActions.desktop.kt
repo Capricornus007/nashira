@@ -56,6 +56,12 @@ actual fun openMediaExternally(bytes: ByteArray, fileName: String, mimeType: Str
     }.getOrDefault(false)
 }
 
+/** 桌面：直接把網址丟給 xdg-open，讓系統播放器自己串流（秒開，不用等整檔）。 */
+actual fun openMediaUrlExternally(url: String): Boolean = runCatching {
+    ProcessBuilder("xdg-open", url).redirectErrorStream(true).start()
+    true
+}.getOrDefault(false)
+
 private fun writeTempMedia(bytes: ByteArray, fileName: String, mimeType: String): File? = runCatching {
     val dir = Files.createTempDirectory("nashira-media").toFile()
     File(dir, fileName.substringAfterLast('/').ifBlank { "media" } + extensionOf(mimeType)).apply {

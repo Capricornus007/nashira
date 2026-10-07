@@ -37,3 +37,19 @@ class DecodedFrame(val bitmap: ImageBitmap, val durationMs: Int)
  * 「為什麼貼紙是靜態的」「tg 這裡實際貼紙也依舊是動態的」。
  */
 expect fun decodeAnimatedFrames(bytes: ByteArray, maxDimension: Int = DefaultMaxImageDimension): List<DecodedFrame>
+
+/**
+ * 把**影片**解成一格一格（webm／mp4 的動態貼紙用）。
+ *
+ * 為什麼要另外一個入口：`decodeAnimatedFrames` 走的是 Skia 的 `Codec`，
+ * 它只認 GIF／動態 WebP／動態 PNG 這類**圖片**容器，影片檔一律回「0 格」。
+ * 用戶 2026-10-08「動態貼紙依舊沒實現」查出來就是這個：Telegram 橋把 TGS 貼紙
+ * 轉成 webm/mp4 傳進 Matrix，Skia 那條解不出任何一格（日誌只有「動畫 0 格」）。
+ *
+ * 桌面用 ffmpeg 解（本專案已經依賴它抽影片封面）；其他平台回空清單＝保持靜態。
+ */
+expect fun decodeAnimatedVideoFrames(
+    bytes: ByteArray,
+    maxDimension: Int,
+    maxFrames: Int,
+): List<DecodedFrame>

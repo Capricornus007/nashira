@@ -3000,8 +3000,16 @@ private fun TimelinePane(
                                     // 這條路徑原本一行日誌都沒有，所以「點不開」時我無法區分
                                     // 是沒觸發、抓不到檔、還是系統那邊開不起來（用戶 2026-10-07
                                     // #137「根本無法點開播放」）。三個關卡各留一行。
-                                    mediaProbe("點擊影片 ${'$'}{img.source} mime=${'$'}{img.mimeType}")
-                                    val bytes = fetchMediaBytes(roomRepository.client, img.source)
+                                    mediaProbe("點擊影片 mxc=${img.source} mime=${img.mimeType}")
+                                    // 先給網址、讓播放器自己串流：圖片是立刻開的，影片沒有理由
+                                    // 要先等整檔下載完（用戶 2026-10-08「憑什麼視頻非得那麼久」）。
+                                    val publicUrl = (img.source as? MediaSource.Plain)?.let { mxcToPublicUrl(it.mxcUrl) }
+                                    if (publicUrl != null && openMediaUrlExternally(publicUrl)) {
+                                        mediaProbe("播放：網址已交給系統播放器（串流）")
+                                        return@launch
+                                    }
+                                    mediaProbe("播放：網址那條開不了，退回下載整檔")
+                                    val bytes = fetchMediaBytesForPlayback(roomRepository.client, img.source)
                                     if (bytes == null) {
                                         mediaProbe("影片抓檔失敗（0 位元組或網路錯）${'$'}{img.source}")
                                         downloadNotice = strings.downloadFailed
@@ -3022,7 +3030,8 @@ private fun TimelinePane(
                         },
                         onDownloadImage = { img ->
                             scope.launch {
-                                val bytes = fetchMediaBytes(roomRepository.client, img.source)
+                                // 「另存影像」跟播放一樣：要的是整份原檔，家伺服器常常根本沒有
+                                val bytes = fetchMediaBytesForPlayback(roomRepository.client, img.source)
                                 if (bytes == null) {
                                     downloadNotice = strings.downloadFailed
                                 } else {

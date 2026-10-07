@@ -7,3 +7,6 @@ package io.github.capricornus007.nashira
 actual fun copyImageToClipboard(bytes: ByteArray, mimeType: String): Boolean = false
 
 actual fun openMediaExternally(bytes: ByteArray, fileName: String, mimeType: String): Boolean = false
+
+/** Android 不用這條：系統內建的播放器走 Intent 即可，見待辦 #96（ExoPlayer 內嵌播放）。 */
+actual fun openMediaUrlExternally(url: String): Boolean = false

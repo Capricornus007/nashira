@@ -82,3 +82,88 @@ actual fun decodeAnimatedFrames(bytes: ByteArray, maxDimension: Int): List<Decod
         codec.close()
     }
 }.getOrDefault(emptyList())
+
+/** 影片解格的播放速率：15fps 對貼紙那種幾秒的循環夠用，也把記憶體壓得住。 */
+private const val VideoFrameRate = 15
+
+/**
+ * 用 ffmpeg 把影片解成一格一格。
+ *
+ * 為什麼不直接讀 rawvideo：那樣要先算準每格位元組數、再處理 skia 的像素格式與
+ * 位元組序，錯一格就整串錯位。改成請 ffmpeg 每格吐一張 PNG、用 PNG 的結尾記號
+ * `IEND`＋CRC（8 位元組）切流，再走**已經在用的** `decodeImageBitmap`，
+ * 沒有新增任何自己處理像素的程式碼。
+ */
+actual fun decodeAnimatedVideoFrames(bytes: ByteArray, maxDimension: Int, maxFrames: Int): List<DecodedFrame> {
+    if (maxFrames <= 0 || bytes.isEmpty()) return emptyList()
+    val file = java.io.File.createTempFile("nashira-anim-", ".bin")
+    return try {
+        file.writeBytes(bytes)
+        val dims = runCapture(
+            listOf(
+                "ffprobe", "-v", "error", "-select_streams", "v:0",
+                "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x",
+                file.absolutePath,
+            )
+        )?.decodeToString()?.trim().orEmpty()
+        val sides = dims.split("x").mapNotNull { it.trim().toIntOrNull() }
+        if (sides.size != 2 || sides[0] <= 0 || sides[1] <= 0) return emptyList()
+        val sourceW = sides[0]
+        val sourceH = sides[1]
+        // 長邊不超過 maxDimension（與 decodeAnimatedFrames 同一套算法）
+        val scale = if (maxDimension <= 0) 1f else maxDimension.toFloat() / maxOf(sourceW, sourceH)
+        val width = if (scale < 1f) (sourceW * scale).toInt().coerceAtLeast(1) else sourceW
+        val height = if (scale < 1f) (sourceH * scale).toInt().coerceAtLeast(1) else sourceH
+        val stream = runCapture(
+            listOf(
+                "ffmpeg", "-v", "error", "-i", file.absolutePath,
+                "-vf", "scale=$width:$height,fps=$VideoFrameRate",
+                "-frames:v", maxFrames.toString(),
+                "-f", "image2pipe", "-vcodec", "png", "pipe:1",
+            )
+        ) ?: return emptyList()
+        val durationMs = 1000 / VideoFrameRate
+        splitPngDocuments(stream).mapNotNull { png -> decodeImageBitmap(png, maxDimension = 0) }
+            .map { DecodedFrame(it, durationMs) }
+    } catch (e: Exception) {
+        emptyList()
+    } finally {
+        file.delete()
+    }
+}
+
+/** 跑一條命令、把 stdout 全收下來；非零出口或開不起來都回 null。 */
+private fun runCapture(command: List<String>): ByteArray? = runCatching {
+    val process = ProcessBuilder(command).redirectErrorStream(false).start()
+    // 一定要先把 stdout 讀空再 waitFor：管線緩衝區年滿時寫端會堵死，
+    // 那時 waitFor 永遠等不到（這個坑在 VideoFrame.desktop.kt 的註解裡記過）。
+    val out = process.inputStream.use { it.readBytes() }
+    process.waitFor()
+    if (process.exitValue() == 0) out else null
+}.getOrNull()
+
+/** 串流的 PNG 是一張接一張，用每一張結尾的 IEND＋CRC 八位元組切開。 */
+private fun splitPngDocuments(stream: ByteArray): List<ByteArray> {
+    val trailer = byteArrayOf(0x49, 0x45, 0x4e, 0x44, 0xae.toByte(), 0x42, 0x60, 0x82.toByte())
+    val docs = ArrayList<ByteArray>()
+    var start = 0
+    var i = 0
+    while (i + trailer.size <= stream.size) {
+        var matches = true
+        for (k in trailer.indices) {
+            if (stream[i + k] != trailer[k]) {
+                matches = false
+                break
+            }
+        }
+        if (matches) {
+            val end = i + trailer.size
+            if (end - start > trailer.size) docs += stream.copyOfRange(start, end)
+            start = end
+            i = end
+        } else {
+            i++
+        }
+    }
+    return docs
+}
