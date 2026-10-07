@@ -342,7 +342,12 @@ private const val MediaTotalBudgetMs = 10_000L
  * 那個卡住的協程留在這裡自己結束，不再擋在畫面上。
  */
 private val MediaIoScope = kotlinx.coroutines.CoroutineScope(
-    kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default,
+    // ⚠️ 必須是 IO，**不能是 Default**。用戶 2026-10-07 反問「爲什麼頭像正常圖片不行」，
+    // 而 /tmp/nashira-media.log 連一筆失敗都沒有 → 那條協程既沒成功也沒認輸。
+    // 用 Default 會這樣卡死：媒體抓取與**解碼**共用同一個有限線程池，十几張圖同時卡在
+    // socket 讀取上就把池子占滿，於是連「要觸發逾時的那個協程」都排不到線程——
+    // 逾時本身永遠不會響。IO 是另一組按需擴充的線程，抓取擠不到解碼，逾時也跑得出來。
+    kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO,
 )
 
 /** 同上，但把失敗原因一起帶出來（「檢視／下載」那條路與失敗占位的懸停都要寫出人話）。 */
