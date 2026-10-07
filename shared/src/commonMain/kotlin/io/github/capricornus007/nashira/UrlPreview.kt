@@ -76,6 +76,34 @@ fun urlsInMessage(formattedBody: String?, plainBody: String): List<String> {
 }
 
 /**
+ * 純文字訊息 → 「只有連結標籤」的 HTML，讓**裸網址也能點**
+ *（用戶 2026-10-07 截圖 #62 對照 #63：他那兩則只有網址、沒有 formatted_body，
+ * 我們畫出來是白字、點不動；Telegram 兩條都是藍色底線可點）。
+ *
+ * 逐段轉義而不是整字串轉義後再抓 URL：`&` 先變成 `&amp;` 的話，
+ * 帶 query 的網址會被連 `amp;` 一起包進 href。
+ */
+internal fun linkifyPlainBody(text: String): String {
+    if (!text.contains("://")) return escapeHtmlText(text)
+    return buildString {
+        var last = 0
+        for (match in URL_REGEX.findAll(text)) {
+            append(escapeHtmlText(text.substring(last, match.range.first)))
+            val url = match.value
+            append("<a href=\"").append(escapeHtmlText(url)).append("\">")
+            append(escapeHtmlText(url)).append("</a>")
+            last = match.range.last + 1
+        }
+        append(escapeHtmlText(text.substring(last)))
+    }
+}
+
+private fun escapeHtmlText(raw: String): String = raw
+    .replace("&", "&amp;")
+    .replace("<", "&lt;")
+    .replace(">", "&gt;")
+
+/**
  * 自己平台的連結不掛卡。matrix.to 的房間／使用者連結在訊息裡就是
  * `https://matrix.to/#/#room:server`，抓下去拿到的 og 是 matrix.to 首頁那套
  * 「Matrix – Decentralised and secure communication / You're invited to talk…」

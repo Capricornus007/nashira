@@ -104,6 +104,11 @@ fun MessageImage(
                 val leftMs = deadlineMs - System.currentTimeMillis()
                 if (leftMs <= 0L) { reason = "累計超過 ${MediaTotalBudgetMs / 1000} 秒"; break }
                 val small = best?.let { it.width < boxPx } == true
+                // 事件本身就寫了原圖尺寸時，比顯示框還小的圖**不必先問縮圖**：
+                // 縮圖端點最多也只給到原圖大小，白跑一趟（實測 kimiblock.top 的縮圖
+                // 對 528 的要求回 32×32，等於每次都要再抓一次原檔）。
+                val declaredSmall = width != null && width in 1 until boxPx
+                val usedOriginal = isVideo || attempt > 0 || small || declaredSmall
                 // ⚠️ 逾時一律走 mediaCallResultWithin（獨立作用域），**不要**改回
                 // `withTimeoutOrNull { 請求 }`：後者要等裡面的協程真的收到取消才返回，
                 // 卡在 DNS／socket 這種不可中斷的呼叫時形同虛設——實測「給了 18 秒預算
@@ -116,7 +121,7 @@ fun MessageImage(
                     val fetched = client.di.get<MediaService>().let { service ->
                         when (source) {
                             is MediaSource.Plain ->
-                                if (isVideo || attempt > 0 || small) {
+                                if (usedOriginal) {
                                     // 影片沒有縮圖端點；縮圖不夠大（或第一輪失敗）就改抓原檔本機降採樣
                                     service.getMedia(source.mxcUrl, maxSize = OriginalMaxMediaBytes)
                                 } else {
@@ -159,8 +164,11 @@ fun MessageImage(
                 }
                 best = frame
                 mediaProbe("成功 $key 第 ${attempt + 1} 次 ${bytes?.size ?: 0}B → ${frame.width}x${frame.height}")
-                // 拿到夠寬的一張才算完；否則繼續下一輪去撈原檔
-                if (isVideo || frame.width >= boxPx) break
+                // **抓過原檔就到此為止**。上一版這裡只看「寬度夠不夠 boxPx」，
+                // 結果小圖（橫幅、貼紙、低解析照片）明明已經拿到完整的原檔，還被判「不夠大」
+                // 再抓三次——日誌實測同一個 3295B／309x59 被抓了四遍、轉圈約十秒
+                //（用戶 2026-10-07 #66「依舊一直加載，矩陣 sdk 的問題？」→ 是我們自己的）。
+                if (usedOriginal || frame.width >= boxPx) break
             }
             best
         }

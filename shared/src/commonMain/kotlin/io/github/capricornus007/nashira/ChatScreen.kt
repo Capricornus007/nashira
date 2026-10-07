@@ -3559,6 +3559,8 @@ internal fun bodyPreview(body: MessageBody): String? = when (body) {
     MessageBody.Undecryptable -> null
 }
 
+private const val QuickReactionPerRow = 5
+
 private val QuickReactions = listOf(
     "\uD83D\uDC4D", // 👍
     "\u2764\uFE0F", // ❤️
@@ -3943,28 +3945,30 @@ private fun MessageRow(
             val settled = msg.eventId != null
             if (settled) {
                 // 常用表情一排，後面接「更多反應」開完整選擇器
-                FlowRow(
-                    // 這排表情是選單裡最寬的東西：它多寬、整個選單就多寬（用戶 2026-10-07
-                    // 截圖 #56 點名的「右鍵」右側那一大片空白，元凶就是原本釘 320dp）。
-                    // 168dp 剛好一排五顆、兩排放完 10 顆，選單整體收到 ~190dp。
-                    Modifier.width(168.dp).padding(horizontal = 10.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    QuickReactions.forEach { key ->
-                        val existing = msg.reactions[key]?.mine
-                        Text(
-                            key,
-                            style = MaterialTheme.typography.titleMedium,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(
-                                    if (existing != null) MaterialTheme.colorScheme.primaryContainer
-                                    else Color.Transparent,
-                                )
-                                .clickable { menuOpen = false; onToggleReaction(key, existing) }
-                                .padding(horizontal = 3.dp, vertical = 3.dp),
-                        )
+                // 用「固定幾顆一排的 Row」而不是 FlowRow：FlowRow 的**內在校寬**會被算成
+                // 全部排成一列的寬度，等於由它決定整個選單多寬（用戶 2026-10-07 截圖 #65
+                // 「emoji 右邊整片多餘」就是這樣留出來的）。Row + fillMaxWidth 只貢獻
+                // 自己那一排的寬度，並把表情均勻铺滿選單寬度。
+                QuickReactions.chunked(QuickReactionPerRow).forEach { rowKeys ->
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 3.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                    ) {
+                        rowKeys.forEach { key ->
+                            val existing = msg.reactions[key]?.mine
+                            Text(
+                                key,
+                                style = MaterialTheme.typography.titleMedium,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(
+                                        if (existing != null) MaterialTheme.colorScheme.primaryContainer
+                                        else Color.Transparent,
+                                    )
+                                    .clickable { menuOpen = false; onToggleReaction(key, existing) }
+                                    .padding(horizontal = 3.dp, vertical = 3.dp),
+                            )
+                        }
                     }
                 }
                 ContextMenuItem(strings.actionAddReaction, icon = MenuIcons.AddReaction) {
@@ -4265,7 +4269,9 @@ private fun htmlToAnnotatedString(
                     )
                 }
                 tagName == "a" -> {
-                    linkUrl = hrefRegex.find(attrs)?.groupValues?.get(1)
+                    // href 也要反轉義：橋接器與 Element 送來的 formatted_body 裡，
+                    // 帶 query 的連結一律寫成 `&amp;`，不解碼就會開出一個 `&amp;` 的錯位址。
+                    linkUrl = hrefRegex.find(attrs)?.groupValues?.get(1)?.let { decodeHtmlEntities(it) }
                         ?.takeIf { it.isNotBlank() }
                         ?.let(::decodeHtmlEntities)
                 }
@@ -4335,35 +4341,28 @@ private fun MessageBodyContent(
         is MessageBody.Text -> {
             // P4-4：優先渲染 formattedBody (HTML)，回退到純文字
             val formatted = body.formattedBody?.takeIf { it.isNotBlank() }
-            if (formatted != null) {
-                val rich = htmlToRichText(
-                    html = formatted,
-                    baseStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-                )
-                // P5-2：custom emoji 以 inline content 排進文字行
-                val inlineContent = rich.emoticons.associate { emote ->
-                    emote.id to InlineTextContent(
-                        Placeholder(1.4.em, 1.4.em, PlaceholderVerticalAlign.TextCenter),
-                    ) { EmoticonInline(client, emote) }
-                }
-                Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    rich.segments.forEach { segment ->
-                        when (segment) {
-                            is RichSegment.Text -> Text(text = segment.annotated, inlineContent = inlineContent)
-                            is RichSegment.Code -> CodeBlockBubble(segment.text, strings.copy)
-                        }
+            // 純文字也要能點裸連結：先轉義、把 URL 包成 <a>，再走**同一條**渲染路徑。
+            // 用戶 2026-10-07 截圖 #62 對照 #63（Telegram）：他那兩則只有網址、沒有
+            // formatted_body，我們畫出來是白字、點不動；Telegram 兩條都是藍色底線可點。
+            // （預覽卡只出現一張不是 bug：`tophub.today` 對非瀏覽器請求回 403/503，
+            // 實測 curl 與帶 UA 都拿不到 og，Telegram 那側同樣沒掛卡。）
+            val rich = htmlToRichText(
+                html = formatted ?: linkifyPlainBody(body.text),
+                baseStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+            )
+            // P5-2：custom emoji 以 inline content 排進文字行
+            val inlineContent = rich.emoticons.associate { emote ->
+                emote.id to InlineTextContent(
+                    Placeholder(1.4.em, 1.4.em, PlaceholderVerticalAlign.TextCenter),
+                ) { EmoticonInline(client, emote) }
+            }
+            Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                rich.segments.forEach { segment ->
+                    when (segment) {
+                        is RichSegment.Text -> Text(text = segment.annotated, inlineContent = inlineContent)
+                        is RichSegment.Code -> CodeBlockBubble(segment.text, strings.copy)
                     }
                 }
-            } else {
-                // 純文字訊息**也要** pangu 化：這一輪實查（讀他的 DB）確認他點名那則
-                // 「红色的R当图标的」根本沒有 formatted_body，走的就是這條分支，
-                // 所以上一版只在 htmlToRichText 裡插空格，他看到的就是「依舊沒有實現」。
-                Text(
-                    pangu(body.text),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = modifier,
-                )
             }
             // P5-3：訊息**本身**含連結時才附 og 預覽卡（回覆的引用塊不算，見 urlsInMessage）。
             // 一張訊息只給一張卡，取第一個連結：Element／Telegram 都是這樣，
