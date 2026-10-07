@@ -3,8 +3,12 @@ package io.github.capricornus007.nashira
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -66,7 +70,12 @@ fun Modifier.contextMenuGestures(
         onLongClick = { onContextMenu(Offset.Unspecified) },
     )
 
-/** 選單的一列；`destructive` 用錯誤色（離開房間、刪除訊息這類）。 */
+/**
+ * 選單的一列；`destructive` 用錯誤色（離開房間、刪除訊息這類）。
+ *
+ * 高度壓到 36dp：Material 預設 48dp 在這臺 2x 縮放的機器上等於 96 實體像素，
+ * 六項就撐出一屏高的空白（用戶 2026-10-07：「看起來依舊有點多餘空白」）。
+ */
 @Composable
 fun ContextMenuItem(
     label: String,
@@ -77,10 +86,25 @@ fun ContextMenuItem(
         text = {
             Text(
                 label,
+                style = MaterialTheme.typography.bodyMedium,
                 color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
             )
         },
         onClick = onClick,
+        modifier = Modifier.height(36.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp),
+    )
+}
+
+/**
+ * 分組線。危險動作（離開、刪除）一定要跟普通動作隔開——
+ * 用戶 2026-10-07 點名的不只是「醜」，是六項擠成一團時容易誤點到「離開」。
+ */
+@Composable
+fun ContextMenuDivider() {
+    HorizontalDivider(
+        Modifier.padding(vertical = 4.dp),
+        color = MaterialTheme.colorScheme.outlineVariant,
     )
 }
 

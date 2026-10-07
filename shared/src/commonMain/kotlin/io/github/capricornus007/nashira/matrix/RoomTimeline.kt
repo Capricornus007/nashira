@@ -217,8 +217,27 @@ class RoomTimeline(
             body = body,
             timestamp = outbox.createdAt.toEpochMilliseconds(),
             pending = true,
-            sendError = outbox.sendError?.let { it::class.simpleName },
+            // 原本填的是 it::class.simpleName，等於把「MediaTooLarge」這種術語丟給用戶。
+            sendError = outbox.sendError?.let { sendErrorText(it) },
         )
+    }
+
+    /**
+     * outbox 的失敗類別翻成人話。
+     *
+     * 走不了 friendlyError：Trixnity 存的不是 Throwable，是
+     * `RoomOutboxMessage.SendError` 這個 sealed class（實測型別不符、編譯直接擋）。
+     * 每一支都要給得出「該做什麼」，不然顯示了跟沒顯示一樣。
+     */
+    private fun sendErrorText(e: RoomOutboxMessage.SendError): String = when (e) {
+        is RoomOutboxMessage.SendError.MediaTooLarge -> "檔案太大，伺服器拒收"
+        is RoomOutboxMessage.SendError.NoMediaPermission -> "這個房間不讓你上傳媒體"
+        is RoomOutboxMessage.SendError.NoEventPermission -> "你在這個房間沒有發言權限"
+        is RoomOutboxMessage.SendError.EncryptionAlgorithmNotSupported ->
+            "這個房間用的加密方式你的裝置不支援"
+        is RoomOutboxMessage.SendError.EncryptionError -> "加密失敗，請重新登入或檢查裝置金鑰"
+        is RoomOutboxMessage.SendError.BadRequest -> "伺服器拒絕了這則內容"
+        is RoomOutboxMessage.SendError.Unknown -> "原因不明，請再試一次"
     }
 
     /**

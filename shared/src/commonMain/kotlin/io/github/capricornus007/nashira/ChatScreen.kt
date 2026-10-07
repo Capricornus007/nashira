@@ -348,9 +348,16 @@ fun ChatScreen(
         PlatformBackHandler(enabled = settingsOpen) { settingsOpen = false }
         AnimatedContent(
             targetState = settingsOpen,
+            // 原本進與出**兩頁都在位移**（一個整頁滑入、另一個滑 1/8 再淡出），
+            // 結果轉場期間兩頁重疊穿插，用戶 2026-10-07 的評語是「動畫缺失，很醜」——
+            // 缺的不是動畫，是「誰蓋住誰」。改成標準推入：底下的原地淡出，新頁滑入覆蓋。
             transitionSpec = {
-                if (targetState) slideInVertically { it } togetherWith slideOutVertically { -it / 8 }
-                else slideInVertically { -it / 8 } togetherWith slideOutVertically { it }
+                val enter = slideInVertically(tween(220)) { it } + fadeIn(tween(160))
+                val leaveInPlace = fadeOut(tween(140))
+                val leaveDown = slideOutVertically(tween(220)) { it } + fadeOut(tween(200))
+                val enterUp = slideInVertically(tween(200)) { -it / 12 } + fadeIn(tween(200))
+                if (targetState) enter togetherWith leaveInPlace
+                else enterUp togetherWith leaveDown
             },
             label = "settings_navigation",
         ) { showSettings ->
@@ -831,6 +838,7 @@ private fun ServerRail(
                             scope.launch { clipboard.setText(AnnotatedString(spacePermalink(space))) }
                         }
                         ContextMenuItem(strings.actionInvite) { menuOpen = false; inviteFor = true }
+                        ContextMenuDivider()
                         ContextMenuItem(strings.actionLeave, destructive = true) {
                             menuOpen = false
                             scope.launch { onLeaveSpace(space) }
@@ -1499,6 +1507,7 @@ private fun RoomListItem(
                 }
                 ContextMenuItem(strings.actionInvite) { menuOpen = false; inviteFor = true }
             }
+            ContextMenuDivider()
             ContextMenuItem(strings.actionLeave, destructive = true) {
                 menuOpen = false
                 scope.launch { roomRepository.leave(room.roomId) }
@@ -3868,7 +3877,9 @@ private fun MessageRow(
                 )
                 when {
                     msg.sendError != null -> Text(
-                        strings.messageSendFailed,
+                        // 原因要一起講：只知道「沒送達」決定不了下一步
+                        // （是該重傳、該換小一點的圖、還是該等網路回來）
+                        "${strings.messageSendFailed}：${msg.sendError}",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.error,
                     )
@@ -4022,6 +4033,7 @@ private fun MessageRow(
                 if (msg.body is MessageBody.Text) {
                     ContextMenuItem(strings.actionResendPending) { menuOpen = false; onResendPending() }
                 }
+                ContextMenuDivider()
                 ContextMenuItem(strings.actionDropPending, destructive = true) { menuOpen = false; onDropPending() }
             }
             if (msg.body is MessageBody.Text) {
@@ -4049,9 +4061,11 @@ private fun MessageRow(
                     if (!img.isSticker) ContextMenuItem(strings.actionHideImage) { menuOpen = false; onHideImage(img) }
                 }
                 if (isOwn) {
+                    ContextMenuDivider()
                     ContextMenuItem(strings.actionDelete, destructive = true) { menuOpen = false; onDelete() }
                 } else {
                     // P4-1：屏蔽用戶（Element 對照）——不在自己的訊息上顯示
+                    ContextMenuDivider()
                     ContextMenuItem(strings.actionIgnoreUser, destructive = true) {
                         menuOpen = false
                         onIgnoreUser()
