@@ -60,13 +60,29 @@ def shrink_jar(path: str) -> int:
             return 0
         saved = sum(i.file_size for i in drop)
         kept = [i for i in z.infolist() if i.filename not in {d.filename for d in drop}]
+        # 不變量：只准動「原生檔」，class／資源／清單一條都不准少。
+        # 0.1.63 那次就是栽在這裡（不是少條目，是換檔後權限變 0600，使用者讀不到 →
+        # 裝起來報 NoClassDefFoundError，看起來像類被刪了）。兩邊都驗，才分得清是哪種壞。
+        classes_before = sum(1 for i in z.infolist() if i.filename.endswith((".class", ".MF", ".kotlin_module")))
+        classes_after = sum(1 for i in kept if i.filename.endswith((".class", ".MF", ".kotlin_module")))
+        if classes_before != classes_after:
+            raise RuntimeError(f"類別條目從 {classes_before} 變成 {classes_after}，拒絕寫出")
+        # ⚠️ 權限要原樣帶過去：tempfile 出廠是 0600，直接 os.replace 換檔會把 jar 變成
+        # 只有 root 讀得到——實測 0.1.63 裝完開不起來，報 NoClassDefFoundError:
+        # androidx/sqlite/driver/bundled/BundledSQLiteDriver（其實類在 jar 裡，是用戶讀不到檔）。
+        # 同一次的 sudo cp 救火也踩了同一個坑（cp 留下 root:600）。
+        mode = os.stat(path).st_mode
         with tempfile.NamedTemporaryFile(dir=os.path.dirname(path), delete=False) as out:
             tmp = out.name
+        os.chmod(tmp, mode)
         with zipfile.ZipFile(path) as src, zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as dst:
             for info in kept:
                 # 保留原條目的時間戳與權限，避免 jar 內簽名／清單順序-sensitive 的東西跑掉
                 dst.writestr(info, src.read(info.filename))
         os.replace(tmp, path)
+        st = os.stat(path)
+        if not st.st_mode & 0o044:
+            raise RuntimeError(f"{os.path.basename(path)} 寫出後一般用戶不可讀（mode {oct(st.st_mode)}）")
         return saved
 
 

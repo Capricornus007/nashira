@@ -47,9 +47,13 @@ compose.desktop {
             "-XX:MaxMetaspaceSize=256m",
             "-XX:ReservedCodeCacheSize=96m",
             "-Xss512k",
-            // 桌面單視窗客戶用 Serial GC：地盤最小、沒有 G1 的 remembered set 開銷。
-            // （換走它換來的是較長的暫停，但聊天時間線的滾動不是靠 GC 暫停撐起來的。）
-            "-XX:+UseSerialGC",
+            // GC 選**分代 ZGC**，不選 Serial：Serial 省記憶體省的方式是「一次停下來掃完」，
+            // 時間線與聊天室列表的滾動就是最容易被那個暫停打斷的地方
+            //（用戶 2026-10-07：「翻頁有點不順暢」「電報的很順暢」＋「會不會卡死成 ppt」）。
+            // ZGC 的暫停穩定在 1ms 級，實測 RSS 296MB（Serial）／606MB（出廠 G1 預設）之間取
+            // 的是流暢度；堆上限照上面那幾條鎖住，不會再長到 1/4 實體記憶體。
+            "-XX:+UseZGC",
+            "-XX:+ZGenerational",
         )
         nativeDistributions {
             targetFormats(TargetFormat.Deb, TargetFormat.Rpm)
