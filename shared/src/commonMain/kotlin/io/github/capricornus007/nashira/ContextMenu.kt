@@ -2,9 +2,11 @@ package io.github.capricornus007.nashira
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.material3.DropdownMenu
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -12,7 +14,14 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
+import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
@@ -22,8 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.isSpecified
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.DpOffset
+import kotlin.math.roundToInt
 
 /**
  * 長按（觸控）與右鍵（滑鼠）都能開的內容選單觸發器。
@@ -42,22 +50,17 @@ fun Modifier.contextMenuGestures(
             while (true) {
                 val event = awaitPointerEvent(PointerEventPass.Main)
                 if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed) {
-                    // 位置要一起帶出去：桌面選單要開在指標處，不然滑鼠在右邊、選單卻從列首彈出
+                    // 位置要一起帶出去：桌面選單要開在指標處，不然滑鼠在右邊、選單卻從列首彈出。
+                    // 這裡給的是「距本節點頂端」的局部座標，**不要再做任何修正**：
+                    // 換算成視窗絕對座標、以及「放不下就往回挪」全部由 ContextMenuSurface 負責。
                     val position = event.changes.firstOrNull()?.position ?: Offset.Zero
                     event.changes.forEach { it.consume() }
-                    // ⚠️ 必須在這裡減掉「錨點元件的高度」，而且用的是這個節點自己的 size，
-                    // 不是外面傳進來的估計列高（2026-09-30 那次減估計值，所以他看著「依舊」）。
-                    // 理由：DropdownMenu 的默認位置是錨點的**左下角**，
-                    // 而 position 是「距該節點**頂端**」的局部座標。
-                    // 直接當 offset 用 = 列高 + y，選單整個掉到下一列——
-                    // 這正是用戶截圖裡「右鍵最頂那列、選單出現在第二列」的成因。
-                    // Space 欄與聊天室列共用這支手勢，所以兩處一起錯、也一起修好。
-                    onContextMenu(Offset(position.x, position.y - size.height))
+                    onContextMenu(position)
                 }
             }
         }
     }
-    // 觸控長按沒有「指標位置」的概念，用 Offset.Unspecified 表示「照預設位置開」
+    // 觸控長按沒有「指標位置」的概念，用 Offset.Unspecified 表示「開在列下方」（選單自己算）
     .combinedClickable(
         onClick = { onClick?.invoke() },
         onLongClick = { onContextMenu(Offset.Unspecified) },
@@ -86,27 +89,52 @@ fun ContextMenuItem(
 fun ContextMenuSurface(
     expanded: Boolean,
     onDismiss: () -> Unit,
-    /** 右鍵按下的位置（相對於錨點元件）；Unspecified 表示照 DropdownMenu 預設位置。 */
+    /** 右鍵按下的位置，相對於「掛這個選單的那個容器」；Unspecified 表示開在容器下方。 */
     anchor: Offset = Offset.Unspecified,
     content: @Composable () -> Unit,
 ) {
-    val density = LocalDensity.current
-    // DropdownMenu 會自動避開畫面邊界（不夠位就往上／往左翻），所以只要給位移就不會被切掉
-    val offset = remember(anchor, density) {
-        if (anchor.isSpecified) {
-            with(density) { DpOffset(anchor.x.toDp(), anchor.y.toDp()) }
-        } else {
-            DpOffset.Zero
+    if (!expanded) return
+    Popup(
+        // Popup 的 anchor 就是呼叫端最近的父節點（各處都是那個包著列的 Box），
+        // 所以 provider 收到的 anchorBounds 已經是容器在視窗裡的位置，不必自己量。
+        popupPositionProvider = remember(anchor) { PointerPopupPositionProvider(anchor) },
+        onDismissRequest = onDismiss,
+        properties = PopupProperties(focusable = true, usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            shape = MaterialTheme.shapes.extraSmall,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = 3.dp,
+            shadowElevation = 8.dp,
+        ) {
+            Column(Modifier.widthIn(min = 180.dp)) { content() }
         }
     }
-    DropdownMenu(
-        expanded = expanded,
-        onDismissRequest = onDismiss,
-        offset = offset,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shadowElevation = 8.dp,
-    ) {
-        content()
+}
+
+/**
+ * 選單開在指標處，並保證整塊留在視窗內。
+ *
+ * 為什麼不用 `DropdownMenu` 的 `offset`（2026-10-07 換掉的）：它先按「錨點左下角」定位，
+ * **下方空間不夠時會自動往上翻**，而我給的 offset 在翻轉之後照樣往下加 →
+ * 靠上的列看起來剛好、靠底的列整塊飛掉，用戶截圖裡兩處症狀其實是同一件事。
+ * 自己算絕對座標就沒有「翻轉後語意改變」這個坑，橫向越界也一起夾住。
+ */
+private class PointerPopupPositionProvider(
+    private val anchor: Offset,
+) : PopupPositionProvider {
+    override fun calculatePosition(
+        anchorBounds: IntRect,
+        windowSize: IntSize,
+        layoutDirection: LayoutDirection,
+        popupContentSize: IntSize,
+    ): IntOffset {
+        val left = if (anchor.isSpecified) anchorBounds.left + anchor.x.roundToInt() else anchorBounds.left
+        val top = if (anchor.isSpecified) anchorBounds.top + anchor.y.roundToInt() else anchorBounds.bottom
+        // 先夾右下界再夾 0：選單比視窗還大時（極窄視窗）退回左上角，不會跑到負座標
+        val maxX = (windowSize.width - popupContentSize.width).coerceAtLeast(0)
+        val maxY = (windowSize.height - popupContentSize.height).coerceAtLeast(0)
+        return IntOffset(left.coerceAtMost(maxX), top.coerceAtMost(maxY))
     }
 }
 

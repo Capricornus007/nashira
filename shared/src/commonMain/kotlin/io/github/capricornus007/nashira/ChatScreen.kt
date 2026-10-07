@@ -1942,7 +1942,9 @@ private fun TimelinePane(
     var messageSearchQuery by remember(room.roomId) { mutableStateOf("") }
     var messageSearchResults by remember(room.roomId) { mutableStateOf<List<MessageSearchResult>>(emptyList()) }
     var messageSearchLoading by remember(room.roomId) { mutableStateOf(false) }
-    var messageSearchError by remember(room.roomId) { mutableStateOf(false) }
+    // 存「原因」而不是存「有沒有錯」：只留一個布林會把伺服器的實際回應吞掉，
+    // 用戶回報「訊息搜尋失敗」時我們無從判斷是 400、404 還是沒索引（2026-10-07）。
+    var messageSearchError by remember(room.roomId) { mutableStateOf<String?>(null) }
     val selectedMessages = messages.orEmpty().filter { it.eventId in selectedEventIds }
     val selectedOwnMessages = selectedMessages.filter {
         it.sender == roomRepository.client.userId && it.eventId != null
@@ -1958,7 +1960,7 @@ private fun TimelinePane(
     LaunchedEffect(messageSearchOpen, messageSearchQuery) {
         if (!messageSearchOpen) return@LaunchedEffect
         val query = messageSearchQuery.trim()
-        messageSearchError = false
+        messageSearchError = null
         if (query.isEmpty()) {
             messageSearchResults = emptyList()
             messageSearchLoading = false
@@ -1970,7 +1972,8 @@ private fun TimelinePane(
             .onSuccess { messageSearchResults = it }
             .onFailure {
                 messageSearchResults = emptyList()
-                messageSearchError = true
+                // 把原因留下來給畫面顯示（截斷，避免整包 JSON 撐爆對話框）
+                messageSearchError = (it.message ?: it.javaClass.simpleName).take(160).replace('\n', ' ')
             }
         messageSearchLoading = false
     }
@@ -2089,7 +2092,7 @@ private fun TimelinePane(
                     actions = {
                         IconButton(onClick = {
                             messageSearchOpen = true
-                            messageSearchError = false
+                            messageSearchError = null
                         }) {
                             Icon(Icons.Filled.Search, contentDescription = strings.searchMessages)
                         }
@@ -3256,8 +3259,9 @@ private fun TimelinePane(
                         ) {
                             CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                         }
-                        messageSearchError -> Text(
-                            strings.messageSearchFailed,
+                        messageSearchError != null -> Text(
+                            // 主句保持母語，後面接伺服器給的原話：看得懂是失敗、也拿得到原因
+                            "${strings.messageSearchFailed}：${messageSearchError.orEmpty()}",
                             color = MaterialTheme.colorScheme.error,
                             modifier = Modifier.padding(vertical = 12.dp),
                         )

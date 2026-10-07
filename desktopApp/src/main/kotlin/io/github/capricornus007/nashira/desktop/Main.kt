@@ -166,13 +166,26 @@ fun main(args: Array<String>) {
         var trayAttached by remember { mutableStateOf(false) }
         val strings = stringsFor(ui.language)
         var mainWindow by remember { mutableStateOf<java.awt.Window?>(null) }
+        // 視窗狀態要能從 WindowScope 外面改（托盤召回、關閉請求都在外面），所以提到這裡 remember；
+        // 可見性一律經 windowState.visible，不要再去碰 AWT 的 isVisible（理由見 hideOrExit）。
+        val windowState = rememberWindowState(
+            position = WindowPosition.PlatformDefault,
+            size = DpSize(1040.dp, 720.dp),
+        )
+        // 可見性是 Window() 的參數、不是 WindowState 的欄位（實測 state.visible 編不過），
+        // 所以自己持有一份狀態；收進托盤＝把它設 false，讓 Compose 自己去 unmap，
+        // 這樣它才不會在之後的重组裡把這個窗口拆掉（幽靈窗口的由來，見 hideOrExit）。
+        var windowVisible by remember { mutableStateOf(true) }
 
         fun showMainWindow() {
             // 可見性一定要排回 EDT 做：這裡同時被托盤監聽器（EDT）與 nashira:// 的協程
             // （非 EDT）呼叫，直接改 isVisible 在兩條線上程之間會打架。
             java.awt.EventQueue.invokeLater {
+                windowVisible = true
                 val w = mainWindow ?: return@invokeLater
-                if (!w.isVisible) w.isVisible = true
+                // 窗口還不可顯示就別去碰它：對已拆掉的框架 toFront/requestFocus
+                // 就是 RootNodeOwner is already disposed 那顆框的來源之一
+                if (!w.isDisplayable) return@invokeLater
                 w.toFront()
                 w.requestFocus()
                 // 喚起是「另外開行程問 WM」，絕不能留在 EDT 上等：
@@ -496,11 +509,17 @@ fun main(args: Array<String>) {
         // 抽出來是因為按視窗關閉鈕與 Ctrl+W 必須走**同一條路**（用戶 2026-09-30 #85）：
         // Ctrl+W 的語意是「收起來」，不是「退出」；要退出的是 Ctrl+Q。
         fun hideOrExit() {
-            if (trayAttached) mainWindow?.isVisible = false else exitApplication()
+            // 收進托盤必須走 Compose 的 state.visible，**不能**直接改 AWT 的 isVisible。
+            // 後者讓 Compose 仍以為視窗可見，它之後去對齊自己的 state 時會把這個窗口拆掉，
+            // 實測留下一顆「X 那邊存在、i3 列得出來、卻沒有任何東西在畫」的幽靈窗口
+            //（用戶 2026-10-07：工作區 3 常顯但切過去只有壁紙），
+            // 再點托盤召回時就拋 RootNodeOwner is already disposed。
+            if (trayAttached) windowVisible = false else exitApplication()
         }
 
         Window(
             onCloseRequest = { hideOrExit() },
+            visible = windowVisible,
             // Ctrl+W／Ctrl+Q 走 onPreviewKeyEvent：這是「程度 A」的全域——
             // **只在我們自己的視窗有焦點時生效**，不碰 XGrabKey，不會搶走別的軟體的鍵
             //（用戶 2026-09-30 點名原本的 Ctrl+Alt+N 全域抓取可能跟其他軟體衝突，已撤掉）。
@@ -528,12 +547,8 @@ fun main(args: Array<String>) {
             // 官方 Window() composable：Skia 面板與 Compose 環境由它全權管理。
             // position 交給 PlatformDefault，讓平鋪式 WM 全權定位。
             // 教訓：不要手動建 ComposeWindow 再插手 isVisible——會產生不受管理的面板。
-            // （上面那條教訓指「繞過 Window() 自建框架」；托盤收放是持有官方窗口
-            // 的引用在 WindowScope 外做顯隱，安全。）
-            state = rememberWindowState(
-                position = WindowPosition.PlatformDefault,
-                size = DpSize(1040.dp, 720.dp),
-            ),
+            // 收進托盤也一樣要走 state.visible（見 hideOrExit），繞過它就會留下幽靈窗口。
+            state = windowState,
         ) {
             LaunchedEffect(window) { mainWindow = window }
             // window.isFocused 只在 WindowScope 內拿得到；焦點變化即時反映到通知抑制
