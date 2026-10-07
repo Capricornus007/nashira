@@ -286,6 +286,14 @@ private const val MediaTotalBudgetMs = 20_000L
  * 把請求丟到這個作用域、外面只 `await` 它，逾時時放棄 await 即可立刻返回；
  * 那個卡住的協程留在這裡自己結束，不再擋在畫面上。
  */
+/**
+ * 讀位元組專用的作用域（獨立的 Job）。
+ *
+ * 存在的理由見 `loadMediaBitmap` 那段：Trixnity 的 `toByteArray(scope)` 會在給它的那個
+ * scope 裡完成讀取，所以**不能**把「正在 await 結果的那個協程」交給它，否則自己等自己。
+ */
+private val MediaReadScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
+
 private val MediaIoScope = kotlinx.coroutines.CoroutineScope(
     // ⚠️ 必須是 IO，**不能是 Default**。用戶 2026-10-07 反問「爲什麼頭像正常圖片不行」，
     // 而 /tmp/nashira-media.log 連一筆失敗都沒有 → 那條協程既沒成功也沒認輸。
@@ -296,7 +304,7 @@ private val MediaIoScope = kotlinx.coroutines.CoroutineScope(
 )
 
 /** 同上，但把失敗原因一起帶出來（「檢視／下載」那條路與失敗占位的懸停都要寫出人話）。 */
-private suspend fun <T> mediaCallResultWithin(timeoutMs: Long, block: suspend kotlinx.coroutines.CoroutineScope.() -> T): Result<T>? {
+private suspend fun <T> mediaCallResultWithin(timeoutMs: Long, block: suspend () -> T): Result<T>? {
     val task = MediaIoScope.async { runCatching { block() } }
     return try {
         kotlinx.coroutines.withTimeout(timeoutMs) { task.await() }
@@ -449,9 +457,14 @@ private suspend fun loadMediaBitmap(
                 }
             }
             // 讓例外走到 runCatching 裡，原因才留得下來。
-            // ⚠️ 這裡的 `this` 是工作協程自己的作用域（IO 那組線程）；Trixnity 的
-            // toByteArray 照著交給它的 context 讀位元組，遞外層那個進去等於鐵律 2 白寫。
-            fetched.getOrThrow().toByteArray(this)
+            //
+            // ⚠️⚠️ `toByteArray` 一定要遞**另一個**作用域進去，不能遞「正在等這個結果的
+            // 那個協程自己的」作用域。Trixnity 會在拿到的那個 scope 裡跑讀取，
+            // 遞自己的 scope 等於自己等自己：實測 0.1.54 起**每一張**圖都在 20 秒準時
+            // 逾時、連 `mxc://matrix.org/…`（自己家的圖、沒有聯邦、沒有冷檔）都一樣，
+            // 而且那 20 秒內 `ss -tnp` 看不到任何新連線與位元組變動——請求根本沒讀完。
+            // 0.1.52 是 `toByteArray(this@withContext)`（外層那個 scope）所以正常。
+            fetched.getOrThrow().toByteArray(MediaReadScope)
         }
         val bytes = when {
             outcome == null -> {
