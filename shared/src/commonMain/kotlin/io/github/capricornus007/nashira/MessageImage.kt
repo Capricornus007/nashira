@@ -193,6 +193,21 @@ internal const val ThumbnailHeight = 600L
  */
 private const val AcceptableThumbnailFraction = 3
 
+/** 中間結果至少要這麼寬才值得貼出來（32×32 那種放大後是一團色塊，不如等原檔）。 */
+private const val ProgressiveMinWidth = 160
+
+/**
+ * 回過「沒有動態縮圖」的家伺服器名單（程序生命週期內有效）。
+ * 對它們再問一次縮圖只是白等 1～4 秒，問過一次就記住。
+ */
+private val NoThumbnailServers = HashSet<String>()
+
+/** mxc://host/id 裡的 host，當「這臺伺服器有沒有動態縮圖」的鍵。 */
+private fun MediaSource.mxcHost(): String = when (this) {
+    is MediaSource.Plain -> mxcUrl.substringAfter("mxc://", "").substringBefore("/", "")
+    is MediaSource.Encrypted -> file.url.substringAfter("mxc://", "").substringBefore("/", "")
+}
+
 /** 退而抓原檔時的上限：原圖普遍 3–6 MiB，卡在同一個 2 MiB 會直接拿不到檔案。 */
 internal const val OriginalMaxMediaBytes = 8L * 1024 * 1024
 
@@ -432,7 +447,10 @@ private suspend fun loadMediaBitmap(
         // 給到原圖大小，白跑一趟（日誌實測 kimiblock.top 對 528 的請求回 32×32）。
         val declaredSmall = declaredWidth != null && declaredWidth in 1 until boxPx
         val acceptableWidth = boxPx / AcceptableThumbnailFraction
-        val usedOriginal = isVideo || attempt > 0 || small || declaredSmall
+        // 同一個家伺服器只要回過一次「沒有動態縮圖」，之後它的圖**直接抓原檔**：
+        // 先問縮圖必定白跑一趟（日誌實測那一趟 1～4 秒，拿回來的是 400 或一張 32×32）。
+        val knownNoThumbnail = source.mxcHost() in NoThumbnailServers
+        val usedOriginal = isVideo || attempt > 0 || small || declaredSmall || knownNoThumbnail
         val outcome = mediaCallResultWithin(leftMs) {
             val fetched = client.di.get<MediaService>().let { service ->
                 when (source) {
@@ -477,6 +495,12 @@ private suspend fun loadMediaBitmap(
             outcome.isFailure -> {
                 val t = outcome.exceptionOrNull()
                 reason = "${t?.javaClass?.simpleName} ${t?.message ?: ""}".trim()
+                // Synapse 關掉動態縮圖時的原文是「Cannot find any thumbnails for the
+                // requested media … Dynamic thumbnails are disabled on this server」。
+                if (!usedOriginal && reason.contains("thumbnail", ignoreCase = true)) {
+                    NoThumbnailServers.add(source.mxcHost())
+                    mediaProbe("記下：${source.mxcHost()} 沒有動態縮圖，之後直接抓原檔")
+                }
                 mediaProbe("第 ${attempt + 1} 次：$reason $key")
                 continue
             }
@@ -500,8 +524,10 @@ private suspend fun loadMediaBitmap(
         // **抓過原檔就到此為止**：上一版只比「寬度夠不夠 boxPx」，小圖（橫幅、貼紙、
         // 低解析照片）明明已拿到完整原檔還被判不合格，同一個 3295B／309x59 被抓了四遍。
         if (usedOriginal || frame.width >= acceptableWidth) break
-        // 還想再抓一張更好的：先把這張交出去，畫面至少不是空白加轉圈
-        onProgress(frame)
+        // 還想再抓一張更好的：先把這張交出去，畫面至少不是空白加轉圈。
+        // 但**糊到不能看的不算**：這些伺服器只預生成 32×32，把它放大成五百像素的
+        // 一團色塊比轉圈更難看（用戶 2026-10-07 #86 對照 #88「不能直接這張嗎」）。
+        if (frame.width >= ProgressiveMinWidth) onProgress(frame)
     }
     return MediaLoad(best, reason ?: if (best == null) "抓完了但沒有可用的一張" else null, animatedFrames)
 }
