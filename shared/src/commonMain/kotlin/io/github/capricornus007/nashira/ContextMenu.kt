@@ -45,7 +45,14 @@ fun Modifier.contextMenuGestures(
                     // 位置要一起帶出去：桌面選單要開在指標處，不然滑鼠在右邊、選單卻從列首彈出
                     val position = event.changes.firstOrNull()?.position ?: Offset.Zero
                     event.changes.forEach { it.consume() }
-                    onContextMenu(position)
+                    // ⚠️ 必須在這裡減掉「錨點元件的高度」，而且用的是這個節點自己的 size，
+                    // 不是外面傳進來的估計列高（2026-09-30 那次減估計值，所以他看著「依舊」）。
+                    // 理由：DropdownMenu 的默認位置是錨點的**左下角**，
+                    // 而 position 是「距該節點**頂端**」的局部座標。
+                    // 直接當 offset 用 = 列高 + y，選單整個掉到下一列——
+                    // 這正是用戶截圖裡「右鍵最頂那列、選單出現在第二列」的成因。
+                    // Space 欄與聊天室列共用這支手勢，所以兩處一起錯、也一起修好。
+                    onContextMenu(Offset(position.x, position.y - size.height))
                 }
             }
         }
