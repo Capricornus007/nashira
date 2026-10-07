@@ -73,6 +73,12 @@ fun MessageImage(
     LaunchedEffect(client, key, boxPx) {
         if (bitmap != null) return@LaunchedEffect
         mediaProbe("開始 $key box=$boxPx")
+        // ⚠️ 這裡**不能**用 `Dispatchers.Main`：桌面端（skiko）沒有 Main 排程器的提供者，
+        // 一碰到就拋「Module with the Main dispatcher is missing」、彈一顆原生錯誤框把
+        // 整個 UI 卡死（用戶 2026-10-07 截圖 #85 就是這個，是我這輪新加的程式碼造成的）。
+        // 正確做法是把 LaunchedEffect 自己的協程上下文抓下來當回流目標——它本來就在
+        // UI 執行緒上。減掉 Job 是必要的：`withContext` 不准換掉協程自己的 Job。
+        val uiContext = coroutineContext.minusKey(kotlinx.coroutines.Job)
         // 「重試」這個按鈕已經拿掉（用戶 2026-10-07：「重試是多餘的」）：
         // 抓不到就自己排背退重試，直到成功為止，不把他拉進「要點一下」的迴圈。
         // 間隔 2s → 7s → 12s → 之後固定 17s，不會變成對壞位址的密集轟炸
@@ -84,7 +90,7 @@ fun MessageImage(
                     // 先讓畫面有東西：日誌實測很多伺服器只給得出 32×32 的預生成縮圖，
                     // 接著要再抓幾秒原檔。Element 的「秒開」感覺一半來自這裡——
                     // 先糊一下、再變清楚，而不是轉十秒圈。
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    kotlinx.coroutines.withContext(uiContext) {
                         if (bitmap == null) bitmap = partial
                     }
                 }
