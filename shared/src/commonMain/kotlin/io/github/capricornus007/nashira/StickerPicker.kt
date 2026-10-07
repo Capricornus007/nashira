@@ -358,14 +358,14 @@ internal fun StickerThumb(
                     val result = if (preferThumbnail) {
                         // 640×480 是 Synapse 內建快取清單裡的大小之一，命中率高；
                         // 自訂的 240×720 每張都要家伺服器現場生成（同 MessageImage 那條註解）。
-                        service.getThumbnail(source.mxcUrl, 640, 480, maxSize = MaxMediaBytes)
+                        service.getThumbnail(source.mxcUrl, 640, 480, maxSize = null)
                     } else {
-                        service.getMedia(source.mxcUrl, maxSize = MaxMediaBytes)
+                        service.getMedia(source.mxcUrl, maxSize = null)
                     }
                     result.getOrNull()
                 }
                 is MediaSource.Encrypted -> {
-                    service.getEncryptedMedia(source.file, maxSize = MaxMediaBytes).getOrNull()
+                    service.getEncryptedMedia(source.file, maxSize = null).getOrNull()
                 }
                 null -> null
             }

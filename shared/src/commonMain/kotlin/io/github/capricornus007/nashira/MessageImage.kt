@@ -208,9 +208,6 @@ private fun ratioOf(width: Int?, height: Int?, bitmap: ImageBitmap?): Float {
     return (w.toFloat() / h.toFloat()).coerceIn(0.5f, 2f)
 }
 
-/** 縮圖上限 2 MiB：時間線一次可能掛十幾張圖，原圖直接拉會把手機流量與記憶體吃光。 */
-internal const val MaxMediaBytes = 2L * 1024 * 1024
-
 /**
  * 縮圖請求框：**與 Element／SchildiChat 相同**的 800×600。
  * Synapse 按尺寸分別快取縮圖，這個組合命中率最高（別人已經生成過了），
@@ -241,12 +238,10 @@ private fun MediaSource.mxcHost(): String = when (this) {
     is MediaSource.Encrypted -> file.url.substringAfter("mxc://", "").substringBefore("/", "")
 }
 
-/**
- * 退而抓原檔時的上限。原本 8 MiB：實測橋來（t2bot.io）的一條影片 9.69 MiB，
- * 被我們自己的上限擋死（`DownloadLimitExceededException`），於是不停重試、永遠轉圈
- * （用戶 2026-10-07 #103「爲什麼有的行有的不行」）。Element 對原檔沒有這種小氣上限。
- */
-internal const val OriginalMaxMediaBytes = 40L * 1024 * 1024
+// **下載一律不設大小上限**（用戶 2026-10-07：「請不要設定上限謝謝」）。
+// 這裡曾有過 2MiB／8MiB 兩道閘，實測把橋來的媒體擋死：`mxc://t2bot.io/…` 一條
+// 9.69MiB 的 mp4 直接拋 `DownloadLimitExceededException`，四輪全無效、永遠轉圈
+//（#103「爲什麼有的行有的不行」）。現在全部走 Trixnity 的預設 `maxSize = null`。
 
 private fun MediaSource.cacheKey(): String = when (this) {
     is MediaSource.Plain -> mxcUrl
@@ -300,8 +295,8 @@ internal suspend fun fetchMediaWithError(client: MatrixClient, source: MediaSour
         // （DNS、socket 讀取）一樣不會返回，「檢視／下載」那條路就會把按鈕卡死在那裡。
         val outcome = mediaCallResultWithin(MEDIA_TIMEOUT_MS) {
             val response = when (source) {
-                is MediaSource.Plain -> service.getMedia(source.mxcUrl, maxSize = 32L * 1024 * 1024)
-                is MediaSource.Encrypted -> service.getEncryptedMedia(source.file, maxSize = 32L * 1024 * 1024)
+                is MediaSource.Plain -> service.getMedia(source.mxcUrl, maxSize = null)
+                is MediaSource.Encrypted -> service.getEncryptedMedia(source.file, maxSize = null)
             }
             response.getOrThrow().toByteArray(this@coroutineScope)
         }
@@ -366,7 +361,9 @@ private suspend fun <T> mediaCallResultWithin(timeoutMs: Long, block: suspend ()
  * 「檢視器／另存圖片」那條路的單次上限：它只抓一次、不重試，
  * 所以用得上獨立的逾時，而不是上面那個含退避的總預算。
  */
-private const val MEDIA_TIMEOUT_MS = 15_000L
+// 15 秒是「不說出口的容量上限」：一條 50MB 的影片在本機那條 ~100KB/s 的鏈路上要跑好幾分鐘。
+// 用戶 2026-10-07「請不要設定上限謝謝」→ 這裡改成 2 分鐘，只當「完全沒反應」的保命線。
+private const val MEDIA_TIMEOUT_MS = 120_000L
 
 /**
  * 媒體載入的診斷紀錄，寫在 `/tmp/nashira-media.log`。
@@ -494,7 +491,7 @@ private suspend fun loadMediaBitmap(
                     is MediaSource.Plain ->
                         if (usedOriginal) {
                             // 影片沒有縮圖端點；縮圖不夠大（或第一輪失敗）就改抓原檔本機降採樣
-                            service.getMedia(source.mxcUrl, maxSize = OriginalMaxMediaBytes)
+                            service.getMedia(source.mxcUrl, maxSize = null)
                         } else {
                             // ⚠️ 尺寸要跟 Element／SchildiChat **一模一样**（800×600 scale），
                             // 不是按我們的顯示框算。Synapse 是「按尺寸分別快取」縮圖的：
@@ -507,10 +504,10 @@ private suspend fun loadMediaBitmap(
                                 source.mxcUrl,
                                 ThumbnailWidth,
                                 ThumbnailHeight,
-                                maxSize = MaxMediaBytes,
+                                maxSize = null,
                             )
                         }
-                    is MediaSource.Encrypted -> service.getEncryptedMedia(source.file, maxSize = OriginalMaxMediaBytes)
+                    is MediaSource.Encrypted -> service.getEncryptedMedia(source.file, maxSize = null)
                 }
             }
             // 讓例外走到 runCatching 裡，原因才留得下來。
@@ -621,16 +618,10 @@ private suspend fun fetchMediaFromOrigin(mxcUrl: String, boxPx: Int, isVideo: Bo
             val input = connection.inputStream
             val buffer = java.io.ByteArrayOutputStream()
             val chunk = ByteArray(64 * 1024)
-            var total = 0
             while (true) {
                 val read = input.read(chunk)
                 if (read <= 0) break
                 buffer.write(chunk, 0, read)
-                total += read
-                if (total > OriginalMaxMediaBytes) {
-                    input.close()
-                    return@runCatching null   // 太大，跟原本的限制一樣丟掉
-                }
             }
             input.close()
             val bytes = buffer.toByteArray()
