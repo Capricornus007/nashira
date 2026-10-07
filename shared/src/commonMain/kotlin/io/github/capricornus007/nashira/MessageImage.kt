@@ -401,9 +401,18 @@ private object MediaRequests {
 
     suspend fun await(key: String, load: suspend () -> MediaLoad): MediaLoad {
         inFlight[key]?.let { running ->
-            if (!running.isCompleted) mediaProbe("接上同一個請求 $key")
-            else mediaProbe("取回剛完成的那把 $key")
-            return running.await()
+            if (running.isCompleted) {
+                // 已完成＝那是**上一輪的結果**，回放它等於把第一次的失敗永久化。
+                // 日誌實測（用戶 2026-10-07 #133～#135 那條 9.69MiB 的影片）：
+                // 建立者被取消（滾出畫面）時走不到下面的 finally，條目就永遠留在表裡，
+                // 之後每一輪都只印「取回剛完成的那把」＋「第 N 輪失敗」，
+                // 繞原站那段一次也沒再跑過。只有**還在跑**的請求才值得共用。
+                mediaProbe("丟掉上一輪的舊結果 $key")
+                inFlight.remove(key)
+            } else {
+                mediaProbe("接上同一個請求 $key")
+                return running.await()
+            }
         }
         // 清掉已經跑完卻沒人取的條目（滾來滾去時會累積，每條都掛著位圖）
         if (inFlight.size > 24) {

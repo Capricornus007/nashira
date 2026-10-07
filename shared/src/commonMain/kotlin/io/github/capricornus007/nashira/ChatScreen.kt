@@ -3119,7 +3119,11 @@ private fun TimelinePane(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .zIndex(1.5f)
-                        .padding(bottom = 12.dp)
+                        // 這層 Box 是 fillMaxSize、**沒有**內距（內距只加在裡面的 LazyColumn 上），
+                        // 所以 BottomCenter 落在整個面板的最下緣——正好被輸入框那條蓋住。
+                        // 日誌證明條件是對的（用戶 2026-10-07 #128 翻了之後 index=0 offset=509
+                        // away=true 一路到 offset=0 away=false），鈕一直存在，只是被壓在後面。
+                        .padding(bottom = padding.calculateBottomPadding() + 12.dp)
                         .size(40.dp),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
