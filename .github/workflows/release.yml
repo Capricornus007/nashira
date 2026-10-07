@@ -62,21 +62,32 @@ jobs:
           # 驗產物、不驗配置：DSL 寫了不等於套得上（moregramX 的簽名就是配置在、產物卻沒簽，
           # 還連紅一個月的 CI）。兩條路都要驗，因為 .deb/.rpm 走 jpackage、
           # 而 Arch 包吃的是 createDistributable 的產物，兩者的 runtime 不一定是同一份。
+          # ⚠️ 判「是不是 JBR」不能 grep release 檔裡的 "JetBrains"：jlink 產物的 release 檔
+          #    只有 JAVA_VERSION 與 MODULES 兩行、**沒有 implementor 那類字串**，
+          #    那樣寫在 CI 上必然紅（實測踩過）。改查**目的本身**：
+          #    那個上報光標的類有沒有被砍掉。
+          check_runtime() { # $1=runtime 目錄, $2=說明
+            local R="$1" W="$2"
+            if [ ! -d "$R" ]; then echo "::error::$W 找不到 $R"; exit 1; fi
+            head -2 "$R/release" | sed 's/^/    /'
+            local N
+            N="$("$JAVA_HOME/bin/jimage" list "$R/lib/modules" 2>/dev/null \
+                 | grep -ci 'ClientComponentCaretPositionTracker' || true)"
+            echo "    ClientComponentCaretPositionTracker 命中 $N 筆"
+            if [ "${N:-0}" -lt 1 ]; then
+              echo "::error::$W 的 runtime 沒有 JBR 的光標上報類（換執行期白做，見 #62）"
+              exit 1
+            fi
+          }
           echo "--- .deb 內捆的執行期 ---"
           DEB="$(find desktopApp/build/compose/binaries/main -name '*.deb' | head -1)"
           test -n "$DEB"
           dpkg-deb -x "$DEB" "$RUNNER_TEMP/debchk"
-          head -4 "$RUNNER_TEMP/debchk"/opt/*/lib/runtime/release
-          grep -q 'JetBrains' "$RUNNER_TEMP/debchk"/opt/*/lib/runtime/release \
-            || { echo "::error::.deb 裡的 runtime 不是 JBR"; exit 1; }
+          check_runtime "$(find "$RUNNER_TEMP/debchk" -type d -name runtime | head -1)" ".deb"
           echo "--- createDistributable 內捆的執行期（Arch 包吃這個）---"
-          # 注意路徑裡有 lib/：實測是 app/nashira/lib/runtime/release，
-          # 少寫一层會 head 不到檔、set -e 直接把 CI 打紅（本地踩過）。
-          DIST=desktopApp/build/compose/binaries/main/app/nashira/lib/runtime/release
-          head -4 "$DIST"
-          grep -q 'JetBrains' "$DIST" \
-            || { echo "::error::distributable 的 runtime 不是 JBR，Arch 包會拿到 OpenJDK"; exit 1; }
-          echo "確認：兩條路捆的都是 JetBrains Runtime"
+          # 注意路徑裡有 lib/：實測是 app/nashira/lib/runtime，漏一層會直接紅（本地踩過）。
+          check_runtime desktopApp/build/compose/binaries/main/app/nashira/lib/runtime "distributable"
+          echo "確認：兩條路捆的 runtime 都帶 JBR 的光標上報類"
           echo "APK built:"
           ls -la androidApp/build/outputs/apk/release/*.apk
           echo "Packages:"
