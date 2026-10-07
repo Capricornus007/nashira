@@ -357,7 +357,9 @@ fun ChatScreen(
                 val enter = slideInVertically(tween(220)) { it } + fadeIn(tween(160))
                 val leaveInPlace = fadeOut(tween(140))
                 val leaveDown = slideOutVertically(tween(220)) { it } + fadeOut(tween(200))
-                val enterUp = slideInVertically(tween(200)) { -it / 12 } + fadeIn(tween(200))
+                // 返回時主畫面要「明顯」滑回來：先前給 -it/12（約 1/12 高）實測
+                // 等於沒有動畫（用戶 2026-10-07：「為什麼從設定返回的動畫消失了」）。
+                val enterUp = slideInVertically(tween(220)) { -it / 3 } + fadeIn(tween(220))
                 if (targetState) enter togetherWith leaveInPlace
                 else enterUp togetherWith leaveDown
             },
@@ -913,7 +915,7 @@ private fun RailSlot(
             ) {
                 content(shape)
             }
-            if (unread.count > 0 || (unread.unread && unread.muted)) {
+            if (unread.count > 0 || unread.unread) {
                 UnreadBadge(
                     count = unread.count,
                     muted = unread.muted,
@@ -1443,10 +1445,13 @@ private fun RoomListItem(
                         modifier = Modifier.weight(1f),
                     )
                     // 靜音房拿不到計數也要給訊號：有未讀就畫（count 為 0 時是灰點）
-                    if (!room.isInvite && (unread.count > 0 || (unread.unread && unread.muted))) {
+                    if (!room.isInvite && (unread.count > 0 || unread.unread)) {
                         Spacer(Modifier.width(8.dp))
                         // 靜音房照樣顯示計數、只是變灰（對齊 64gram 桌面版）
-                        UnreadBadge(unread.count, muted = unread.muted)
+                        // 靜音房一律只給點、不給數字：先前「有 count 就顯示數字、
+                        // 沒有才顯示點」導致同一列清單裡兩種樣式混著，
+                        // 用戶 2026-10-07 點名「為什麼有的出點有的出數字」。
+                        UnreadBadge(if (unread.muted) 0 else unread.count, muted = unread.muted)
                     }
                 }
             }
@@ -1754,6 +1759,23 @@ private fun TimelinePane(
     }.collectAsState(initial = 0)
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
+
+    // 跳轉之後要把捲動位置對到目標那一筆。
+    // 原本只呼叫 timeline.jumpTo() 就結束了，但它內部是 `timeline.init(startFrom=…)`
+    // ——**整個視窗被重建**（換成目標前後那 60 則），而 listState 還停在舊 index：
+    // 舊 index 在新清單裡對應到完全不相干的一則，使用者看到的就是
+    // 「一點引用時間線就亂跳」（用戶 2026-10-07 點名，並明確要求修好而不是給重試）。
+    // 這裡等目標真的出現在新清單裡，再捲到它那一筆。
+    var pendingJumpEventId by remember(room.roomId) { mutableStateOf<String?>(null) }
+    LaunchedEffect(pendingJumpEventId, messages) {
+        val pid = pendingJumpEventId ?: return@LaunchedEffect
+        val list = messages ?: return@LaunchedEffect
+        val index = list.indexOfFirst { it.eventId?.full == pid }
+        if (index >= 0) {
+            listState.scrollToItem(index)
+            pendingJumpEventId = null
+        }
+    }
 
     // reverseLayout 下 index 0 就是最新訊息（畫在最底部）。新訊息到達時只在
     // 「使用者本來就貼著底部」才跟隨——深讀歷史時被拽走是反 UX（Telegram
@@ -2879,6 +2901,7 @@ private fun TimelinePane(
                                 if (where != null && where != id) returnToEvent = where
                                 timeline.jumpTo(id)
                                 highlightedEventId = id.full
+                                pendingJumpEventId = id.full
                             }
                         },
                         strings = strings,
@@ -2935,7 +2958,9 @@ private fun TimelinePane(
                         },
                         onCopyText = {
                             (msg.body as? MessageBody.Text)?.let { text ->
-                                clipboard.setText(AnnotatedString(text.text))
+                                // 用戶 2026-10-07 定案「顯示和複製都加」→ 兩側走同一個 pangu，
+                                // 否則螢幕上看得到空格、複製出來沒有，會以為顯示壞了。
+                                clipboard.setText(AnnotatedString(pangu(text.text)))
                             }
                         },
                         onCopyLink = {
@@ -3084,6 +3109,7 @@ private fun TimelinePane(
                             returnToEvent = null
                             timeline.jumpTo(back)
                             highlightedEventId = back.full
+                            pendingJumpEventId = back.full
                         }
                     },
                     shape = RoundedCornerShape(20.dp),
@@ -4190,6 +4216,18 @@ private fun htmlToAnnotatedString(
         var wroteAny = false
         val mxColorRegex = """data-mx-color\s*=\s*["']#?([0-9a-fA-F]{3,8})["']""".toRegex()
 
+        // pangu 化必須在「逐段 append」時做，不能事後整串替換：
+        // AnnotatedString 的 span（連結、粗體、自訂表情）記的是字元位置，
+        // 事後插字會讓全部 span 錯位。而 HTML 標籤又會把一句話切成多段，
+        // 所以要記住上一段的尾字元、逐段帶過去，才不會漏掉
+        // `<b>Chrome</b>瀏覽器` 中間那個空格。
+        var panguPrev: Char? = null
+        fun emitPangu(text: String) {
+            val (out, next) = pangu(text, panguPrev)
+            panguPrev = next
+            append(out)
+        }
+
         fun writeBlockPrefix() {
             // 換行後把引用前綴補齊；清單縮排由 <li> 自己處理（一項一行）
             repeat(quoteDepth) { append("│ ") }
@@ -4223,9 +4261,9 @@ private fun htmlToAnnotatedString(
                         ),
                         linkInteractionListener = { openLink(url) },
                     ),
-                ) { append(decoded) }
+                ) { emitPangu(decoded) }
             } else {
-                withStyle(currentStyle) { append(decoded) }
+                withStyle(currentStyle) { emitPangu(decoded) }
             }
         }
 

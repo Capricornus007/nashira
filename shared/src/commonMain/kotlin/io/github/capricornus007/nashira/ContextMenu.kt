@@ -130,6 +130,10 @@ fun ContextMenuSurface(
         properties = PopupProperties(focusable = true, usePlatformDefaultWidth = false),
     ) {
         Surface(
+            // 寬度要釘在 **Surface** 上，不是裡面的 Column：
+            // Popup 的窗口尺寸取決於它最外層內容的約束，釘 Column 時 Surface 仍會被撐開，
+            // 用戶 2026-10-07 因此看到「依舊沒收掉」。
+            modifier = Modifier.width(200.dp),
             shape = MaterialTheme.shapes.extraSmall,
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 3.dp,
@@ -138,7 +142,7 @@ fun ContextMenuSurface(
             // 寬度必須自己釘死。Popup 在桌面端是一顆獨立窗口，它的尺寸取自內容的「期望尺寸」，
             // 而 DropdownMenuItem 內部是 fillMaxWidth——不給上限就會一路撐到父窗口那麼寬
             //（用戶 2026-10-07 換成 Popup 後當場點名「右鍵明顯過大」）。
-            Column(Modifier.width(240.dp)) { content() }
+            Column { content() }
         }
     }
 }
