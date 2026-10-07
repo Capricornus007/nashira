@@ -309,24 +309,27 @@ fun ChatScreen(
     val unreadFlow = remember(roomRepository) { roomRepository.unreadByRoom() }
     val allUnread by unreadFlow.collectAsState(initial = emptyMap())
     // 關閉未讀提示時直接給空 map，白條與紅圈就都不畫
-    // 靜音的房間一律不進徽章（用戶 2026-09-30 #48/#50：設了靜音還冒紅點）。
-    // 在這裡一次攔掉，聊天室列、Space 總和、首頁格才會跟著一起少；逐處判斷遲早漏一處。
-    val mutedIds by roomRepository.mutedRoomIds.collectAsState()
+    // ⚠️ 靜音的房間**不能從這裡濾掉**（我 2026-09-30 那麼做是錯的，用戶 2026-10-07 拿
+    // 64gram 桌面版截圖點名）：TG 桌面的行為是「靜音房照樣顯示未讀數字，只是徽章變灰」，
+    // 不是讓數字消失。靜音狀態改由 UnreadState.muted 帶著走，繪製端決定樣式。
+    // 只有「總和」那兩處（Space 徽章、首頁格）要跳過靜音房——截圖可反推這個口徑：
+    // 左側「全部」是 132，而右側靜音房動輒 46552/12731，加起來遠超 132
+    // → 代表 Space／首頁只累計**有聲**的未讀。
     LaunchedEffect(roomRepository) { roomRepository.refreshMutedRoomIds(attempts = 6) }
-    val unreadByRoom = if (!showUnread) emptyMap() else allUnread.filterKeys { it.full !in mutedIds }
+    val unreadByRoom = if (!showUnread) emptyMap() else allUnread
     val unreadBySpace = remember(snapshot, unreadByRoom) {
         snapshot.spaces.associate { space ->
             space.roomId to snapshot.rooms
                 .filter { space.roomId in it.spaceIds }
                 .fold(UnreadState()) { acc, room ->
                     val state = unreadByRoom[room.roomId] ?: UnreadState()
-                    UnreadState(acc.unread || state.unread, acc.count + state.count)
+                    if (state.muted) acc else UnreadState(acc.unread || state.unread, acc.count + state.count)
                 }
         }
     }
     val homeUnread = remember(unreadByRoom) {
         unreadByRoom.values.fold(UnreadState()) { acc, state ->
-            UnreadState(acc.unread || state.unread, acc.count + state.count)
+            if (state.muted) acc else UnreadState(acc.unread || state.unread, acc.count + state.count)
         }
     }
 
@@ -903,6 +906,7 @@ private fun RailSlot(
             if (unread.count > 0) {
                 UnreadBadge(
                     count = unread.count,
+                    muted = unread.muted,
                     modifier = Modifier.align(Alignment.BottomEnd).offset(x = 6.dp, y = 4.dp),
                 )
             }
@@ -913,9 +917,14 @@ private fun RailSlot(
 /**
  * Discord 的紅圈未讀數。紅色固定不跟隨動態配色：這是狀態指示，
  * 換成 colorScheme.error 在暖色種子下會變成淺粉、白字看不清。
+ *
+ * `muted = true` 時換成中性灰、數字**照樣顯示**——64gram／TG 桌面版對靜音房就是
+ * 「計數還在、徽章變灰不強調」，不是讓它消失（用戶 2026-10-07 點名）。
+ * 灰階走 surfaceVariant/onSurfaceVariant 而非固定色：它本來就要「不搶眼」，
+ * 跟著主題走才不會在淺色底下變成一塊看不清的深斑。
  */
 @Composable
-private fun UnreadBadge(count: Int, modifier: Modifier = Modifier) {
+private fun UnreadBadge(count: Int, muted: Boolean = false, modifier: Modifier = Modifier) {
     Box(
         modifier
             .clip(CircleShape)
@@ -925,13 +934,13 @@ private fun UnreadBadge(count: Int, modifier: Modifier = Modifier) {
         Box(
             Modifier.defaultMinSize(minWidth = 18.dp, minHeight = 18.dp)
                 .clip(CircleShape)
-                .background(UnreadRed)
+                .background(if (muted) MaterialTheme.colorScheme.surfaceVariant else UnreadRed)
                 .padding(horizontal = 5.dp),
             contentAlignment = Alignment.Center,
         ) {
             Text(
                 if (count > 99) "99+" else count.toString(),
-                color = Color.White,
+                color = if (muted) MaterialTheme.colorScheme.onSurfaceVariant else Color.White,
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
@@ -1391,7 +1400,8 @@ private fun RoomListItem(
                     )
                     if (unread.count > 0 && !room.isInvite) {
                         Spacer(Modifier.width(8.dp))
-                        UnreadBadge(unread.count)
+                        // 靜音房照樣顯示計數、只是變灰（對齊 64gram 桌面版）
+                        UnreadBadge(unread.count, muted = unread.muted)
                     }
                 }
             }

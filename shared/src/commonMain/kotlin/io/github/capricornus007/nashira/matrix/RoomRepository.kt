@@ -113,6 +113,12 @@ data class UnreadState(
     val count: Int = 0,
     /** 使用者手動標記的未讀（`m.marked_unread`），與「有新訊息」區分開。 */
     val markedUnread: Boolean = false,
+    /**
+     * 該房間被設了靜音（`m.push_rules`）。
+     * ⚠️ 靜音**不該讓未讀數字消失**——64gram／TG 桌面的行為是「照樣顯示計數，
+     * 但徽章換成不強調的灰色」。之前把靜音房從未讀清單裡濾掉是用戶點名的錯誤做法。
+     */
+    val muted: Boolean = false,
 )
 
 data class SpaceSummary(
@@ -347,10 +353,17 @@ class RoomRepository(val client: MatrixClient) {
             client.notification.isUnread(roomId),
             client.notification.getCount(roomId),
             markedUnread(roomId),
-        ) { unread, count, marked ->
+            // 靜音狀態跟著未讀一起出來：徽章要「顯示但變灰」，不是把房間從未讀裡濾掉。
+            mutedRoomIds.map { it.contains(roomId.full) },
+        ) { unread, count, marked, muted ->
             // 手動標記的未讀也算未讀，否則「標記為未讀」按了畫面完全沒反應
             // （isUnread 只看有沒有需要通知的新訊息，不看 m.marked_unread）
-            UnreadState(unread = unread || count > 0 || marked, count = count, markedUnread = marked)
+            UnreadState(
+                unread = unread || count > 0 || marked,
+                count = count,
+                markedUnread = marked,
+                muted = muted,
+            )
         }
             .distinctUntilChanged()
 
