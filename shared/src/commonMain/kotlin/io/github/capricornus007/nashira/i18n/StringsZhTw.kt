@@ -218,7 +218,7 @@ object ZhTwStrings : Strings {
     override val passphrase = "安全密語"
     override val recoveryKeyCreated = "已建立復原金鑰"
     override val recoveryKeyCreatedHint = "請立刻抄下來並妥善保存——關閉後就看不到了。"
-    override val recoveryKeySaved = "我已保存"
+    override val recoveryKeySaved = "我已儲存"
     override val compareEmojiHint = "確認兩台裝置顯示的表情符號完全相同。"
     override val sessions = "工作階段"
     override val refreshSessions = "刷新工作階段"
