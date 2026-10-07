@@ -3,7 +3,7 @@ package io.github.capricornus007.nashira
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -107,7 +107,10 @@ fun ContextMenuSurface(
             tonalElevation = 3.dp,
             shadowElevation = 8.dp,
         ) {
-            Column(Modifier.widthIn(min = 180.dp)) { content() }
+            // 寬度必須自己釘死。Popup 在桌面端是一顆獨立窗口，它的尺寸取自內容的「期望尺寸」，
+            // 而 DropdownMenuItem 內部是 fillMaxWidth——不給上限就會一路撐到父窗口那麼寬
+            //（用戶 2026-10-07 換成 Popup 後當場點名「右鍵明顯過大」）。
+            Column(Modifier.width(240.dp)) { content() }
         }
     }
 }

@@ -949,6 +949,24 @@ private fun UnreadBadge(count: Int, muted: Boolean = false, modifier: Modifier =
     }
 }
 
+/**
+ * 把 /search 的失敗翻成一句人話。
+ *
+ * 要翻是因為 Trixnity 的例外字串（`statusCode=500 errorResponse=Unknown(...)`）對使用者
+ * 等於沒說，而「500」與「404」的處置完全不同：前者是伺服器自己的搜尋壞了、
+ * 後者是它根本不提供這個功能——兩種都不該讓他去查自己的網路
+ *（用戶 2026-10-07 看到轉圈就直接問「我網絡問題？」）。
+ */
+private fun searchFailureHint(raw: String): String {
+    val oneLine = raw.replace('\n', ' ')
+    return when {
+        "statusCode=500" in oneLine || "Internal server error" in oneLine ->
+            "這臺伺服器自己的搜尋壞了（500），跟你的網路無關"
+        "statusCode=404" in oneLine -> "這臺伺服器不提供訊息搜尋"
+        else -> oneLine.take(160)
+    }
+}
+
 /** Discord 未讀徽章紅（#ED4245）。 */
 private val UnreadRed = Color(0xFFED4245)
 
@@ -1973,7 +1991,7 @@ private fun TimelinePane(
             .onFailure {
                 messageSearchResults = emptyList()
                 // 把原因留下來給畫面顯示（截斷，避免整包 JSON 撐爆對話框）
-                messageSearchError = (it.message ?: it.javaClass.simpleName).take(160).replace('\n', ' ')
+                messageSearchError = searchFailureHint(it.message ?: it.javaClass.simpleName)
             }
         messageSearchLoading = false
     }
