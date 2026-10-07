@@ -16,6 +16,8 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+          # 同上：匿名查版號目錄會被共用網段的配額拖垮（release #124 的教訓）
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4

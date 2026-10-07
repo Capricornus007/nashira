@@ -1803,7 +1803,13 @@ private fun TimelinePane(
     // reverseLayout 下 index 0 就是最新訊息（畫在最底部）。新訊息到達時只在
     // 「使用者本來就貼著底部」才跟隨——深讀歷史時被拽走是反 UX（Telegram
     // 也只在貼底時跟隨）；回底部交給「跳到最新」按鈕。
-    val awayFromLive by remember { derivedStateOf { listState.firstVisibleItemIndex > LiveEdgeItemThreshold } }
+    // 「跳到最新」鈕的條件跟上面那個「新訊息要不要跟著捲」是兩回事，門檻要分開：
+    // 跟著捲可以寬（差幾條还算貼底），鈕必須**偏離底部一點點就出現**——
+    // 用戶 2026-10-07 #120 對照 64Gram desktop：往上翻卻看不到回頭鈕。
+    // reverseLayout 下 index 0 就是最新那條，所以 index>0 或在那條內部已經捲過頭，都算離開底部。
+    val awayFromLive by remember {
+        derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0 }
+    }
     LaunchedEffect(messages?.firstOrNull()?.eventId) {
         // 這條與上面那條都以 messages 為鍵，跳轉時**兩條會同時重跑**，而 Compose 按
         // 宣告順序啟動 → 上面剛捲到目標，這裡又 scrollToItem(0) 把人拽回底部。
@@ -4064,11 +4070,19 @@ private fun MessageRow(
  * 所以先把 `<pre>…</pre>` 從 HTML 裡挖出來當獨立區塊，其餘照常走行內解析
  * （切段見 [splitHtmlCodeBlocks]）。
  */
-@Composable
+/**
+ * 純函數，**不是 @Composable**——這樣呼叫端才可以用 `remember` 把它記住。
+ *
+ * 之前它是 @Composable（只因為預設值寫了 MaterialTheme），於是每則訊息的
+ * 「切段＋HTML 解析＋pangu＋連結化」在每次重組時重跑一遍。滾動時 LazyList
+ * 不斷重組看得見的列，這一趟字串掃描就是「翻頁不順」的來源之一
+ *（用戶 2026-10-07：「聊天室列表跟訊息時間線列表的翻頁就有點不順暢」「電報的很順暢」）。
+ */
 fun htmlToRichText(
     html: String,
-    baseStyle: TextStyle = MaterialTheme.typography.bodyLarge,
-    linkColor: Color = MaterialTheme.colorScheme.primary,
+    baseStyle: TextStyle,
+    linkColor: Color,
+    codeBackground: Color,
 ): FormattedRichText {
     val emoticons = ArrayList<InlineEmoticon>()
     // 切段放純函數做（local 函數不能調 @Composable），這裡只把文字段交給行內解析器
@@ -4081,7 +4095,7 @@ fun htmlToRichText(
             val text = chunk.trim('\n')
             if (text.isBlank()) null
             else {
-                val parsed = htmlToAnnotatedString(text, baseStyle, linkColor)
+                val parsed = htmlToAnnotatedString(text, baseStyle, linkColor, codeBackground)
                 emoticons += parsed.second
                 RichSegment.Text(parsed.first)
             }
@@ -4104,11 +4118,11 @@ fun htmlToRichText(
  * 引用／清單／標題等區塊標籤。<pre> 不在這裡處理——它要獨立成塊，
  * [splitHtmlCodeBlocks] 已經先把它切走了。
  */
-@Composable
 private fun htmlToAnnotatedString(
     html: String,
-    baseStyle: TextStyle = MaterialTheme.typography.bodyLarge,
-    linkColor: Color = MaterialTheme.colorScheme.primary,
+    baseStyle: TextStyle,
+    linkColor: Color,
+    codeBackground: Color,
 ): Pair<AnnotatedString, List<InlineEmoticon>> {
     val emoticons = mutableListOf<InlineEmoticon>()
     val annotated = buildAnnotatedString {
@@ -4289,7 +4303,7 @@ private fun htmlToAnnotatedString(
                     // 行內程式碼：等寬字體＋一層底色。整塊的 <pre> 不走這裡（已切段另行渲染）
                     currentStyle = currentStyle.copy(
                         fontFamily = FontFamily.Monospace,
-                        background = MaterialTheme.colorScheme.surfaceContainer,
+                        background = codeBackground,
                     )
                 }
                 tagName == "a" -> {
@@ -4370,10 +4384,18 @@ private fun MessageBodyContent(
             // formatted_body，我們畫出來是白字、點不動；Telegram 兩條都是藍色底線可點。
             // （預覽卡只出現一張不是 bug：`tophub.today` 對非瀏覽器請求回 403/503，
             // 實測 curl 與帶 UA 都拿不到 og，Telegram 那側同樣沒掛卡。）
-            val rich = htmlToRichText(
-                html = formatted ?: linkifyPlainBody(body.text),
-                baseStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-            )
+            // 樣式先算好當 key：TextStyle／Color 都是 @Immutable，顏色不變就不會重算
+            val baseStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface)
+            val linkColor = MaterialTheme.colorScheme.primary
+            val codeBackground = MaterialTheme.colorScheme.surfaceContainer
+            val rich = remember(body.text, body.formattedBody, baseStyle, linkColor, codeBackground) {
+                htmlToRichText(
+                    html = formatted ?: linkifyPlainBody(body.text),
+                    baseStyle = baseStyle,
+                    linkColor = linkColor,
+                    codeBackground = codeBackground,
+                )
+            }
             // P5-2：custom emoji 以 inline content 排進文字行
             val inlineContent = rich.emoticons.associate { emote ->
                 emote.id to InlineTextContent(

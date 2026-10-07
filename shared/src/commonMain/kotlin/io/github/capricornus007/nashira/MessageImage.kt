@@ -238,10 +238,15 @@ private fun MediaSource.mxcHost(): String = when (this) {
     is MediaSource.Encrypted -> file.url.substringAfter("mxc://", "").substringBefore("/", "")
 }
 
+// Trixnity 的 `maxSize` **不給 null**：實測 null 會走到一條回「空檔案」的分支
+//（9.69MiB 的 t2bot.io 影片 → 「拿到 0 位元組但解不了碼」，同一輪 420KB 的圖卻正常）。
+// 用戶 2026-10-07 要的是「不要設定上限」，所以給一個聊天媒體永遠碰不到的數：1GiB。
+internal const val NoMediaLimit = 1L * 1024 * 1024 * 1024
+
 // **下載一律不設大小上限**（用戶 2026-10-07：「請不要設定上限謝謝」）。
 // 這裡曾有過 2MiB／8MiB 兩道閘，實測把橋來的媒體擋死：`mxc://t2bot.io/…` 一條
 // 9.69MiB 的 mp4 直接拋 `DownloadLimitExceededException`，四輪全無效、永遠轉圈
-//（#103「爲什麼有的行有的不行」）。現在全部走 Trixnity 的預設 `maxSize = null`。
+//（#103「爲什麼有的行有的不行」）。現在全部走 Trixnity 的預設 `maxSize = NoMediaLimit`。
 
 private fun MediaSource.cacheKey(): String = when (this) {
     is MediaSource.Plain -> mxcUrl
@@ -295,8 +300,8 @@ internal suspend fun fetchMediaWithError(client: MatrixClient, source: MediaSour
         // （DNS、socket 讀取）一樣不會返回，「檢視／下載」那條路就會把按鈕卡死在那裡。
         val outcome = mediaCallResultWithin(MEDIA_TIMEOUT_MS) {
             val response = when (source) {
-                is MediaSource.Plain -> service.getMedia(source.mxcUrl, maxSize = null)
-                is MediaSource.Encrypted -> service.getEncryptedMedia(source.file, maxSize = null)
+                is MediaSource.Plain -> service.getMedia(source.mxcUrl, maxSize = NoMediaLimit)
+                is MediaSource.Encrypted -> service.getEncryptedMedia(source.file, maxSize = NoMediaLimit)
             }
             response.getOrThrow().toByteArray(this@coroutineScope)
         }
@@ -491,7 +496,7 @@ private suspend fun loadMediaBitmap(
                     is MediaSource.Plain ->
                         if (usedOriginal) {
                             // 影片沒有縮圖端點；縮圖不夠大（或第一輪失敗）就改抓原檔本機降採樣
-                            service.getMedia(source.mxcUrl, maxSize = null)
+                            service.getMedia(source.mxcUrl, maxSize = NoMediaLimit)
                         } else {
                             // ⚠️ 尺寸要跟 Element／SchildiChat **一模一样**（800×600 scale），
                             // 不是按我們的顯示框算。Synapse 是「按尺寸分別快取」縮圖的：
@@ -504,10 +509,10 @@ private suspend fun loadMediaBitmap(
                                 source.mxcUrl,
                                 ThumbnailWidth,
                                 ThumbnailHeight,
-                                maxSize = null,
+                                maxSize = NoMediaLimit,
                             )
                         }
-                    is MediaSource.Encrypted -> service.getEncryptedMedia(source.file, maxSize = null)
+                    is MediaSource.Encrypted -> service.getEncryptedMedia(source.file, maxSize = NoMediaLimit)
                 }
             }
             // 讓例外走到 runCatching 裡，原因才留得下來。

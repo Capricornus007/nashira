@@ -33,6 +33,11 @@ jobs:
         with:
           distribution: jetbrains
           java-version: "21"
+          # ⚠️ 一定要給 token：沒有它，setup-java 是用**匿名**請求去查 JetBrains 的版號目錄，
+          # 匿名配額 60 次/小時、而且是整個 runner 網段共用（實測 release #124 就是這樣紅的：
+          # `API rate limit exceeded for 20.64.182.20`，12 秒就掛，跟程式碼無關）。
+          # 帶 GITHUB_TOKEN 走認證配額（5000 次/小時）就不會再被別人用光。
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Show which runtime will be bundled
         run: |
