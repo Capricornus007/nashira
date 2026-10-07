@@ -129,6 +129,16 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Face
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExitToApp
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MailOutline
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
@@ -848,14 +858,14 @@ private fun ServerRail(
                         )
                     }
                     ContextMenuSurface(expanded = menuOpen, onDismiss = { menuOpen = false }, anchor = menuAnchor) {
-                        ContextMenuItem(strings.spaceHome) { menuOpen = false; onSelectSpace(space) }
-                        ContextMenuItem(strings.actionCopySpaceLink) {
+                        ContextMenuItem(strings.spaceHome, icon = Icons.Filled.Home) { menuOpen = false; onSelectSpace(space) }
+                        ContextMenuItem(strings.actionCopySpaceLink, icon = BarIcons.ContentCopy) {
                             menuOpen = false
                             scope.launch { clipboard.setText(AnnotatedString(spacePermalink(space))) }
                         }
-                        ContextMenuItem(strings.actionInvite) { menuOpen = false; inviteFor = true }
+                        ContextMenuItem(strings.actionInvite, icon = Icons.Filled.Person) { menuOpen = false; inviteFor = true }
                         ContextMenuDivider()
-                        ContextMenuItem(strings.actionLeave, destructive = true) {
+                        ContextMenuItem(strings.actionLeave, icon = Icons.Filled.ExitToApp, destructive = true) {
                             menuOpen = false
                             scope.launch { onLeaveSpace(space) }
                         }
@@ -1497,7 +1507,7 @@ private fun RoomListItem(
             if (!room.isInvite) {
                 // 有未讀時該給的是「標記為已讀」，反過來才是「標記為未讀」
                 if (unread.unread) {
-                    ContextMenuItem(strings.actionMarkRead) {
+                    ContextMenuItem(strings.actionMarkRead, icon = Icons.Filled.Done) {
                         menuOpen = false
                         scope.launch {
                             // markRead 本身就把 read + fully_read 兩個 marker 一起推
@@ -1510,19 +1520,27 @@ private fun RoomListItem(
                         }
                     }
                 } else {
-                    ContextMenuItem(strings.actionMarkUnread) {
+                    ContextMenuItem(strings.actionMarkUnread, icon = Icons.Filled.MailOutline) {
                         menuOpen = false
                         scope.launch { roomRepository.setMarkedUnread(room.roomId, true) }
                     }
                 }
-                ContextMenuItem(if (favourite) "✓ ${strings.actionFavourite}" else strings.actionFavourite) {
+                ContextMenuItem(
+                    strings.actionFavourite,
+                    icon = Icons.Filled.KeyboardArrowUp,
+                    selected = favourite,
+                ) {
                     menuOpen = false
                     scope.launch {
                         roomRepository.setTag(room.roomId, "m.favourite", !favourite)
                         tags = roomRepository.tags(room.roomId)
                     }
                 }
-                ContextMenuItem(if (lowPriority) "✓ ${strings.actionLowPriority}" else strings.actionLowPriority) {
+                ContextMenuItem(
+                    strings.actionLowPriority,
+                    icon = Icons.Filled.KeyboardArrowDown,
+                    selected = lowPriority,
+                ) {
                     menuOpen = false
                     scope.launch {
                         roomRepository.setTag(room.roomId, "m.lowpriority", !lowPriority)
@@ -1530,21 +1548,25 @@ private fun RoomListItem(
                     }
                 }
                 // 靜音就是伺服器端的 room 推播規則，Element 等其他客戶端會看到同一個狀態
-                ContextMenuItem(if (muted) strings.actionUnmute else strings.actionMute) {
+                ContextMenuItem(
+                    if (muted) strings.actionUnmute else strings.actionMute,
+                    icon = Icons.Filled.Notifications,
+                    selected = muted,
+                ) {
                     menuOpen = false
                     scope.launch {
                         roomRepository.setMuted(room.roomId, !muted)
                         muted = roomRepository.isMuted(room.roomId)
                     }
                 }
-                ContextMenuItem(strings.actionCopyRoomLink) {
+                ContextMenuItem(strings.actionCopyRoomLink, icon = BarIcons.ContentCopy) {
                     menuOpen = false
                     scope.launch { clipboard.setText(AnnotatedString(roomRepository.permalink(room.roomId))) }
                 }
-                ContextMenuItem(strings.actionInvite) { menuOpen = false; inviteFor = true }
+                ContextMenuItem(strings.actionInvite, icon = Icons.Filled.Person) { menuOpen = false; inviteFor = true }
             }
             ContextMenuDivider()
-            ContextMenuItem(strings.actionLeave, destructive = true) {
+            ContextMenuItem(strings.actionLeave, icon = Icons.Filled.ExitToApp, destructive = true) {
                 menuOpen = false
                 scope.launch { roomRepository.leave(room.roomId) }
             }
@@ -4086,7 +4108,9 @@ private fun MessageRow(
             if (settled) {
                 // 常用表情一排，後面接「更多反應」開完整選擇器
                 FlowRow(
-                    Modifier.width(320.dp).padding(horizontal = 12.dp, vertical = 6.dp),
+                    // 244dp 而不是 320：這排表情是選單裡最寬的東西，它多寬、整個選單就多寬。
+                    // 用戶 2026-10-07 拿 Telegram 對照點名右側空白，選單要跟著項目收。
+                    Modifier.width(244.dp).padding(horizontal = 12.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
@@ -4106,7 +4130,7 @@ private fun MessageRow(
                         )
                     }
                 }
-                ContextMenuItem(strings.actionAddReaction) {
+                ContextMenuItem(strings.actionAddReaction, icon = Icons.Filled.Face) {
                     menuOpen = false
                     // 從選單進來時沒有指標位置可錨，讓 DropdownMenu 自己決定開哪裡
                     reactAnchor = Offset.Unspecified
@@ -4117,42 +4141,46 @@ private fun MessageRow(
             // 就只能永遠看它半透明掛在那裡（用戶 2026-09-29 點名）
             if (msg.pending) {
                 if (msg.body is MessageBody.Text) {
-                    ContextMenuItem(strings.actionResendPending) { menuOpen = false; onResendPending() }
+                    ContextMenuItem(strings.actionResendPending, icon = Icons.Filled.Refresh) { menuOpen = false; onResendPending() }
                 }
                 ContextMenuDivider()
-                ContextMenuItem(strings.actionDropPending, destructive = true) { menuOpen = false; onDropPending() }
+                ContextMenuItem(strings.actionDropPending, icon = Icons.Filled.Close, destructive = true) { menuOpen = false; onDropPending() }
             }
             if (msg.body is MessageBody.Text) {
-                ContextMenuItem(strings.actionCopyText) { menuOpen = false; onCopyText() }
+                ContextMenuItem(strings.actionCopyText, icon = BarIcons.ContentCopy) { menuOpen = false; onCopyText() }
             }
             if (settled) {
                 if (isOwn && msg.body is MessageBody.Text) {
-                    ContextMenuItem(strings.actionEdit) { menuOpen = false; onEdit() }
+                    ContextMenuItem(strings.actionEdit, icon = Icons.Filled.Edit) { menuOpen = false; onEdit() }
                 }
-                ContextMenuItem(strings.actionCopyLink) { menuOpen = false; onCopyLink() }
-                ContextMenuItem(if (msg.pinned) strings.actionUnpin else strings.actionPin) {
+                ContextMenuItem(strings.actionCopyLink, icon = BarIcons.ContentCopy) { menuOpen = false; onCopyLink() }
+                ContextMenuItem(
+                    if (msg.pinned) strings.actionUnpin else strings.actionPin,
+                    icon = Icons.Filled.Star,
+                    selected = msg.pinned,
+                ) {
                     menuOpen = false
                     onTogglePin()
                 }
                 // 橋接訊息才有 external_url（例如 Telegram 橋會指回原訊息）
                 msg.externalUrl?.let { url ->
-                    ContextMenuItem(strings.actionSourceUrl) { menuOpen = false; openLink(url) }
+                    ContextMenuItem(strings.actionSourceUrl, icon = Icons.Filled.Info) { menuOpen = false; openLink(url) }
                 }
-                ContextMenuItem(strings.actionViewSource) { menuOpen = false; onViewSource() }
-                ContextMenuItem(strings.actionForward) { menuOpen = false; onForward() }
-                ContextMenuItem(strings.actionSelectMessages) { menuOpen = false; onEnterSelection() }
+                ContextMenuItem(strings.actionViewSource, icon = BarIcons.Code) { menuOpen = false; onViewSource() }
+                ContextMenuItem(strings.actionForward, icon = Icons.Filled.Share) { menuOpen = false; onForward() }
+                ContextMenuItem(strings.actionSelectMessages, icon = Icons.AutoMirrored.Filled.List) { menuOpen = false; onEnterSelection() }
                 (msg.body as? MessageBody.Image)?.let { img ->
-                    ContextMenuItem(strings.actionDownload) { menuOpen = false; onDownloadImage(img) }
+                    ContextMenuItem(strings.actionDownload, icon = BarIcons.Download) { menuOpen = false; onDownloadImage(img) }
                     // 貼圖沒有「隱藏」——它本來就是內容本體，不是敏感縮圖
-                    if (!img.isSticker) ContextMenuItem(strings.actionHideImage) { menuOpen = false; onHideImage(img) }
+                    if (!img.isSticker) ContextMenuItem(strings.actionHideImage, icon = Icons.Filled.Lock) { menuOpen = false; onHideImage(img) }
                 }
                 if (isOwn) {
                     ContextMenuDivider()
-                    ContextMenuItem(strings.actionDelete, destructive = true) { menuOpen = false; onDelete() }
+                    ContextMenuItem(strings.actionDelete, icon = Icons.Filled.Delete, destructive = true) { menuOpen = false; onDelete() }
                 } else {
                     // P4-1：屏蔽用戶（Element 對照）——不在自己的訊息上顯示
                     ContextMenuDivider()
-                    ContextMenuItem(strings.actionIgnoreUser, destructive = true) {
+                    ContextMenuItem(strings.actionIgnoreUser, icon = Icons.Filled.Clear, destructive = true) {
                         menuOpen = false
                         onIgnoreUser()
                     }

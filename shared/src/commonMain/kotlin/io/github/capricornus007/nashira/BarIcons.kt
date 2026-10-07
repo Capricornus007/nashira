@@ -145,6 +145,20 @@ object BarIcons {
             }
         }.build()
     }
+    /**
+     * 下載（圖片訊息選單用）。material-icons-core 沒有 Download／FileDownload，
+     * 照本檔模式手繪標準 Material `file_download` 輪廓（一條底線＋一支插進去的箭頭）。
+     */
+    val Download: ImageVector by lazy {
+        ImageVector.Builder(name = "Download", defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f).apply {
+            path(fill = SolidColor(Color.Black)) {
+                moveTo(5f, 20f); lineTo(19f, 20f); lineTo(19f, 18f); lineTo(5f, 18f); close()
+                moveTo(19f, 9f); lineTo(15f, 9f); lineTo(15f, 3f); lineTo(9f, 3f)
+                lineTo(9f, 9f); lineTo(5f, 9f); lineTo(12f, 16f); lineTo(19f, 9f); close()
+            }
+        }.build()
+    }
+
     /** 「原始碼」那列用的 `</>`（原本是「人頭」＝帳號，用戶 2026-09-29 點名不對）。 */
     val Code: ImageVector by lazy {
         ImageVector.Builder(

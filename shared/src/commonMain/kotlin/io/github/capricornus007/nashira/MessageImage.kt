@@ -65,6 +65,8 @@ fun MessageImage(
     val key = remember(source) { source.cacheKey() }
     var bitmap by remember(key) { mutableStateOf(MediaBitmapCache.get(key)) }
     var failed by remember(key) { mutableStateOf(false) }
+    /** 失敗的**原因**。只寫「重試」的話，他下次截圖我還是分不清是逾時、404 還是解不了碼。 */
+    var failReason by remember(key) { mutableStateOf<String?>(null) }
     // 失敗要能重試：原本只能顯示檔名，使用者除了往上下翻讓它重新進畫面以外無路可走。
     // 靠這個計數當 LaunchedEffect 的鍵，點一下就重跑一輪。
     var reloadTick by remember(key) { mutableStateOf(0) }
@@ -79,6 +81,8 @@ fun MessageImage(
     val boxPx = remember(density, maxWidth) { with(density) { maxWidth.toPx() }.toInt().coerceAtLeast(1) }
     LaunchedEffect(client, key, boxPx, reloadTick) {
         if (bitmap != null) return@LaunchedEffect
+        // 原因先在背景執行緒累積、回到主緒才寫進狀態（Compose 狀態不在別的緒寫）
+        var reason: String? = null
         // 抓取與解碼**挪出主執行緒**：Skia 沒有解碼期降採樣，一張 2560 的原圖是「先整張解開、再縮」，
         // 而 LaunchedEffect 跑在桌面端的 UI 執行緒上——來回翻時間線時，每張新進畫面的圖都在主緒
         // 解 6–8 MB 的 JPEG（還疊上換成 Mitchell 的高品質縮放），就會黏
@@ -86,28 +90,26 @@ fun MessageImage(
         //
         // 寫快取與狀態留回主緒：MediaBitmapCache 是普通 LinkedHashMap，不是執行緒安全的。
         val decoded = withContext(kotlinx.coroutines.Dispatchers.Default) {
-            var best: ImageBitmap? = null
-            // 整個載入一個**總預算**，不是每輪各給一個逾時：
-            // MediaFetchAttempts 是 4、退避 1.2s×(1+2+3)，若每輪 20 秒就是 80 秒＋7.2 秒
-            // 才認輸——用戶 2026-10-07 截圖 #30 的評語是「根本沒見要加載甚至重試的樣子」。
+            var best: ImageBitmap? = null            // 整個載入一個**總預算**，不是每輪各給一個逾時：MediaFetchAttempts 是 4、
+            // 退避 1.2s×(1+2+3)，若每輪 20 秒就是 87 秒才認輸——用戶 2026-10-07 的評語是
+            // 「根本沒見要加載甚至重試的樣子」。10 秒是「我們這側該放棄了」的長度。
             val deadlineMs = System.currentTimeMillis() + MediaTotalBudgetMs
             // 啟動初期伺服器版本還沒讀進來，請求會走舊版媒體端點被 404，所以失敗要重試幾次
             for (attempt in 0 until MediaFetchAttempts) {
                 if (attempt > 0) delay(MediaRetryDelayMillis * attempt)
                 val leftMs = deadlineMs - System.currentTimeMillis()
-                if (leftMs <= 0L) break
+                if (leftMs <= 0L) { reason = "累計超過 ${MediaTotalBudgetMs / 1000} 秒"; break }
                 val small = best?.let { it.width < boxPx } == true
-                // 整段包逾時：Trixnity 的 getMedia／getThumbnail／toByteArray 都沒有時間上限，
-                // 來源伺服器不回時這個協程就永久掛著——用戶 2026-10-07 截圖 #23 那張
-                // 「以前載得出來、現在轉沒完了」的圖片（mxc 來自 nichi.co）就是這樣。
-                // 順帶把 toByteArray 的例外接住：原本只包了取 media 那段，它一拋就整輪報銷。
+                // ⚠️ 逾時一律走 mediaCallResultWithin（獨立作用域），**不要**改回
+                // `withTimeoutOrNull { 請求 }`：後者要等裡面的協程真的收到取消才返回，
+                // 卡在 DNS／socket 這種不可中斷的呼叫時形同虛設——實測「給了 18 秒預算
+                // 照樣永久轉圈」（用戶 2026-10-07 截圖 #43/#45）。
                 //
-                // ⚠️ 上一版這裡直接寫 `withTimeoutOrNull(leftMs) { ... }`，實測**仍然永久轉圈**
-                //（用戶 2026-10-07 截圖 #43/#45）。原因是 withTimeout 要等裡面的協程**真的收到
-                // 取消**才返回：卡在 DNS 查詢／socket 讀取這種不可中斷的阻塞呼叫時，逾時形同虛設。
-                // 所以改成丟到獨立作用域，只 await 它、等不到就自己走——那個協程留在背景死。
-                val bytes = mediaCallWithin(leftMs) {
-                    val media = client.di.get<MediaService>().let { service ->
+                // 這一輪同時把**真實原因**留下來：上一輪我把「圖拿不到」歸因成「對方伺服器
+                // 的 nginx 壞了」，用戶回兩張 ping 截圖打臉（兩個網域都通、70ms）。
+                // 所以現在原因寫進 /tmp/nashira-media.log（我自己讀得到）＋掛在失敗占位上。
+                val outcome = mediaCallResultWithin(leftMs) {
+                    val fetched = client.di.get<MediaService>().let { service ->
                         when (source) {
                             is MediaSource.Plain ->
                                 if (isVideo || attempt > 0 || small) {
@@ -124,19 +126,36 @@ fun MessageImage(
                                 }
                             is MediaSource.Encrypted -> service.getEncryptedMedia(source.file, maxSize = OriginalMaxMediaBytes)
                         }
-                    }.getOrNull() ?: return@mediaCallWithin null
-                    runCatching { media.toByteArray(this@withContext) }.getOrNull()
-                } ?: continue
-                val frame = if (isVideo) {
-                    decodeVideoFrame(bytes, maxDimension = boxPx * 2)
-                } else {
-                    decodeImageBitmap(bytes, maxDimension = boxPx * 2)
+                    }
+                    // 讓例外走到 mediaCallResultWithin 的 runCatching 裡，原因才留得下來
+                    fetched.getOrThrow().toByteArray(this@withContext)
                 }
-                if (frame != null) {
-                    best = frame
-                    // 拿到夠寬的一張才算完；否則繼續下一輪去撈原檔
-                    if (isVideo || frame.width >= boxPx) break
+                val bytes = when {
+                    outcome == null -> {
+                        reason = "來源伺服器 $((leftMs / 1000).coerceAtLeast(0)) 秒內沒有回應"
+                        mediaProbe("$reason（第 ${attempt + 1} 次）$key")
+                        continue
+                    }
+                    outcome.isFailure -> {
+                        val t = outcome.exceptionOrNull()
+                        reason = "${t?.javaClass?.simpleName} ${t?.message ?: ""}".trim()
+                        mediaProbe("第 ${attempt + 1} 次：$reason $key")
+                        continue
+                    }
+                    else -> outcome.getOrNull()
                 }
+                val frame = if (bytes != null) {
+                    if (isVideo) decodeVideoFrame(bytes, maxDimension = boxPx * 2)
+                    else decodeImageBitmap(bytes, maxDimension = boxPx * 2)
+                } else null
+                if (frame == null) {
+                    reason = "拿到 ${bytes?.size ?: 0} 位元組但解不了碼"
+                    mediaProbe("第 ${attempt + 1} 次：$reason $key")
+                    continue
+                }
+                best = frame
+                // 拿到夠寬的一張才算完；否則繼續下一輪去撈原檔
+                if (isVideo || frame.width >= boxPx) break
             }
             best
         }
@@ -145,6 +164,8 @@ fun MessageImage(
             bitmap = decoded
         } else if (bitmap == null) {
             failed = true
+            failReason = reason
+            mediaProbe("最終失敗：${reason ?: "原因不明"} $key")
         }
     }
 
@@ -178,16 +199,21 @@ fun MessageImage(
             //（用戶 2026-09-29 對照 Telegram：「tg 無論點開之前還是點開之後都沒那麼糊」）。
             filterQuality = FilterQuality.High,
         )
-        // 載入失敗就退回檔名，至少看得出這裡本來有東西；點一下重跑一輪
-        failed -> Text(
-            "${caption.ifBlank { "🖼" }} · ${strings.retry}",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.clickable {
-                failed = false
-                reloadTick++
-            },
-        )
+        // 載入失敗就退回檔名，至少看得出這裡本來有東西；點一下重跑一輪。
+        // 懸停給**原因**（也寫進 /tmp/nashira-media.log）：只知道「失敗」決定不了下一步
+        // 是該重試、該換伺服器、還是這張圖根本解不了。
+        failed -> HoverTooltip(text = failReason) {
+            Text(
+                "${caption.ifBlank { "🖼" }} · ${strings.retry}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.clickable {
+                    failed = false
+                    failReason = null
+                    reloadTick++
+                },
+            )
+        }
         // 貼圖的佔位不畫灰底：多數貼圖有透明背景，灰塊會在載入前一閃，看起來
         // 像是「貼圖壞了」。圖片訊息保留灰底（裁切圓角需要一個可見的版位）。
         else -> if (isSticker) {
@@ -275,21 +301,22 @@ internal suspend fun fetchMediaBytes(client: MatrixClient, source: MediaSource):
 internal suspend fun fetchMediaWithError(client: MatrixClient, source: MediaSource): Pair<ByteArray?, Throwable?> =
     kotlinx.coroutines.coroutineScope {
         val service = client.di.get<MediaService>()
-        val fetched = runCatching {
-            kotlinx.coroutines.withTimeoutOrNull(MEDIA_TIMEOUT_MS) {
-                when (source) {
-                    is MediaSource.Plain -> service.getMedia(source.mxcUrl, maxSize = 32L * 1024 * 1024)
-                    is MediaSource.Encrypted -> service.getEncryptedMedia(source.file, maxSize = 32L * 1024 * 1024)
-                }
-            } ?: throw java.net.SocketTimeoutException("來源伺服器 $((MEDIA_TIMEOUT_MS / 1000)) 秒內沒有回應")
+        // 走 mediaCallResultWithin 而不是 withTimeoutOrNull：後者遇到不響應取消的阻塞呼叫
+        // （DNS、socket 讀取）一樣不會返回，「檢視／下載」那條路就會把按鈕卡死在那裡。
+        val outcome = mediaCallResultWithin(MEDIA_TIMEOUT_MS) {
+            val response = when (source) {
+                is MediaSource.Plain -> service.getMedia(source.mxcUrl, maxSize = 32L * 1024 * 1024)
+                is MediaSource.Encrypted -> service.getEncryptedMedia(source.file, maxSize = 32L * 1024 * 1024)
+            }
+            response.getOrThrow().toByteArray(this@coroutineScope)
         }
-        val inner = fetched.getOrNull() ?: return@coroutineScope null to fetched.exceptionOrNull()
-        val media = inner.getOrNull() ?: return@coroutineScope null to inner.exceptionOrNull()
-        val bytes = runCatching {
-            kotlinx.coroutines.withTimeoutOrNull(MEDIA_TIMEOUT_MS) { media.toByteArray(this@coroutineScope) }
-        }.getOrNull() ?: return@coroutineScope null to
-            java.net.SocketTimeoutException("下載中斷或太慢（>$MEDIA_TIMEOUT_MS ms）")
-        bytes to null
+        when {
+            outcome == null -> null to java.net.SocketTimeoutException(
+                "來源伺服器 $((MEDIA_TIMEOUT_MS / 1000)) 秒內沒有回應",
+            )
+            outcome.isFailure -> null to outcome.exceptionOrNull()
+            else -> outcome.getOrNull() to null
+        }
     }
 
 /**
@@ -299,7 +326,7 @@ internal suspend fun fetchMediaWithError(client: MatrixClient, source: MediaSour
  * 用毫秒 Long 不用 kotlin.time.Duration：Duration 的比較運算子與 `seconds()`
  * 在這套 commonMain 下要額外 import，實測一口氣踩了三個編譯錯誤。
  */
-private const val MediaTotalBudgetMs = 18_000L
+private const val MediaTotalBudgetMs = 10_000L
 
 /**
  * 抓媒體用的獨立作用域。
@@ -313,11 +340,7 @@ private val MediaIoScope = kotlinx.coroutines.CoroutineScope(
     kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default,
 )
 
-/** 在 `timeoutMs` 內要一個結果；拿不到就回 null，**一定**會返回。 */
-private suspend fun <T> mediaCallWithin(timeoutMs: Long, block: suspend () -> T): T? =
-    mediaCallResultWithin(timeoutMs, block)?.getOrNull()
-
-/** 同上，但把失敗原因一起帶出來（「檢視／下載」那條路要寫出人話）。 */
+/** 同上，但把失敗原因一起帶出來（「檢視／下載」那條路與失敗占位的懸停都要寫出人話）。 */
 private suspend fun <T> mediaCallResultWithin(timeoutMs: Long, block: suspend () -> T): Result<T>? {
     val task = MediaIoScope.async { runCatching { block() } }
     return try {
@@ -333,3 +356,17 @@ private suspend fun <T> mediaCallResultWithin(timeoutMs: Long, block: suspend ()
  * 所以用得上獨立的逾時，而不是上面那個含退避的總預算。
  */
 private const val MEDIA_TIMEOUT_MS = 15_000L
+
+/**
+ * 媒體載入的診斷紀錄，寫在 `/tmp/nashira-media.log`。
+ *
+ * 為什麼要留檔而不是只印 stdout：用戶 2026-10-07 用兩張 ping 截圖打臉了我
+ * 「圖拿不到是對方伺服器的 nginx 壞了」的說法（兩個網域都通、70ms）——
+ * 我不能再靠猜。每一次失敗的真實例外都寫下來，我自己讀得到，不用麻煩他截圖。
+ */
+private fun mediaProbe(line: String) {
+    runCatching {
+        java.io.File("/tmp/nashira-media.log")
+            .appendText("${System.currentTimeMillis()} $line\n")
+    }
+}

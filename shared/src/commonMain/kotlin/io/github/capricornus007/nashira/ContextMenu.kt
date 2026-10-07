@@ -7,22 +7,26 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -90,16 +94,27 @@ fun Modifier.contextMenuGestures(
  * 上一輪試著用空的 `trailingIcon = { }` 收右側，實測收不掉——它還是在那裡占了寬度。
  * 高度 36dp 對齊 Telegram 桌面；底色只在懸停時出現，不靠水波紋（這臺沒有合成器，
  * Popup 窗口裡的 ripple 本來就畫不好）。
+ *
+ * `icon` 是用戶 2026-10-07 拿 Telegram 桌面的選單對照點名的（「你自己看看人家的右鍵菜單
+ * 再看看你的」）：他那邊每一列左緣都有圖示、危險項連圖示一起變紅。
  */
 @Composable
 fun ContextMenuItem(
     label: String,
+    icon: ImageVector? = null,
     destructive: Boolean = false,
+    /** 這個動作「已經生效」（已置頂、已靜音）：用強調色標出來，不再靠標籤前面塞一個 ✓。 */
+    selected: Boolean = false,
     onClick: () -> Unit,
 ) {
     val source = remember { MutableInteractionSource() }
     val hovered by source.collectIsHoveredAsState()
-    Box(
+    val tint = when {
+        destructive -> MaterialTheme.colorScheme.error
+        selected -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Row(
         Modifier
             .fillMaxWidth()
             .height(MenuItemHeight)
@@ -107,13 +122,21 @@ fun ContextMenuItem(
             .background(if (hovered) MaterialTheme.colorScheme.surfaceContainerHighest else Color.Transparent)
             .hoverable(source)
             .clickable(interactionSource = source, indication = null, onClick = onClick)
-            .padding(horizontal = 14.dp),
-        contentAlignment = Alignment.CenterStart,
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (icon != null) {
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(12.dp))
+        }
         Text(
             label,
             style = MaterialTheme.typography.bodyMedium,
-            color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+            color = when {
+                destructive -> MaterialTheme.colorScheme.error
+                selected -> MaterialTheme.colorScheme.primary
+                else -> MaterialTheme.colorScheme.onSurface
+            },
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -153,8 +176,9 @@ fun ContextMenuSurface(
     ) {
         Surface(
             // 寬度**不釘死**：釘 200dp 時「邀請」這種兩字項右邊就是一大片空白
-            //（用戶 2026-10-07 截圖 #44）。改成跟著最長那項收，兩側留下限與上限。
-            modifier = Modifier.widthIn(min = 148.dp, max = 320.dp),
+            //（用戶 2026-10-07 截圖 #44）。上限留 340 給長標籤，下限壓到 116——
+            // 上一版下限 148dp 比最長那項還寬，所以他看著「收了但右邊還是空的」。
+            modifier = Modifier.widthIn(min = 116.dp, max = 340.dp),
             shape = MaterialTheme.shapes.extraSmall,
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 3.dp,
