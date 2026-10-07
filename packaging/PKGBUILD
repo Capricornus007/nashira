@@ -23,6 +23,22 @@ package() {
     install -dm755 "${pkgdir}/opt/nashira"
     cp -a "${dist}/." "${pkgdir}/opt/nashira/"
 
+    # 體積精簡：丟掉 jar 裡別的作業系統／別的架構的原生檔，再剝 .so 符號表。
+    # 與 AUR 的 nashira-git 跑同一份腳本（$startdir 就是本目錄），兩邊產物一樣小。
+    # 實測 v0.1.62：187MB → 172MB。腳本失敗或沒變小就让打包紅，別靜默出貨。
+    local shrink="${startdir}/shrink-app-image.py" before after
+    if [[ -f "${shrink}" ]]; then
+        before=$(du -sm "${pkgdir}/opt/nashira" | cut -f1)
+        python3 "${shrink}" "${pkgdir}/opt/nashira" \
+            || { echo "::error::體積精簡腳本失敗" >&2; return 1; }
+        after=$(du -sm "${pkgdir}/opt/nashira" | cut -f1)
+        echo "==> 體積精簡：${before}MB → ${after}MB（省 $((before - after))MB）"
+        (( after < before )) || { echo "::error::精簡後沒有變小" >&2; return 1; }
+    else
+        echo "::error::找不到 ${shrink}，拒絕出貨未精簡的包" >&2
+        return 1
+    fi
+
     lib="${pkgdir}/opt/nashira/lib"
     if [[ -f "${lib}/nashira.desktop" ]]; then
         install -Dm644 "${lib}/nashira.desktop" "${pkgdir}/usr/share/applications/nashira.desktop"

@@ -36,6 +36,20 @@ compose.desktop {
         jvmArgs += listOf(
             "--add-opens=java.desktop/sun.awt.X11=ALL-UNNAMED",
             "-Djb.awt.newXimClient.enabled=true",
+            // ── 執行期記憶體 ────────────────────────────────────────────────
+            // jpackage 出廠**一個記憶體參數都沒有**，於是最大堆＝實體記憶體的 1/4
+            //（13GB 機器＝3.3GB），GC 又是 G1，會先把地盤圈起來。
+            // 實測 v0.1.62 開著兩個房間閒置 RSS = 606MB（用戶 2026-10-07 點名「運行佔用也要小」）。
+            // 512MB 軟上限對一個聊天客戶是夠的（媒體快取本身另有 24MB 上限），
+            // 超過時 SoftMaxHeapSize 讓 GC 先努力回收，真需要才長到 768MB 硬頂。
+            "-XX:SoftMaxHeapSize=512m",
+            "-Xmx768m",
+            "-XX:MaxMetaspaceSize=256m",
+            "-XX:ReservedCodeCacheSize=96m",
+            "-Xss512k",
+            // 桌面單視窗客戶用 Serial GC：地盤最小、沒有 G1 的 remembered set 開銷。
+            // （換走它換來的是較長的暫停，但聊天時間線的滾動不是靠 GC 暫停撐起來的。）
+            "-XX:+UseSerialGC",
         )
         nativeDistributions {
             targetFormats(TargetFormat.Deb, TargetFormat.Rpm)
