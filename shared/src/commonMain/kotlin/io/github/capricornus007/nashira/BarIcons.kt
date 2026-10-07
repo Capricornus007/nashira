@@ -159,6 +159,33 @@ object BarIcons {
         }.build()
     }
 
+    /**
+     * 置頂／置底。用戶 2026-10-07 看了第一版直接問「你這圖標確定正常嗎」——
+     * 那版用 `KeyboardArrowUp/Down`，在選單裡就是兩顆孤零零的 `^` `v`，
+     * 讀不出「釘到頂部」的意思。改成自畫的**「靠邊一條槓＋一支箭頭插過去」**，
+     * 這才是各家（Telegram／Discord）置頂置底的共同語彙。
+     */
+    val PinTop: ImageVector by lazy {
+        ImageVector.Builder(name = "PinTop", defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f).apply {
+            path(fill = SolidColor(Color.Black)) {
+                moveTo(5f, 3f); lineTo(19f, 3f); lineTo(19f, 5f); lineTo(5f, 5f); close()
+                moveTo(12f, 6f); lineTo(17f, 12f); lineTo(7f, 12f); close()
+                moveTo(11f, 12f); lineTo(13f, 12f); lineTo(13f, 21f); lineTo(11f, 21f); close()
+            }
+        }.build()
+    }
+
+    /** [PinTop] 的上下鏡像（y' = 24 - y）。 */
+    val PinBottom: ImageVector by lazy {
+        ImageVector.Builder(name = "PinBottom", defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f).apply {
+            path(fill = SolidColor(Color.Black)) {
+                moveTo(5f, 19f); lineTo(19f, 19f); lineTo(19f, 21f); lineTo(5f, 21f); close()
+                moveTo(12f, 18f); lineTo(7f, 12f); lineTo(17f, 12f); close()
+                moveTo(11f, 12f); lineTo(13f, 12f); lineTo(13f, 3f); lineTo(11f, 3f); close()
+            }
+        }.build()
+    }
+
     /** 「原始碼」那列用的 `</>`（原本是「人頭」＝帳號，用戶 2026-09-29 點名不對）。 */
     val Code: ImageVector by lazy {
         ImageVector.Builder(

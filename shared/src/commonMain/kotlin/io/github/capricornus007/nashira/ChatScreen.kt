@@ -121,13 +121,13 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.foundation.Canvas
-import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Edit
@@ -187,7 +187,6 @@ import kotlin.math.roundToInt
 import io.github.capricornus007.nashira.matrix.MatrixSession
 import io.github.capricornus007.nashira.matrix.RoomRepository
 import io.github.capricornus007.nashira.matrix.MediaSource
-import io.github.capricornus007.nashira.matrix.MessageSearchResult
 import io.github.capricornus007.nashira.matrix.RoomSummary
 import de.connect2x.trixnity.core.model.RoomId
 import io.github.capricornus007.nashira.matrix.UnreadState
@@ -859,11 +858,11 @@ private fun ServerRail(
                     }
                     ContextMenuSurface(expanded = menuOpen, onDismiss = { menuOpen = false }, anchor = menuAnchor) {
                         ContextMenuItem(strings.spaceHome, icon = Icons.Filled.Home) { menuOpen = false; onSelectSpace(space) }
-                        ContextMenuItem(strings.actionCopySpaceLink, icon = BarIcons.ContentCopy) {
+                        ContextMenuItem(strings.actionCopySpaceLink, icon = MenuIcons.Link) {
                             menuOpen = false
                             scope.launch { clipboard.setText(AnnotatedString(spacePermalink(space))) }
                         }
-                        ContextMenuItem(strings.actionInvite, icon = Icons.Filled.Person) { menuOpen = false; inviteFor = true }
+                        ContextMenuItem(strings.actionInvite, icon = MenuIcons.PersonAdd) { menuOpen = false; inviteFor = true }
                         ContextMenuDivider()
                         ContextMenuItem(strings.actionLeave, icon = Icons.Filled.ExitToApp, destructive = true) {
                             menuOpen = false
@@ -999,23 +998,6 @@ private fun UnreadBadge(count: Int, muted: Boolean = false, modifier: Modifier =
     }
 }
 
-/**
- * 把 /search 的失敗翻成一句人話。
- *
- * 要翻是因為 Trixnity 的例外字串（`statusCode=500 errorResponse=Unknown(...)`）對使用者
- * 等於沒說，而「500」與「404」的處置完全不同：前者是伺服器自己的搜尋壞了、
- * 後者是它根本不提供這個功能——兩種都不該讓他去查自己的網路
- *（用戶 2026-10-07 看到轉圈就直接問「我網絡問題？」）。
- */
-private fun searchFailureHint(raw: String): String {
-    val oneLine = raw.replace('\n', ' ')
-    return when {
-        "statusCode=500" in oneLine || "Internal server error" in oneLine ->
-            "這臺伺服器自己的搜尋壞了（500），跟你的網路無關"
-        "statusCode=404" in oneLine -> "這臺伺服器不提供訊息搜尋"
-        else -> oneLine.take(160)
-    }
-}
 
 /** Discord 未讀徽章紅（#ED4245）。 */
 private val UnreadRed = Color(0xFFED4245)
@@ -1520,14 +1502,14 @@ private fun RoomListItem(
                         }
                     }
                 } else {
-                    ContextMenuItem(strings.actionMarkUnread, icon = Icons.Filled.MailOutline) {
+                    ContextMenuItem(strings.actionMarkUnread, icon = MenuIcons.MarkUnread) {
                         menuOpen = false
                         scope.launch { roomRepository.setMarkedUnread(room.roomId, true) }
                     }
                 }
                 ContextMenuItem(
                     strings.actionFavourite,
-                    icon = Icons.Filled.KeyboardArrowUp,
+                    icon = BarIcons.PinTop,
                     selected = favourite,
                 ) {
                     menuOpen = false
@@ -1538,7 +1520,7 @@ private fun RoomListItem(
                 }
                 ContextMenuItem(
                     strings.actionLowPriority,
-                    icon = Icons.Filled.KeyboardArrowDown,
+                    icon = BarIcons.PinBottom,
                     selected = lowPriority,
                 ) {
                     menuOpen = false
@@ -1550,7 +1532,7 @@ private fun RoomListItem(
                 // 靜音就是伺服器端的 room 推播規則，Element 等其他客戶端會看到同一個狀態
                 ContextMenuItem(
                     if (muted) strings.actionUnmute else strings.actionMute,
-                    icon = Icons.Filled.Notifications,
+                    icon = if (muted) MenuIcons.Bell else MenuIcons.BellOff,
                     selected = muted,
                 ) {
                     menuOpen = false
@@ -1559,11 +1541,11 @@ private fun RoomListItem(
                         muted = roomRepository.isMuted(room.roomId)
                     }
                 }
-                ContextMenuItem(strings.actionCopyRoomLink, icon = BarIcons.ContentCopy) {
+                ContextMenuItem(strings.actionCopyRoomLink, icon = MenuIcons.Link) {
                     menuOpen = false
                     scope.launch { clipboard.setText(AnnotatedString(roomRepository.permalink(room.roomId))) }
                 }
-                ContextMenuItem(strings.actionInvite, icon = Icons.Filled.Person) { menuOpen = false; inviteFor = true }
+                ContextMenuItem(strings.actionInvite, icon = MenuIcons.PersonAdd) { menuOpen = false; inviteFor = true }
             }
             ContextMenuDivider()
             ContextMenuItem(strings.actionLeave, icon = Icons.Filled.ExitToApp, destructive = true) {
@@ -2052,13 +2034,6 @@ private fun TimelinePane(
     var selectionMode by remember(room.roomId) { mutableStateOf(false) }
     var selectedEventIds by remember(room.roomId) { mutableStateOf<Set<EventId>>(emptySet()) }
     var bulkDeleteConfirm by remember(room.roomId) { mutableStateOf(false) }
-    var messageSearchOpen by remember(room.roomId) { mutableStateOf(false) }
-    var messageSearchQuery by remember(room.roomId) { mutableStateOf("") }
-    var messageSearchResults by remember(room.roomId) { mutableStateOf<List<MessageSearchResult>>(emptyList()) }
-    var messageSearchLoading by remember(room.roomId) { mutableStateOf(false) }
-    // 存「原因」而不是存「有沒有錯」：只留一個布林會把伺服器的實際回應吞掉，
-    // 用戶回報「訊息搜尋失敗」時我們無從判斷是 400、404 還是沒索引（2026-10-07）。
-    var messageSearchError by remember(room.roomId) { mutableStateOf<String?>(null) }
     val selectedMessages = messages.orEmpty().filter { it.eventId in selectedEventIds }
     val selectedOwnMessages = selectedMessages.filter {
         it.sender == roomRepository.client.userId && it.eventId != null
@@ -2068,29 +2043,6 @@ private fun TimelinePane(
     // 只有桌面有底欄那顆麥克風靜音鈕（audioDeviceSettingsSupported），Android 上恆
     // false：手機既沒有開關可擋錄音，也不該提示用戶去點一顆不存在的鈕。
     val micBlockedByMute = audioDeviceSettingsSupported && uiState.audioMicMuted
-
-    // 房內訊息搜尋使用 Matrix `/search`，不會把搜尋詞送成聊天訊息；輸入停止後才查詢，
-    // 避免每打一個字都打一次伺服器。點結果會把時間線重新定位到那則事件附近。
-    LaunchedEffect(messageSearchOpen, messageSearchQuery) {
-        if (!messageSearchOpen) return@LaunchedEffect
-        val query = messageSearchQuery.trim()
-        messageSearchError = null
-        if (query.isEmpty()) {
-            messageSearchResults = emptyList()
-            messageSearchLoading = false
-            return@LaunchedEffect
-        }
-        delay(350)
-        messageSearchLoading = true
-        roomRepository.searchMessages(room.roomId, query)
-            .onSuccess { messageSearchResults = it }
-            .onFailure {
-                messageSearchResults = emptyList()
-                // 把原因留下來給畫面顯示（截斷，避免整包 JSON 撐爆對話框）
-                messageSearchError = searchFailureHint(it.message ?: it.javaClass.simpleName)
-            }
-        messageSearchLoading = false
-    }
 
     val stickerPanelContent: @Composable (Modifier) -> Unit = { panelModifier ->
         StickerPicker(
@@ -2204,12 +2156,6 @@ private fun TimelinePane(
                         }
                     },
                     actions = {
-                        IconButton(onClick = {
-                            messageSearchOpen = true
-                            messageSearchError = null
-                        }) {
-                            Icon(Icons.Filled.Search, contentDescription = strings.searchMessages)
-                        }
                         if (onToggleMembers != null) {
                             IconButton(onClick = onToggleMembers) {
                                 Icon(Icons.Filled.Person, contentDescription = strings.members, tint = if (membersOpen) MaterialTheme.colorScheme.primary else LocalContentColor.current)
@@ -3329,116 +3275,6 @@ private fun TimelinePane(
     }
 
     // 房內訊息搜尋結果：結果來自伺服器，點一下會回到時間線並定位到原事件。
-    if (messageSearchOpen) {
-        AlertDialog(
-            onDismissRequest = {
-                messageSearchOpen = false
-                messageSearchQuery = ""
-            },
-            confirmButton = {},
-            dismissButton = {
-                TextButton(onClick = {
-                    messageSearchOpen = false
-                    messageSearchQuery = ""
-                }) { Text(strings.cancel) }
-            },
-            title = { Text(strings.searchMessages) },
-            text = {
-                Column {
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        shape = RoundedCornerShape(12.dp),
-                    ) {
-                        BasicTextField(
-                            value = messageSearchQuery,
-                            onValueChange = { messageSearchQuery = it },
-                            singleLine = true,
-                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
-                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
-                            decorationBox = { inner ->
-                                if (messageSearchQuery.isEmpty()) {
-                                    Text(
-                                        strings.searchMessagesHint,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                                inner()
-                            },
-                        )
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    when {
-                        messageSearchLoading -> Row(
-                            Modifier.fillMaxWidth().padding(vertical = 20.dp),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                        }
-                        messageSearchError != null -> Text(
-                            // 主句保持母語，後面接伺服器給的原話：看得懂是失敗、也拿得到原因
-                            "${strings.messageSearchFailed}：${messageSearchError.orEmpty()}",
-                            color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.padding(vertical = 12.dp),
-                        )
-                        messageSearchQuery.isNotBlank() && messageSearchResults.isEmpty() -> Text(
-                            strings.noMessageSearchResults,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(vertical = 12.dp),
-                        )
-                        else -> Column(
-                            Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState()),
-                        ) {
-                            messageSearchResults.forEach { result ->
-                                Row(
-                                    Modifier.fillMaxWidth()
-                                        .clickable {
-                                            messageSearchOpen = false
-                                            messageSearchQuery = ""
-                                            timelineScope.launch {
-                                                runCatching { timeline.jumpTo(result.eventId) }
-                                                    .onFailure { sendError = strings.messageSearchFailed }
-                                            }
-                                        }
-                                        .padding(horizontal = 4.dp, vertical = 9.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Column(Modifier.weight(1f)) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(
-                                                result.senderName,
-                                                style = MaterialTheme.typography.labelMedium,
-                                                color = MaterialTheme.colorScheme.primary,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier.weight(1f, fill = false),
-                                            )
-                                            Text(
-                                                formatClock(result.timestamp),
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.padding(start = 8.dp),
-                                            )
-                                        }
-                                        Text(
-                                            (result.body as? MessageBody.Text)?.text.orEmpty(),
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                            maxLines = 2,
-                                            overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier.padding(top = 2.dp),
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-        )
-    }
 
     // 手機端的附件面板：從下往上（對照 SchildiChat 的做法）
     if (compact && attachMenu) {
@@ -4108,9 +3944,10 @@ private fun MessageRow(
             if (settled) {
                 // 常用表情一排，後面接「更多反應」開完整選擇器
                 FlowRow(
-                    // 244dp 而不是 320：這排表情是選單裡最寬的東西，它多寬、整個選單就多寬。
-                    // 用戶 2026-10-07 拿 Telegram 對照點名右側空白，選單要跟著項目收。
-                    Modifier.width(244.dp).padding(horizontal = 12.dp, vertical = 6.dp),
+                    // 這排表情是選單裡最寬的東西：它多寬、整個選單就多寬（用戶 2026-10-07
+                    // 截圖 #56 點名的「右鍵」右側那一大片空白，元凶就是原本釘 320dp）。
+                    // 168dp 剛好一排五顆、兩排放完 10 顆，選單整體收到 ~190dp。
+                    Modifier.width(168.dp).padding(horizontal = 10.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
@@ -4126,11 +3963,11 @@ private fun MessageRow(
                                     else Color.Transparent,
                                 )
                                 .clickable { menuOpen = false; onToggleReaction(key, existing) }
-                                .padding(horizontal = 6.dp, vertical = 4.dp),
+                                .padding(horizontal = 3.dp, vertical = 3.dp),
                         )
                     }
                 }
-                ContextMenuItem(strings.actionAddReaction, icon = Icons.Filled.Face) {
+                ContextMenuItem(strings.actionAddReaction, icon = MenuIcons.AddReaction) {
                     menuOpen = false
                     // 從選單進來時沒有指標位置可錨，讓 DropdownMenu 自己決定開哪裡
                     reactAnchor = Offset.Unspecified
@@ -4153,10 +3990,10 @@ private fun MessageRow(
                 if (isOwn && msg.body is MessageBody.Text) {
                     ContextMenuItem(strings.actionEdit, icon = Icons.Filled.Edit) { menuOpen = false; onEdit() }
                 }
-                ContextMenuItem(strings.actionCopyLink, icon = BarIcons.ContentCopy) { menuOpen = false; onCopyLink() }
+                ContextMenuItem(strings.actionCopyLink, icon = MenuIcons.Link) { menuOpen = false; onCopyLink() }
                 ContextMenuItem(
                     if (msg.pinned) strings.actionUnpin else strings.actionPin,
-                    icon = Icons.Filled.Star,
+                    icon = MenuIcons.PushPin,
                     selected = msg.pinned,
                 ) {
                     menuOpen = false
@@ -4168,7 +4005,7 @@ private fun MessageRow(
                 }
                 ContextMenuItem(strings.actionViewSource, icon = BarIcons.Code) { menuOpen = false; onViewSource() }
                 ContextMenuItem(strings.actionForward, icon = Icons.Filled.Share) { menuOpen = false; onForward() }
-                ContextMenuItem(strings.actionSelectMessages, icon = Icons.AutoMirrored.Filled.List) { menuOpen = false; onEnterSelection() }
+                ContextMenuItem(strings.actionSelectMessages, icon = Icons.Filled.CheckCircle) { menuOpen = false; onEnterSelection() }
                 (msg.body as? MessageBody.Image)?.let { img ->
                     ContextMenuItem(strings.actionDownload, icon = BarIcons.Download) { menuOpen = false; onDownloadImage(img) }
                     // 貼圖沒有「隱藏」——它本來就是內容本體，不是敏感縮圖
@@ -4180,7 +4017,7 @@ private fun MessageRow(
                 } else {
                     // P4-1：屏蔽用戶（Element 對照）——不在自己的訊息上顯示
                     ContextMenuDivider()
-                    ContextMenuItem(strings.actionIgnoreUser, icon = Icons.Filled.Clear, destructive = true) {
+                    ContextMenuItem(strings.actionIgnoreUser, icon = MenuIcons.Block, destructive = true) {
                         menuOpen = false
                         onIgnoreUser()
                     }

@@ -185,7 +185,9 @@ private fun ComposerMenuPopup(
                         item.onClick()
                         onDismiss()
                     },
-                    topPadding = submenuTop(items, submenu.submenu),
+                    // 不再往下沉到「文字格式」那一條：沉下去會在面板右上角留一整塊
+                    // 空白，用戶 2026-10-07 點名「多餘的右上方空格」。子欄與父欄同頂，
+                    // 短的那一欄多出來的是**下方**，那在選單裡是正常的。
                 )
             }
         }
@@ -197,24 +199,14 @@ private fun rowHeight(row: ComposerMenuItem): Dp =
 
 private fun columnHeight(rows: List<ComposerMenuItem>): Dp = rows.fold(0.dp) { acc, row -> acc + rowHeight(row) }
 
-/** 子選單欄往下沉到父列那一條（跟 Telegram 一樣貼著點的那項），長出底部就往上收。 */
-private fun submenuTop(rows: List<ComposerMenuItem>, submenu: List<ComposerMenuItem>): Dp {
-    val index = rows.indexOfFirst { it.submenu.isNotEmpty() && it.submenu === submenu }
-    if (index <= 0) return 0.dp
-    val above = rows.subList(0, index).fold(0.dp) { acc, row -> acc + rowHeight(row) }
-    val maxTop = (columnHeight(rows) - columnHeight(submenu)).coerceAtLeast(0.dp)
-    return above.coerceAtMost(maxTop)
-}
-
 @Composable
 private fun MenuColumn(
     rows: List<ComposerMenuItem>,
     openSubmenuLabel: String?,
     onSubmenu: (String) -> Unit,
     onPick: (ComposerMenuItem) -> Unit,
-    topPadding: Dp = 0.dp,
 ) {
-    Column(modifier = Modifier.width(MenuColumnWidth).padding(top = topPadding)) {
+    Column(modifier = Modifier.width(MenuColumnWidth)) {
         rows.forEach { row ->
             if (row.isSeparator) {
                 HorizontalDivider(

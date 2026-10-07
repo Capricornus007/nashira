@@ -81,6 +81,10 @@ fun MessageImage(
     val boxPx = remember(density, maxWidth) { with(density) { maxWidth.toPx() }.toInt().coerceAtLeast(1) }
     LaunchedEffect(client, key, boxPx, reloadTick) {
         if (bitmap != null) return@LaunchedEffect
+        // 連「開始」都記：用戶 2026-10-07 反問「爲什麼頭像加載正常圖片就加載不了」，
+        // 而 /tmp/nashira-media.log 完全沒有失敗紀錄——代表這條協程**根本沒走到認輸那步**。
+        // 若是每次重組都重來（key 不安定），這裡就會出現一堆重複「開始」行，一眼可辨。
+        mediaProbe("開始 $key box=$boxPx")
         // 原因先在背景執行緒累積、回到主緒才寫進狀態（Compose 狀態不在別的緒寫）
         var reason: String? = null
         // 抓取與解碼**挪出主執行緒**：Skia 沒有解碼期降採樣，一張 2560 的原圖是「先整張解開、再縮」，
@@ -154,6 +158,7 @@ fun MessageImage(
                     continue
                 }
                 best = frame
+                mediaProbe("成功 $key 第 ${attempt + 1} 次 ${bytes?.size ?: 0}B → ${frame.width}x${frame.height}")
                 // 拿到夠寬的一張才算完；否則繼續下一輪去撈原檔
                 if (isVideo || frame.width >= boxPx) break
             }
