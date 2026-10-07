@@ -70,6 +70,9 @@ import io.github.capricornus007.nashira.theme.audioDeviceSettingsSupported
 import io.github.capricornus007.nashira.AudioDevices
 import io.github.capricornus007.nashira.theme.applyBackgroundSync
 
+/** 介面文字大小的可選檔位（見外觀那節：檔位要夠密，四檔不夠用）。 */
+private val FontPercentSteps = listOf(75, 80, 85, 90, 95, 100, 105, 110, 115, 120, 125, 130, 140, 150, 160)
+
 /** 設定的子頁。用單一 enum 表示，返回鍵逐層退回。 */
 internal enum class SettingsPage { ROOT, ACCOUNT, APPEARANCE, CHAT_LIST, ABOUT }
 
@@ -366,15 +369,16 @@ private fun AppearancePage(onBack: () -> Unit) {
                     )
                 }
             }
-            // 介面文字大小：離散四檔，不做滑桿——倉裡沒有現成滑桿元件，
-            // 而且百分比本身就是不需要翻譯的字串，省掉一輪六語系的機器味。
+            // 介面文字大小：不做滑桿（倉裡沒有現成滑桿元件），但檔位要夠密——
+            // 原本只有 90/100/115/130 四檔，用戶 2026-10-07 說「可用的比例太少了」。
+            // 75–125 每 5% 一档，再 130/140/150/160；百分比本身不需要翻譯，不用進六語系。
             item { shape ->
                 SettingsDropdownItem(
                     shape = shape,
                     title = strings.chatFontSize,
                     current = "${ui.chatTextPercent}%",
                 ) { close ->
-                    listOf(90, 100, 115, 130).forEach { percent ->
+                    FontPercentSteps.forEach { percent ->
                         SettingsMenuOption("$percent%", ui.chatTextPercent == percent) {
                             ui.chatTextPercent = percent; close()
                         }

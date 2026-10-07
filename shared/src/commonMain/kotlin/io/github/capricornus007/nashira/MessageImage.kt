@@ -85,93 +85,87 @@ fun MessageImage(
         // 而 /tmp/nashira-media.log 完全沒有失敗紀錄——代表這條協程**根本沒走到認輸那步**。
         // 若是每次重組都重來（key 不安定），這裡就會出現一堆重複「開始」行，一眼可辨。
         mediaProbe("開始 $key box=$boxPx")
-        // 原因先在背景執行緒累積、回到主緒才寫進狀態（Compose 狀態不在別的緒寫）
         var reason: String? = null
-        // 抓取與解碼**挪出主執行緒**：Skia 沒有解碼期降採樣，一張 2560 的原圖是「先整張解開、再縮」，
-        // 而 LaunchedEffect 跑在桌面端的 UI 執行緒上——來回翻時間線時，每張新進畫面的圖都在主緒
-        // 解 6–8 MB 的 JPEG（還疊上換成 Mitchell 的高品質縮放），就會黏
-        //（用戶 2026-09-30 點名「時間線來回翻動訊息似乎開始粘滯了」）。
-        //
-        // 寫快取與狀態留回主緒：MediaBitmapCache 是普通 LinkedHashMap，不是執行緒安全的。
-        val decoded = withContext(kotlinx.coroutines.Dispatchers.Default) {
-            var best: ImageBitmap? = null            // 整個載入一個**總預算**，不是每輪各給一個逾時：MediaFetchAttempts 是 4、
-            // 退避 1.2s×(1+2+3)，若每輪 20 秒就是 87 秒才認輸——用戶 2026-10-07 的評語是
-            // 「根本沒見要加載甚至重試的樣子」。10 秒是「我們這側該放棄了」的長度。
-            val deadlineMs = System.currentTimeMillis() + MediaTotalBudgetMs
-            // 啟動初期伺服器版本還沒讀進來，請求會走舊版媒體端點被 404，所以失敗要重試幾次
-            for (attempt in 0 until MediaFetchAttempts) {
-                if (attempt > 0) delay(MediaRetryDelayMillis * attempt)
-                val leftMs = deadlineMs - System.currentTimeMillis()
-                if (leftMs <= 0L) { reason = "累計超過 ${MediaTotalBudgetMs / 1000} 秒"; break }
-                val small = best?.let { it.width < boxPx } == true
-                // 事件本身就寫了原圖尺寸時，比顯示框還小的圖**不必先問縮圖**：
-                // 縮圖端點最多也只給到原圖大小，白跑一趟（實測 kimiblock.top 的縮圖
-                // 對 528 的要求回 32×32，等於每次都要再抓一次原檔）。
-                val declaredSmall = width != null && width in 1 until boxPx
-                val usedOriginal = isVideo || attempt > 0 || small || declaredSmall
-                // ⚠️ 逾時一律走 mediaCallResultWithin（獨立作用域），**不要**改回
-                // `withTimeoutOrNull { 請求 }`：後者要等裡面的協程真的收到取消才返回，
-                // 卡在 DNS／socket 這種不可中斷的呼叫時形同虛設——實測「給了 18 秒預算
-                // 照樣永久轉圈」（用戶 2026-10-07 截圖 #43/#45）。
-                //
-                // 這一輪同時把**真實原因**留下來：上一輪我把「圖拿不到」歸因成「對方伺服器
-                // 的 nginx 壞了」，用戶回兩張 ping 截圖打臉（兩個網域都通、70ms）。
-                // 所以現在原因寫進 /tmp/nashira-media.log（我自己讀得到）＋掛在失敗占位上。
-                val outcome = mediaCallResultWithin(leftMs) {
-                    val fetched = client.di.get<MediaService>().let { service ->
-                        when (source) {
-                            is MediaSource.Plain ->
-                                if (usedOriginal) {
-                                    // 影片沒有縮圖端點；縮圖不夠大（或第一輪失敗）就改抓原檔本機降採樣
-                                    service.getMedia(source.mxcUrl, maxSize = OriginalMaxMediaBytes)
-                                } else {
-                                    // 高度給 3 倍寬：scale 是「塞進這個框」，框不夠高會讓直式圖的寬度被壓掉
-                                    service.getThumbnail(
-                                        source.mxcUrl,
-                                        boxPx.toLong(),
-                                        boxPx.toLong() * ThumbnailHeightFactor,
-                                        maxSize = MaxMediaBytes,
-                                    )
-                                }
-                            is MediaSource.Encrypted -> service.getEncryptedMedia(source.file, maxSize = OriginalMaxMediaBytes)
-                        }
+        var best: ImageBitmap? = null
+        // 整個載入一個**總預算**，不是每輪各給一個逾時（4 輪各 20 秒會變成 87 秒才認輸）。
+        val deadlineMs = System.currentTimeMillis() + MediaTotalBudgetMs
+        // 啟動初期伺服器版本還沒讀進來，請求會走舊版媒體端點被 404，所以失敗要重試幾次
+        for (attempt in 0 until MediaFetchAttempts) {
+            if (attempt > 0) delay(MediaRetryDelayMillis * attempt)
+            val leftMs = deadlineMs - System.currentTimeMillis()
+            if (leftMs <= 0L) { reason = "累計超過 ${MediaTotalBudgetMs / 1000} 秒"; break }
+            val small = best?.let { it.width < boxPx } == true
+            // 事件本身就寫了原圖尺寸時，比顯示框還小的圖**不必先問縮圖**：縮圖端點最多也只
+            // 給到原圖大小，白跑一趟（日誌實測 kimiblock.top 對 528 的請求回 32×32）。
+            val declaredSmall = width != null && width in 1 until boxPx
+            val usedOriginal = isVideo || attempt > 0 || small || declaredSmall
+            // ⚠️ 兩條鐵律，都是日誌實錘換來的：
+            // 1) 逾時一律走 mediaCallResultWithin（擲到獨立作用域、只 await 它）。
+            //    `withTimeoutOrNull { 請求 }` 要等裡面的協程真的收到取消才返回，
+            //    卡在 DNS／socket 這種不可中斷呼叫時形同虛設。
+            // 2) 這段**不能包在 withContext(Dispatchers.Default) 裡**。上一版就是：
+            //    抓取與解碼共用 Default 那個有限池，十几張圖一起卡在讀取上時，
+            //    連「要觸發逾時的協程」都排不到線程——日誌實測同一個 URL 卡了 48 秒、
+            //    既沒成功也沒失敗（用戶 #70「依舊」）。現在只有**解碼**進 Default。
+            val outcome = mediaCallResultWithin(leftMs) {
+                val fetched = client.di.get<MediaService>().let { service ->
+                    when (source) {
+                        is MediaSource.Plain ->
+                            if (usedOriginal) {
+                                // 影片沒有縮圖端點；縮圖不夠大（或第一輪失敗）就改抓原檔本機降採樣
+                                service.getMedia(source.mxcUrl, maxSize = OriginalMaxMediaBytes)
+                            } else {
+                                // 高度給 3 倍寬：scale 是「塞進這個框」，框不夠高會讓直式圖的寬度被壓掉
+                                service.getThumbnail(
+                                    source.mxcUrl,
+                                    boxPx.toLong(),
+                                    boxPx.toLong() * ThumbnailHeightFactor,
+                                    maxSize = MaxMediaBytes,
+                                )
+                            }
+                        is MediaSource.Encrypted -> service.getEncryptedMedia(source.file, maxSize = OriginalMaxMediaBytes)
                     }
-                    // 讓例外走到 mediaCallResultWithin 的 runCatching 裡，原因才留得下來
-                    fetched.getOrThrow().toByteArray(this@withContext)
                 }
-                val bytes = when {
-                    outcome == null -> {
-                        reason = "來源伺服器 $((leftMs / 1000).coerceAtLeast(0)) 秒內沒有回應"
-                        mediaProbe("$reason（第 ${attempt + 1} 次）$key")
-                        continue
-                    }
-                    outcome.isFailure -> {
-                        val t = outcome.exceptionOrNull()
-                        reason = "${t?.javaClass?.simpleName} ${t?.message ?: ""}".trim()
-                        mediaProbe("第 ${attempt + 1} 次：$reason $key")
-                        continue
-                    }
-                    else -> outcome.getOrNull()
+                // 讓例外走到 runCatching 裡，原因才留得下來。
+                // ⚠️ 這裡的 `this` 是 mediaCallResultWithin 裡面那個**工作協程自己的作用域**
+                // （IO 那組線程）。Trixnity 的 toByteArray 照著交給它的 context 讀位元組，
+                // 遞外層那個進去（上一版遞的是 Default）等於前面那條鐵律白寫。
+                fetched.getOrThrow().toByteArray(this)
+            }
+            val bytes = when {
+                outcome == null -> {
+                    reason = "來源伺服器 $((leftMs / 1000).coerceAtLeast(0)) 秒內沒有回應"
+                    mediaProbe("$reason（第 ${attempt + 1} 次）$key")
+                    continue
                 }
-                val frame = if (bytes != null) {
-                    if (isVideo) decodeVideoFrame(bytes, maxDimension = boxPx * 2)
-                    else decodeImageBitmap(bytes, maxDimension = boxPx * 2)
-                } else null
-                if (frame == null) {
-                    reason = "拿到 ${bytes?.size ?: 0} 位元組但解不了碼"
+                outcome.isFailure -> {
+                    val t = outcome.exceptionOrNull()
+                    reason = "${t?.javaClass?.simpleName} ${t?.message ?: ""}".trim()
                     mediaProbe("第 ${attempt + 1} 次：$reason $key")
                     continue
                 }
-                best = frame
-                mediaProbe("成功 $key 第 ${attempt + 1} 次 ${bytes?.size ?: 0}B → ${frame.width}x${frame.height}")
-                // **抓過原檔就到此為止**。上一版這裡只看「寬度夠不夠 boxPx」，
-                // 結果小圖（橫幅、貼紙、低解析照片）明明已經拿到完整的原檔，還被判「不夠大」
-                // 再抓三次——日誌實測同一個 3295B／309x59 被抓了四遍、轉圈約十秒
-                //（用戶 2026-10-07 #66「依舊一直加載，矩陣 sdk 的問題？」→ 是我們自己的）。
-                if (usedOriginal || frame.width >= boxPx) break
+                else -> outcome.getOrNull()
             }
-            best
+            // 解碼留給 Default：Skia 沒有解碼期降採樣，一張 2560 的原圖是「先整張解開、再縮」，
+            // 在 UI 執行緒上解 6–8 MB 的 JPEG 會讓時間線黏（用戶 2026-09-30 點名）。
+            val frame = if (bytes != null) {
+                withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    if (isVideo) decodeVideoFrame(bytes, maxDimension = boxPx * 2)
+                    else decodeImageBitmap(bytes, maxDimension = boxPx * 2)
+                }
+            } else null
+            if (frame == null) {
+                reason = "拿到 ${bytes?.size ?: 0} 位元組但解不了碼"
+                mediaProbe("第 ${attempt + 1} 次：$reason $key")
+                continue
+            }
+            best = frame
+            mediaProbe("成功 $key 第 ${attempt + 1} 次 ${bytes?.size ?: 0}B → ${frame.width}x${frame.height}")
+            // **抓過原檔就到此為止**：上一版只比「寬度夠不夠 boxPx」，小圖（橫幅、貼紙、
+            // 低解析照片）明明已拿到完整原檔還被判不合格，同一個 3295B／309x59 被抓了四遍。
+            if (usedOriginal || frame.width >= boxPx) break
         }
+        val decoded = best
         if (decoded != null) {
             MediaBitmapCache.put(key, decoded)
             bitmap = decoded
@@ -359,13 +353,16 @@ private val MediaIoScope = kotlinx.coroutines.CoroutineScope(
 )
 
 /** 同上，但把失敗原因一起帶出來（「檢視／下載」那條路與失敗占位的懸停都要寫出人話）。 */
-private suspend fun <T> mediaCallResultWithin(timeoutMs: Long, block: suspend () -> T): Result<T>? {
+private suspend fun <T> mediaCallResultWithin(timeoutMs: Long, block: suspend kotlinx.coroutines.CoroutineScope.() -> T): Result<T>? {
     val task = MediaIoScope.async { runCatching { block() } }
     return try {
         kotlinx.coroutines.withTimeout(timeoutMs) { task.await() }
     } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-        task.cancel()
         null
+    } finally {
+        // 逾時、正常返回、以及外面那個 LaunchedEffect 被取消（滾出畫面）三條路都要收乾淨：
+        // 滾走的圖片不該繼續占頻寬，否則時間線来回翻時會積一堆沒人在等的下載。
+        task.cancel()
     }
 }
 
