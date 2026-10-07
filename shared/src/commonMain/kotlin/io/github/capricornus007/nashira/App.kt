@@ -65,7 +65,7 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
     var dynamicColor by mutableStateOf(false)
 
     /** Material You 配置（僅 Android 顯示；動態顏色開啟時以抽屜動畫展開） */
-    var paletteStyle by mutableStateOf(stored.enumOr("paletteStyle", PaletteStyle.Expressive))
+    var paletteStyle by mutableStateOf(stored.enumOr("paletteStyle", PaletteStyle.TonalSpot))
     var specVersion by mutableStateOf(stored.enumOr("specVersion", ColorSpec.SpecVersion.SPEC_2025))
     /**
      * 手選強調色，存成 `#RRGGBB`；null＝預設（動態取色或品牌 Arcaea 色板）。
@@ -290,11 +290,12 @@ fun rememberNashiraColorScheme(defaultDark: Boolean? = null): ColorScheme {
     // 桌面沒有桌布取色（dynamicColorSupported=false），一律走色票這條。
     val dynamic = dynamicColorSupported && ui.dynamicColor
     val seed = if (dynamic) wallpaperSeedColor(enabled = true) else ui.accentHex?.let { parseAccentHex(it) }
-    // 手選的顏色一律用「保留色相」的 TonalSpot 生成：Expressive 這套會把色相轉掉，
-    // 實測拿純藍 #2196F3 當種子生出**綠色** UI、Space 頭像圈變粉紅
-    // （用戶 2026-09-29 連兩輪點名「選藍得綠」「為什麼 space 內背景色是粉色」）。
-    // 「調色盤樣式」那個選項只在 Android 的桌布取色那條路上才有意義，留給它。
-    val style = if (dynamic) ui.paletteStyle else PaletteStyle.TonalSpot
+    // 風格現在**兩端都由 ui.paletteStyle 決定**（用戶 2026-10-07 點名「桌面上也放出這個選項」）。
+    // 但預設值一併從 Expressive 改成 TonalSpot：Expressive 會把色相轉掉，實測拿純藍 #2196F3
+    // 當種子生出**綠色** UI、Space 頭像圈變粉紅（用戶 2026-09-29 連兩輪點名）。
+    // 也就是說「寫死 TonalSpot」當時是對的修法，錯的是「不給桌面選」——
+    // 現在保留 TonalSpot 為預設，讓他可以自己調到別的風格。
+    val style = ui.paletteStyle
     val generated = rememberDynamicColorScheme(
         seedColor = seed ?: androidx.compose.ui.graphics.Color(0xFF1F1E33),
         isDark = dark,

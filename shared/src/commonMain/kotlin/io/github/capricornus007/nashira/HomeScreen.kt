@@ -366,9 +366,10 @@ private fun AppearancePage(onBack: () -> Unit) {
                     )
                 }
             }
-            // 調色盤樣式與顏色規格（M3 / Expressive 2025）只影響動態取色的生成；
-            // 桌面沒有桌布取色，這兩項在那邊沒有意義（使用者指示）
-            if (dynamicColorSupported) item { shape ->
+            // 調色盤樣式與顏色規格（M3 / Expressive 2025）：原本只在 Android 顯示，
+            // 理由是「桌面沒有桌布取色」。但桌面的種子來自手選色票、一樣走動態生成，
+            // 所以這兩項在桌面**同樣有效**——用戶 2026-10-07 點名「桌面上也放出這個選項」。
+            item { shape ->
                 SettingsDropdownItem(
                     shape = shape,
                     title = strings.paletteStyle,
@@ -381,7 +382,7 @@ private fun AppearancePage(onBack: () -> Unit) {
                     }
                 }
             }
-            if (dynamicColorSupported) item { shape ->
+            item { shape ->
                 SettingsDropdownItem(
                     shape = shape,
                     title = strings.colorSpec,
