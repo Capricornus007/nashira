@@ -1,6 +1,7 @@
 package io.github.capricornus007.nashira
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
@@ -39,6 +40,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -136,6 +144,15 @@ fun ImageViewer(
 
         var scale by remember(key) { mutableFloatStateOf(1f) }
         var offset by remember(key) { mutableStateOf(Offset.Zero) }
+        // 方向鍵連翻。桌面端 Dialog 裡「沒有東西持有焦點」時鍵盤事件根本不進組合，
+        // 所以一定要主動把焦點要過來（上一輪我以「搶不到焦點」為由沒做這事，是用戶
+        // 2026-10-08 兩句「快捷鍵左右切換根本没反应」「圖片裡也沒辦法左右切換」逼出來的）。
+        // 事件掛在**根 Box** 上（onPreviewKeyEvent 是預覽、先於子節點），
+        // 這樣焦點在關閉鈕／下載鈕上時方向鍵也照樣翻。
+        val pagerFocus = remember { FocusRequester() }
+        LaunchedEffect(Unit) {
+            if (items.size > 1) runCatching { pagerFocus.requestFocus() }
+        }
         val transformState = rememberTransformableState { zoomChange, panChange, _ ->
             scale = (scale * zoomChange).coerceIn(1f, 6f)
             offset = if (scale > 1f) offset + panChange else Offset.Zero
@@ -147,6 +164,18 @@ fun ImageViewer(
         Box(
             Modifier
                 .fillMaxSize()
+                .focusable()
+                .focusRequester(pagerFocus)
+                .onPreviewKeyEvent { event ->
+                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    if (items.size <= 1) return@onPreviewKeyEvent false
+                    val at = index.coerceIn(items.indices)
+                    when (event.key) {
+                        Key.DirectionLeft -> if (at > 0) { onSelectIndex(at - 1); true } else true
+                        Key.DirectionRight -> if (at < items.lastIndex) { onSelectIndex(at + 1); true } else true
+                        else -> false
+                    }
+                }
                 .background(Color.Black.copy(alpha = 0.92f))
                 .pointerInput(Unit) {
                     detectTapGestures(

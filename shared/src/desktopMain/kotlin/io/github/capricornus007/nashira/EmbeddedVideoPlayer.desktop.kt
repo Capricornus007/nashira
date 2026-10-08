@@ -137,9 +137,17 @@ actual fun EmbeddedVideoPlayer(
                 (source as? MediaSource.Plain)?.let { plain -> mxcToPublicUrl(plain.mxcUrl)?.let(::add) }
             }
             var resolved: Pair<String, MovieInfo>? = null
+            // 探測結果按「這條媒體 + 第幾個候選」快取。省掉的是一條**完整的網路往返**：
+            // 實測他這條鏈路光是 TTFB 就 ~1 秒，而 ffprobe 與 ffmpeg 各要一條連線。
+            // 相簿左右連翻、翻回去看同一條，或同一條看第二次，都不用再等那次探測。
+            val probeKeyBase = when (val s = source) {
+                is MediaSource.Plain -> s.mxcUrl
+                is MediaSource.Encrypted -> s.file.url
+            }
             candidates.forEachIndexed { index, candidate ->
                 if (resolved != null) return@forEachIndexed
-                val probed = probeMovie(candidate)
+                val probeKey = "$probeKeyBase#$index"
+                val probed = MovieProbeCache[probeKey] ?: probeMovie(candidate)?.also { MovieProbeCache[probeKey] = it }
                 if (probed != null) resolved = candidate to probed
                 else mediaProbe("內嵌播放：串流候選 ${index + 1} 探測不通")
             }
@@ -493,6 +501,23 @@ private class MovieInfo(
     val durationSec: Long,
     val hasAudio: Boolean,
 )
+
+/**
+ * ffprobe 結果快取（鍵＝媒體來源＋第幾個串流候選）。
+ * 只存「尺寸/長度/有沒有音軌」這種跟網址無關的事實——**不存網址**：
+ * 本機串流代理那條 URL 每次都換一個 id，存下來下次就是條死路徑。
+ * 上限 64 條，滿了整票清掉（媒體快取本來就是可丟的東西，不追求精確淘汰）。
+ */
+private object MovieProbeCache {
+    private val entries = java.util.concurrent.ConcurrentHashMap<String, MovieInfo>()
+
+    operator fun get(key: String): MovieInfo? = entries[key]
+
+    operator fun set(key: String, value: MovieInfo) {
+        if (entries.size >= 64) entries.clear()
+        entries[key] = value
+    }
+}
 
 /** 問尺寸與長度：解格要按顯示框縮，長度給進度條與拖動。網址與檔案都走同一條 ffprobe。 */
 private fun probeMovie(source: String): MovieInfo? = readCmdOutput(
