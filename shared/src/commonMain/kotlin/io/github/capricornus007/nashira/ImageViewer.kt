@@ -29,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,6 +48,8 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -57,6 +60,7 @@ import de.connect2x.trixnity.utils.toByteArray
 import io.github.capricornus007.nashira.matrix.MediaSource
 import io.github.capricornus007.nashira.matrix.MessageBody
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -179,6 +183,21 @@ fun ImageViewer(
         // 事件掛在**根 Box** 上（onPreviewKeyEvent 是預覽、先於子節點），
         // 這樣焦點在關閉鈕／下載鈕上時方向鍵也照樣翻。
         val pagerFocus = remember { FocusRequester() }
+        // 外圍那圈按鈕（左右箭頭、計數、下載＋關閉）**不該常顯**：
+        // Telegram 是全靠容器收事件、控件浮現一陣子後自己收掉。用戶 2026-10-08 兩句
+        // 「問題是周圍的這些按鈕並不會常顯啊？」＋「抱歉我是說並不應該常顯」。
+        // 做法：任何滑鼠移動就把它們叫出來，靜靜不動 2.5 秒再收掉。
+        var chromeVisible by remember { mutableStateOf(true) }
+        var chromeTick by remember { mutableIntStateOf(0) }
+        // Space／Enter 播放在這層分派（tdesktop 也是把按鍵收在容器：
+        // `media_view_overlay_widget.cpp:5584-5591`），播放器只認那個計數器。
+        var playToggleTick by remember { mutableIntStateOf(0) }
+        LaunchedEffect(chromeTick) {
+            if (chromeTick > 0) {
+                delay(2500)
+                chromeVisible = false
+            }
+        }
         // 每一次換格都要重新要焦點：從影片切回圖片時，子樹整個換掉（內嵌播放器那層消失了），
         // 原本持焦的節點跟著銷毀，焦點就掉到沒有物件——用戶 2026-10-08 實測
         // 「從視頻切換到圖片就切換不回去了」就是這個。只請求一次（Unit）撐不過換格。
@@ -200,12 +219,25 @@ fun ImageViewer(
                 .focusRequester(pagerFocus)
                 .onPreviewKeyEvent { event ->
                     if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                    if (items.size <= 1) return@onPreviewKeyEvent false
-                    val at = index.coerceIn(items.indices)
                     when (event.key) {
-                        Key.DirectionLeft -> if (at > 0) { onSelectIndex(at - 1); true } else true
-                        Key.DirectionRight -> if (at < items.lastIndex) { onSelectIndex(at + 1); true } else true
-                        else -> false
+                        // Space／Enter：播放在影片上＝播放或暫停（播完再按就是重放）。
+                        // 非影片時**不吃這個鍵**，留給以後可能出現的輸入。
+                        Key.Spacebar, Key.Enter -> if (isVideo) {
+                            playToggleTick++
+                            chromeVisible = true
+                            chromeTick++
+                            true
+                        } else false
+                        else -> {
+                            if (items.size <= 1) return@onPreviewKeyEvent false
+                            val at = index.coerceIn(items.indices)
+                            when (event.key) {
+                                Key.DirectionLeft -> if (at > 0) onSelectIndex(at - 1)
+                                Key.DirectionRight -> if (at < items.lastIndex) onSelectIndex(at + 1)
+                                else -> return@onPreviewKeyEvent false
+                            }
+                            true
+                        }
                     }
                 }
                 .background(Color.Black.copy(alpha = 0.92f))
@@ -220,6 +252,18 @@ fun ImageViewer(
                             }
                         },
                     )
+                }
+                .pointerInput(Unit) {
+                    // 滑鼠一动就把外圍控件叫出來（Telegram 的浮層就是這樣回來的）
+                    awaitPointerEventScope {
+                        while (true) {
+                            val e = awaitPointerEvent(PointerEventPass.Initial)
+                            if (e.type == PointerEventType.Move || e.type == PointerEventType.Exit) {
+                                if (!chromeVisible) chromeVisible = true
+                                chromeTick++
+                            }
+                        }
+                    }
                 },
         ) {
             val loaded = bitmap
@@ -236,6 +280,7 @@ fun ImageViewer(
                     poster = loaded,
                     boxWidth = 900.dp,
                     boxHeight = 900.dp,
+                    playToggleTick = playToggleTick,
                     modifier = Modifier.fillMaxSize(),
                 )
                 loaded != null -> androidx.compose.foundation.Image(
@@ -264,95 +309,98 @@ fun ImageViewer(
                 )
             }
 
-            // 頂欄：關閉＋下載。半透明底確保任何圖片上都看得清。
-            Surface(
-                color = Color.Black.copy(alpha = 0.55f),
-                shape = RoundedCornerShape(22.dp),
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = 36.dp, end = 12.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(
-                        onClick = {
-                            scope.launch {
-                                // 影片走這條時通常還沒有位元組（不再預抓），現點現抓
-                                val bytes = fileBytes ?: fetchMediaBytesForPlayback(client, source)
-                                if (bytes == null || bytes.isEmpty()) {
-                                    snackbar.showSnackbar(downloadFailedLabel)
-                                    return@launch
-                                }
-                                val ext = when {
-                                    mimeType?.contains("webp") == true -> "webp"
-                                    mimeType?.contains("jpeg") == true || mimeType?.contains("jpg") == true -> "jpg"
-                                    mimeType?.contains("webm") == true -> "webm"
-                                    else -> "png"
-                                }
-                                val name = fileName.ifBlank { "nashira-media.$ext" }
-                                val type = mimeType ?: "image/png"
-                                saver(bytes, name, type)
-                                    .onSuccess { where -> snackbar.showSnackbar(where) }
-                            }
-                        },
-                    ) {
-                        Icon(
-                            BarIcons.Download,
-                            contentDescription = null,
-                            tint = Color.White,
-                        )
-                    }
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Filled.Close, contentDescription = null, tint = Color.White)
-                    }
-                }
-            }
-            // 相簿連翻：左右兩側的箭頭鈕＋左上角計數，照 Element 的燈光箱
-            //（到頭就停用，不是繞回——繞回讓人以為整組在循環，找不到「結束」）。
-            // 不接方向鍵：桌面端 Dialog 沒拿到焦點時鍵盤事件根本進不來，
-            // 擺一個「可能不會動」的按鍵比擺一個看得見按得動的鈕更糟。
-            if (items.size > 1) {
-                val safeIndex = index.coerceIn(items.indices)
-                IconButton(
-                    enabled = safeIndex > 0,
-                    onClick = { onSelectIndex(safeIndex - 1) },
-                    modifier = Modifier
-                        .align(Alignment.CenterStart)
-                        .padding(start = 8.dp)
-                        .background(Color.Black.copy(alpha = 0.45f), CircleShape),
-                ) {
-                    Icon(
-                        Icons.Filled.KeyboardArrowLeft,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(34.dp),
-                    )
-                }
-                IconButton(
-                    enabled = safeIndex < items.lastIndex,
-                    onClick = { onSelectIndex(safeIndex + 1) },
-                    modifier = Modifier
-                        .align(Alignment.CenterEnd)
-                        .padding(end = 8.dp)
-                        .background(Color.Black.copy(alpha = 0.45f), CircleShape),
-                ) {
-                    Icon(
-                        Icons.Filled.KeyboardArrowRight,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(34.dp),
-                    )
-                }
+            // 外圍控件不常顯：滑鼠動一下才出現、靜置 2.5 秒收掉（用戶 2026-10-08：「並不應該常顯」）。
+            if (chromeVisible) {
+                // 頂欄：關閉＋下載。半透明底確保任何圖片上都看得清。
                 Surface(
                     color = Color.Black.copy(alpha = 0.55f),
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.align(Alignment.TopStart).padding(top = 36.dp, start = 12.dp),
+                    shape = RoundedCornerShape(22.dp),
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 36.dp, end = 12.dp),
                 ) {
-                    Text(
-                        text = "${safeIndex + 1} / ${items.size}",
-                        color = Color.White,
-                        style = MaterialTheme.typography.labelLarge,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = {
+                                scope.launch {
+                                    // 影片走這條時通常還沒有位元組（不再預抓），現點現抓
+                                    val bytes = fileBytes ?: fetchMediaBytesForPlayback(client, source)
+                                    if (bytes == null || bytes.isEmpty()) {
+                                        snackbar.showSnackbar(downloadFailedLabel)
+                                        return@launch
+                                    }
+                                    val ext = when {
+                                        mimeType?.contains("webp") == true -> "webp"
+                                        mimeType?.contains("jpeg") == true || mimeType?.contains("jpg") == true -> "jpg"
+                                        mimeType?.contains("webm") == true -> "webm"
+                                        else -> "png"
+                                    }
+                                    val name = fileName.ifBlank { "nashira-media.$ext" }
+                                    val type = mimeType ?: "image/png"
+                                    saver(bytes, name, type)
+                                        .onSuccess { where -> snackbar.showSnackbar(where) }
+                                }
+                            },
+                        ) {
+                            Icon(
+                                BarIcons.Download,
+                                contentDescription = null,
+                                tint = Color.White,
+                            )
+                        }
+                        IconButton(onClick = onDismiss) {
+                            Icon(Icons.Filled.Close, contentDescription = null, tint = Color.White)
+                        }
+                    }
+                }
+                // 相簿連翻：左右兩側的箭頭鈕＋左上角計數，照 Element 的燈光箱
+                //（到頭就停用，不是繞回——繞回讓人以為整組在循環，找不到「結束」）。
+                // 不接方向鍵：桌面端 Dialog 沒拿到焦點時鍵盤事件根本進不來，
+                // 擺一個「可能不會動」的按鍵比擺一個看得見按得動的鈕更糟。
+                if (items.size > 1) {
+                    val safeIndex = index.coerceIn(items.indices)
+                    IconButton(
+                        enabled = safeIndex > 0,
+                        onClick = { onSelectIndex(safeIndex - 1) },
+                        modifier = Modifier
+                            .align(Alignment.CenterStart)
+                            .padding(start = 8.dp)
+                            .background(Color.Black.copy(alpha = 0.45f), CircleShape),
+                    ) {
+                        Icon(
+                            Icons.Filled.KeyboardArrowLeft,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(34.dp),
+                        )
+                    }
+                    IconButton(
+                        enabled = safeIndex < items.lastIndex,
+                        onClick = { onSelectIndex(safeIndex + 1) },
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .padding(end = 8.dp)
+                            .background(Color.Black.copy(alpha = 0.45f), CircleShape),
+                    ) {
+                        Icon(
+                            Icons.Filled.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(34.dp),
+                        )
+                    }
+                    Surface(
+                        color = Color.Black.copy(alpha = 0.55f),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.align(Alignment.TopStart).padding(top = 36.dp, start = 12.dp),
+                    ) {
+                        Text(
+                            text = "${safeIndex + 1} / ${items.size}",
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        )
+                    }
                 }
             }
             SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = 32.dp))

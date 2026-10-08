@@ -25,6 +25,7 @@ actual fun EmbeddedVideoPlayer(
     boxWidth: Dp,
     boxHeight: Dp,
     inline: Boolean,
+    playToggleTick: Int,
     modifier: Modifier,
 ) {
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

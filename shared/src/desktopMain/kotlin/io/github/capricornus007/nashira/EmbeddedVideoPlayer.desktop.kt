@@ -96,6 +96,7 @@ actual fun EmbeddedVideoPlayer(
     boxWidth: Dp,
     boxHeight: Dp,
     inline: Boolean,
+    playToggleTick: Int,
     modifier: Modifier,
 ) {
     val density = LocalDensity.current
@@ -114,6 +115,14 @@ actual fun EmbeddedVideoPlayer(
     var resumeMs by remember { mutableLongStateOf(0L) }
     var generation by remember { mutableIntStateOf(0) }
     val durationMs = (info?.durationSec ?: 0L) * 1000L
+
+    // 檢視器容器層分派過來的播放／暫停（Space、Enter）。0 代表「還沒按過」，
+    // 不能拿 0 去翻轉，否則一進場就是暫停。
+    // 播完那一趟 `playing` 已經被設回 false、起點歸零，所以這裡翻回 true 就是**從頭重放**
+    //（用戶 2026-10-08：「放完的視頻也不會正常按照按了空格就重放」）。
+    LaunchedEffect(playToggleTick) {
+        if (playToggleTick > 0) playing = !playing
+    }
 
     DisposableEffect(tempFile) {
         val stale = tempFile

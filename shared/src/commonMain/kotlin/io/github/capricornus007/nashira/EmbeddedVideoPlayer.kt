@@ -38,5 +38,13 @@ expect fun EmbeddedVideoPlayer(
      * 也順勢避開「多條同時有聲音」的衝突：聲音一律留給點開的全螢幕。
      */
     inline: Boolean = false,
+    /**
+     * 播放／暫停的外部開關：**每按一次把這個數 +1**，播放器在裡面翻轉播放狀態。
+     * 走信號而不是回調，是因為 `playing` 是播放器自己的狀態，外面不該持有它。
+     * 存在的理由：tdesktop 把 Space/Enter 收在**容器層**分派
+     *（`media/view/media_view_overlay_widget.cpp:5584-5591`），我們的方向鍵也在容器層，
+     * 所以「播完按空格重播」要有同一個入口（用戶 2026-10-08：「放完的視頻也不會正常按照按了空格就重放」）。
+     */
+    playToggleTick: Int = 0,
     modifier: Modifier = Modifier,
 )
