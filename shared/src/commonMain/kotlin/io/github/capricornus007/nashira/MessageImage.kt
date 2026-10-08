@@ -4,10 +4,12 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
@@ -40,6 +42,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import io.github.capricornus007.nashira.matrix.MediaSource
+import io.github.capricornus007.nashira.matrix.looksLikeRealCaption
 
 /** 貼圖不畫底、不裁切，尺寸比照 Element／SchildiChat 的行內貼圖。 */
 private val StickerMaxWidth = 148.dp
@@ -179,53 +182,66 @@ fun MessageImage(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        loaded != null -> Box(
-            frame
-                .then(sizing)
-                .then(if (onOpen != null) Modifier.clickable(onClick = onOpen) else Modifier),
-        ) {
-            if (autoplayInline) {
-                // 靜音、迴圈、不畫控制列；點這塊的點擊仍然往上冒給 onOpen（開全螢幕有聲音）
-                EmbeddedVideoPlayer(
-                    client = client,
-                    source = source,
-                    bytes = null,
-                    poster = loaded,
-                    boxWidth = maxWidth,
-                    boxHeight = maxWidth,
-                    inline = true,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            } else {
-            Image(
-                bitmap = loaded,
-                contentDescription = caption.takeIf { it.isNotBlank() },
-                modifier = Modifier.fillMaxSize(),
-                contentScale = if (isSticker) ContentScale.Fit else ContentScale.Crop,
-                // 一定要明寫 High：預設是 Low（最近鄰），縮放時直接糊成一團或鋸齒
-                //（用戶 2026-09-29 對照 Telegram：「tg 無論點開之前還是點開之後都沒那麼糊」）。
-                filterQuality = FilterQuality.High,
-            )
-            }
-            if (isVideo && !autoplayInline) {
-                // 影片一律是「第一格當 poster＋中間一顆播放鈕」（Element 也這樣），
-                // 否則看起來就是一張普通照片，沒人知道點下去會怎樣。
-                // 用 PlayArrow 圖示，不要拿字型裡的 "▶" 湊：那個字元在這套字型下是
-                // **空心輪廓**，擺在圓裡像沒渲染完（用戶 2026-10-07 #137「播放按鈕好抽象」）。
-                Box(
-                    Modifier
-                        .align(Alignment.Center)
-                        .size(44.dp)
-                        .background(Color.Black.copy(alpha = 0.55f), CircleShape),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.PlayArrow,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(26.dp),
+        loaded != null -> Column(frame) {
+            Box(
+                Modifier
+                    .then(sizing)
+                    .then(if (onOpen != null) Modifier.clickable(onClick = onOpen) else Modifier),
+            ) {
+                if (autoplayInline) {
+                    // 靜音、迴圈、不畫控制列；點這塊的點擊仍然往上冒給 onOpen（開全螢幕有聲音）
+                    EmbeddedVideoPlayer(
+                        client = client,
+                        source = source,
+                        bytes = null,
+                        poster = loaded,
+                        boxWidth = maxWidth,
+                        boxHeight = maxWidth,
+                        inline = true,
+                        modifier = Modifier.fillMaxSize(),
                     )
+                } else {
+                Image(
+                    bitmap = loaded,
+                    contentDescription = caption.takeIf { it.isNotBlank() },
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = if (isSticker) ContentScale.Fit else ContentScale.Crop,
+                    // 一定要明寫 High：預設是 Low（最近鄰），縮放時直接糊成一團或鋸齒
+                    //（用戶 2026-09-29 對照 Telegram：「tg 無論點開之前還是點開之後都沒那麼糊」）。
+                    filterQuality = FilterQuality.High,
+                )
                 }
+                if (isVideo && !autoplayInline) {
+                    // 影片一律是「第一格當 poster＋中間一顆播放鈕」（Element 也這樣），
+                    // 否則看起來就是一張普通照片，沒人知道點下去會怎樣。
+                    // 用 PlayArrow 圖示，不要拿字型裡的 "▶" 湊：那個字元在這套字型下是
+                    // **空心輪廓**，擺在圓裡像沒渲染完（用戶 2026-10-07 #137「播放按鈕好抽象」）。
+                    Box(
+                        Modifier
+                            .align(Alignment.Center)
+                            .size(44.dp)
+                            .background(Color.Black.copy(alpha = 0.55f), CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.PlayArrow,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(26.dp),
+                        )
+                    }
+                }
+            }
+            // 說明文字要**看得見**：以前 caption 只拿去當 contentDescription（無障礙文字），
+            // 結果有人打了說明的圖片在時間線上完全看不到那句話（2026-10-08 做相簿時發現，
+            // 相簿那側已經會顯示，兩邊不一致）。橋站的佔位 body（`image`／檔名）一律不畫。
+            if (!insideAlbumCell && looksLikeRealCaption(caption)) {
+                Text(
+                    text = pangu(caption.trim()),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
             }
         }
         // 貼圖的佔位不畫灰底：多數貼圖有透明背景，灰塊會在載入前一閃，看起來

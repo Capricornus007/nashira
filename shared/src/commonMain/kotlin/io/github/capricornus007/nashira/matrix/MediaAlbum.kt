@@ -48,7 +48,7 @@ private val MediaFileExtensions = setOf(
 )
 
 /** 這則訊息的 body 能不能當整組的說明文字。 */
-internal fun looksLikeAlbumCaption(body: String): Boolean {
+internal fun looksLikeRealCaption(body: String): Boolean {
     val s = body.trim()
     if (s.isEmpty()) return false
     if (s.lowercase() in PlaceholderBodies) return false
@@ -87,7 +87,7 @@ private fun mergeReactions(run: List<TimelineMessage>): Map<String, ReactionInfo
 
 private fun albumOf(run: List<TimelineMessage>): TimelineMessage {
     val images = run.map { it.body as MessageBody.Image }
-    val captioned = images.filter { looksLikeAlbumCaption(it.caption) }
+    val captioned = images.filter { looksLikeRealCaption(it.caption) }
     // Telegram 的規則（tdesktop `itemForText()`）：整組**恰好一項**有說明文字才顯示；
     // 每張各附一句的話就不顯示，否則我們會把某張的說明擺在整組下面，看著像錯配。
     val caption = if (captioned.size == 1) captioned.single().caption.trim() else ""
