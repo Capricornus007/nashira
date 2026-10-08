@@ -169,6 +169,29 @@ actual fun EmbeddedVideoPlayer(
         }
     }
 
+    // 邊抓邊播在他這條管子上一定會卡（影片位元率 570KB/s > 鏈路 150–280KB/s），
+    // 所以**同時**把整份檔抓進磁碟（串流寫檔、不進記憶體）；抓完就換成本機檔案、
+    // 從同一個位置續播——之後是純本地播放，跟網路再無關係，也就不會再卡。
+    // 這是「立刻能開始看」與「看得順」兩個都要的作法，取捨放在這裡而不是丟給用戶選。
+    LaunchedEffect(input, source, inline) {
+        val current = input ?: return@LaunchedEffect
+        if (inline) return@LaunchedEffect // 氣泡那側不搶頻寬：要看的不是它
+        if (!current.startsWith("http")) return@LaunchedEffect // 已經是本地檔
+        val plain = source as? MediaSource.Plain ?: return@LaunchedEffect
+        val file = withContext(Dispatchers.IO) { downloadOriginToFile(plain.mxcUrl, LocalSwitchMaxBytes) }
+            ?: return@LaunchedEffect
+        val probed = withContext(Dispatchers.IO) { probeMovie(file.absolutePath) }
+        if (probed == null) {
+            runCatching { file.delete() }
+            return@LaunchedEffect
+        }
+        mediaProbe("內嵌播放：整檔已落地 ${file.length()} 位元組，改從本機續播")
+        resumeMs = positionMs
+        info = probed
+        tempFile = file
+        input = file.absolutePath
+    }
+
     LaunchedEffect(input, info, playing, generation, resumeMs) {
         val sourcePath = input ?: return@LaunchedEffect
         val meta = info ?: return@LaunchedEffect
@@ -354,9 +377,52 @@ private const val InlineFps = 15
 
 /** 行內連播起播前的等待：快速滾動時被滾走的氣泡不該各起一條 ffmpeg。 */
 private const val InlineStartDelayMs = 250L
+
+/** 「順手把整份檔抓下來改成本機播放」的檔案上限：再大的檔等它落地不如就看著串流卡。 */
+private const val LocalSwitchMaxBytes = 200L * 1024 * 1024
 private const val SampleRate = 48000
 
 private fun formatClock(totalMs: Long): String = "%d:%02d".format(totalMs / 60_000, (totalMs / 1000) % 60)
+
+/**
+ * 把原檔**串流寫進磁碟**（不進記憶體：動輒幾十 MB，而我們的 heap 只有 384MB）。
+ * 只走原站的公開下載端點——那條不需要憑證；家伺服器那側要憑證，
+ * 而代理不給外部程序用（見 `MediaStream.desktop.kt`），抓不到就老實回 null。
+ */
+private fun downloadOriginToFile(mxcUrl: String, capBytes: Long): File? = runCatching {
+    val url = mxcToPublicUrl(mxcUrl) ?: return@runCatching null
+    val connection = java.net.URL(url).openConnection() as? java.net.HttpURLConnection ?: return@runCatching null
+    connection.connectTimeout = 8_000
+    connection.readTimeout = 20_000
+    connection.instanceFollowRedirects = true
+    connection.setRequestProperty("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) Nashira/1.0")
+    if (connection.responseCode !in 200..299) return@runCatching null
+    if (connection.contentLengthLong > capBytes) return@runCatching null
+    val file = File.createTempFile("nashira-play-", ".bin").apply { deleteOnExit() }
+    var total = 0L
+    var overflow = false
+    connection.inputStream.use { input ->
+        file.outputStream().buffered(64 * 1024).use { output ->
+            val chunk = ByteArray(64 * 1024)
+            while (true) {
+                val read = input.read(chunk)
+                if (read <= 0) break
+                total += read
+                if (total > capBytes) {
+                    overflow = true
+                    break
+                }
+                output.write(chunk, 0, read)
+            }
+        }
+    }
+    if (overflow || file.length() == 0L) {
+        runCatching { file.delete() }
+        null
+    } else {
+        file
+    }
+}.getOrNull()
 
 private fun writePlayableFile(bytes: ByteArray): File? = runCatching {
     File.createTempFile("nashira-play-", ".bin").apply { writeBytes(bytes) }
