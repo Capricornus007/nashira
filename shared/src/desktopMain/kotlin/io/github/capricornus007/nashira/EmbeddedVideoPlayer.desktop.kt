@@ -413,7 +413,7 @@ actual fun EmbeddedVideoPlayer(
 /** 解格上限 fps：螢幕本來就 60Hz 上下，30 格夠順，也把 CPU 與複製量減一半（實測這條源是 60fps）。 */
 private const val PlaybackFps = 30
 
-/** 第一格等这么久還是不來，就把 stderr 唸進日誌。 */
+/** 第一格等這麼久還是不來，就把 stderr 唸進日誌。 */
 private const val NoFrameWatchdogMs = 6_000L
 
 /** 落後音訊超過這個毫秒數的格才丟掉。 */
@@ -759,8 +759,11 @@ private class MovieDecoder private constructor(
     }
 }
 
+/** 音訊緩衝：預設那個太小（寫幾毫秒就滿、一直阻塞），聽起來就是聲音斷斷續續。 */
+private const val AudioLineBytes = 48 * 1024
+
 private fun openAudioLine(): SourceDataLine? = runCatching {
     val format = AudioFormat(AudioFormat.Encoding.PCM_SIGNED, SampleRate.toFloat(), 16, 2, 4, SampleRate.toFloat(), false)
     (AudioSystem.getLine(DataLine.Info(SourceDataLine::class.java, format)) as? SourceDataLine)
-        ?.takeIf { line -> runCatching { line.open(format); true }.getOrDefault(false) }
+        ?.takeIf { line -> runCatching { line.open(format, AudioLineBytes); true }.getOrDefault(false) }
 }.getOrNull()

@@ -68,7 +68,17 @@ fun ImageViewer(
     ) {
         val key = source.cacheKeyShared()
         val isVideo = mimeType?.startsWith("video/") == true
-        var bitmap by remember(key) { mutableStateOf<ImageBitmap?>(MediaBitmapCache.get(key)) }
+        // 時間線那側早就把這張圖（圖片是縮圖、影片是首格）解好放在快取裡了，
+        // 鍵就是 mxc／加密檔的 url。開檢視器時先拿它墊上，才不會變成空白轉圈：
+        // 0.1.76 拿掉「開啟時預抓整檔」之後，影片開啟有約 5 秒什麼都沒有
+        //（用戶 2026-10-08「依舊沒秒開」）——而那 5 秒要的畫面其實早就在手上了。
+        val timelineKey = when (source) {
+            is MediaSource.Plain -> source.mxcUrl
+            is MediaSource.Encrypted -> source.file.url
+        }
+        var bitmap by remember(key) {
+            mutableStateOf<ImageBitmap?>(MediaBitmapCache.get(key) ?: MediaBitmapCache.get(timelineKey))
+        }
         var failed by remember(key) { mutableStateOf(false) }
         // 下載用原檔位元組（影片存 webm 原樣、圖片存原解析度），不重編碼
         var fileBytes by remember(key) { mutableStateOf<ByteArray?>(null) }

@@ -2127,8 +2127,15 @@ private fun TimelinePane(
             // 看起來就像程式卡死（他對「轉圈不說話」的忍度是零，2026-10-08 已經發過火）。
             sending = true
             val payload = compressVideoForSending(picked)
-            roomRepository.sendFile(room.roomId, payload)
-                .onFailure { sendError = io.github.capricornus007.nashira.i18n.friendlyError(it) }
+            // 影片走 m.video（帶寬高／時長／縮圖），不再一律 m.File：
+            // 附件型別的訊息在對方（和我們自己的時間線）只顯示成「檔名＋圖示」，
+            // 永遠不會有首格畫面、行內連播與點開播放（Telegram／Element 都是 m.video）。
+            val sent = if (payload.mimeType.startsWith("video/")) {
+                roomRepository.sendVideo(room.roomId, payload)
+            } else {
+                roomRepository.sendFile(room.roomId, payload)
+            }
+            sent.onFailure { sendError = io.github.capricornus007.nashira.i18n.friendlyError(it) }
             sending = false
         }
     }

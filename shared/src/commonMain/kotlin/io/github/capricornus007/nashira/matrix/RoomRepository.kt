@@ -72,6 +72,7 @@ import de.connect2x.trixnity.client.room.message.reply
 import de.connect2x.trixnity.core.model.events.m.MarkedUnreadEventContent
 import de.connect2x.trixnity.core.model.events.m.TagEventContent
 import io.github.capricornus007.nashira.PickedFile
+import io.github.capricornus007.nashira.probeVideoForSending
 import de.connect2x.trixnity.core.model.events.m.ReactionEventContent
 import de.connect2x.trixnity.core.model.events.m.RelatesTo
 import de.connect2x.trixnity.core.model.events.m.room.PinnedEventsEventContent
@@ -1078,6 +1079,67 @@ class RoomRepository(val client: MatrixClient) {
                 body = body,
                 url = mxc,
                 info = info,
+            )
+        }
+        client.room.sendMessage(roomId) {
+            if (replyTo != null) reply(replyTo, null)
+            content(content)
+        }
+    }
+
+    /**
+     * 發送影片（m.video）。
+     *
+     * 為什麼要另一個入口：`sendFile` 一律發 `m.File`，對方（以及我們自己的時間線）
+     * 只會看到「附件＋檔名」——不會走影片那條渲染路（首格當畫面、行內連播、點開全螢幕）。
+     * Telegram／Element 發影片都是 m.video，並且把 `info` 的寬／高／時長／大小與縮圖帶齊。
+     * 探測不到時（手機端目前如此）照樣發出去，只是 info 精簡。
+     */
+    suspend fun sendVideo(
+        roomId: RoomId,
+        video: PickedFile,
+        caption: String? = null,
+        replyTo: EventId? = null,
+    ): Result<String> = runCatching {
+        val mediaService = client.di.get<de.connect2x.trixnity.client.media.MediaService>()
+        val contentType = io.ktor.http.ContentType.parse(video.mimeType)
+        val meta = probeVideoForSending(video.bytes)
+        val body = caption?.trim()?.takeIf { it.isNotEmpty() } ?: video.fileName
+        val info = VideoInfo(
+            duration = meta?.durationMs,
+            width = meta?.widthPx,
+            height = meta?.heightPx,
+            mimeType = video.mimeType,
+            size = video.bytes.size.toLong(),
+        )
+        val encrypted = client.room.getState<EncryptionEventContent>(roomId).firstOrNull() != null
+        val content = if (encrypted) {
+            RoomMessageEventContent.FileBased.Video(
+                body = body,
+                fileName = video.fileName,
+                file = mediaService.prepareUploadEncryptedMedia(video.bytes.toByteArrayFlow()),
+                info = info,
+            )
+        } else {
+            val cacheUri = mediaService.prepareUploadMedia(video.bytes.toByteArrayFlow(), contentType)
+            val mxc = mediaService.uploadMedia(cacheUri).getOrThrow()
+            // 縮圖只是加分項：上傳失敗不影響影片本身
+            val thumbnailMxc: String? = try {
+                meta?.thumbnailJpeg?.let { jpeg ->
+                    val thumbUri = mediaService.prepareUploadMedia(
+                        jpeg.toByteArrayFlow(),
+                        io.ktor.http.ContentType.Image.JPEG,
+                    )
+                    mediaService.uploadMedia(thumbUri).getOrNull()
+                }
+            } catch (e: Exception) {
+                null
+            }
+            RoomMessageEventContent.FileBased.Video(
+                body = body,
+                fileName = video.fileName,
+                url = mxc,
+                info = if (thumbnailMxc == null) info else info.copy(thumbnailUrl = thumbnailMxc),
             )
         }
         client.room.sendMessage(roomId) {
