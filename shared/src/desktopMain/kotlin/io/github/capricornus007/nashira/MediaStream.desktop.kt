@@ -4,6 +4,7 @@ import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpHandler
 import com.sun.net.httpserver.HttpServer
 import de.connect2x.trixnity.client.MatrixClient
+import de.connect2x.trixnity.client.store.AuthenticationStore
 import de.connect2x.trixnity.clientserverapi.client.ClassicMatrixClientAuthProviderData
 import de.connect2x.trixnity.clientserverapi.client.MatrixClientAuthProviderDataStore
 import io.github.capricornus007.nashira.matrix.MediaSource
@@ -42,15 +43,36 @@ import java.util.concurrent.TimeUnit
 internal actual suspend fun mediaStreamUrl(client: MatrixClient, source: MediaSource): String? {
     if (source !is MediaSource.Plain) return null // 加密的影片要先解密才有檔，沒有「直接串」這回事
     val (host, id) = mxcParts(source.mxcUrl) ?: return null
-    val auth = runCatching { client.di.get<MatrixClientAuthProviderDataStore>().getAuthData() }.getOrNull()
-        as? ClassicMatrixClientAuthProviderData
-    val token = auth?.accessToken
-    val base = auth?.baseUrl?.toString()?.trimEnd('/')?.takeIf { it.isNotEmpty() }
-    if (token == null || base == null) {
-        mediaProbe("串流代理：這個帳號沒有可用的登入憑證，退回整檔下載")
-        return null
+    val token = liveAccessToken(client) ?: return null
+    return MediaStreamProxy.endpoint(host, id, client.baseUrl.toString().trimEnd('/'), token)
+}
+
+/**
+ * 向**活著的** client 要 access token。兩條路：
+ * 1) Koin 裡的 `MatrixClientAuthProviderDataStore`——Trixnity 續期後就是寫在這裡；
+ * 2) 退一條：`AuthenticationStore` 那筆 `providerData`（序列化過的登入回應 JSON）裡的 `access_token`。
+ *
+ * 都拿不到就回 null（呼叫端退回整檔下載），而且一定要留一行日誌：
+ * 2026-10-08 第一版讀的是磁碟上的 `session.properties`，那份只在登入當下寫一次，
+ * 續期後就是作廢的舊鑰匙（拿去要媒體一律 401），而當時只留下一句「沒有可用的登入憑證」，
+ * 我因此多繞了一輪。
+ */
+private suspend fun liveAccessToken(client: MatrixClient): String? {
+    val fromProvider = runCatching { client.di.get<MatrixClientAuthProviderDataStore>().getAuthData() }
+    fromProvider.exceptionOrNull()?.let { mediaProbe("串流代理：auth 存放點不可用 ${it::class.qualifiedName}") }
+    (fromProvider.getOrNull() as? ClassicMatrixClientAuthProviderData)?.accessToken?.let { return it }
+    val fromStore = runCatching {
+        val providerData = client.di.get<AuthenticationStore>().getAuthentication()?.providerData ?: return@runCatching null
+        providerData
+            .substringAfter("\"access_token\":\"", "")
+            .substringBefore('"')
+            .takeIf { it.isNotEmpty() }
+    }.getOrNull()
+    if (fromStore == null) {
+        val kind = fromProvider.getOrNull()?.let { it::class.simpleName } ?: "null"
+        mediaProbe("串流代理：拿不到活著的憑證（存放點回 $kind），退回整檔下載")
     }
-    return MediaStreamProxy.endpoint(host, id, base, token)
+    return fromStore
 }
 
 private fun mxcParts(mxcUrl: String): Pair<String, String>? {

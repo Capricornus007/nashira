@@ -54,8 +54,10 @@ import org.jetbrains.skia.ImageInfo
 import java.io.BufferedInputStream
 import java.io.DataInputStream
 import java.io.File
+import java.io.RandomAccessFile
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 import javax.sound.sampled.AudioFormat
 import javax.sound.sampled.AudioSystem
 import javax.sound.sampled.DataLine
@@ -160,12 +162,12 @@ actual fun EmbeddedVideoPlayer(
     }
 
     LaunchedEffect(input, info, playing, generation, resumeMs) {
-        val source = input ?: return@LaunchedEffect
+        val sourcePath = input ?: return@LaunchedEffect
         val meta = info ?: return@LaunchedEffect
         if (!playing) return@LaunchedEffect
         val startMs = resumeMs
         val ended = withContext(Dispatchers.IO) {
-            val decoder = MovieDecoder.create(source, meta, maxW, maxH, startMs)
+            val decoder = MovieDecoder.create(sourcePath, meta, maxW, maxH, startMs)
                 ?: return@withContext false
             var done = false
             try {
@@ -176,14 +178,16 @@ actual fun EmbeddedVideoPlayer(
                         done = true
                         break
                     }
-                    // 落後超過兩格就丟掉這張（只讀不轉），否則越積越慢、聲音先跑掉
-                    val late = System.nanoTime() - (decoder.startedAt + index * FrameNanos)
-                    if (late > 2 * FrameNanos) {
-                        index++
-                        continue
+                    val frameMs = index * 1000L / PlaybackFps
+                    val audioMs = decoder.audioPositionMs()
+                    // 只丟「落後音訊超過半秒」的格（那種畫面留著也沒意義，顯示最新那張就好）。
+                    // ⚠️ 準則一定是音訊、不是牆鐘：網路比影片位元率慢時，牆鐘永遠領先，
+                    // 每一格都會被判成過期格——用戶 2026-10-08 實測回報的
+                    // 「只有聲音沒有畫面、進度一直 0:00」就是那樣來的。
+                    if (audioMs == null || frameMs >= audioMs - StaleWindowMs) {
+                        decoder.toBitmap()?.let { frame = it }
+                        positionMs = startMs + (audioMs ?: frameMs)
                     }
-                    decoder.toBitmap()?.let { frame = it }
-                    positionMs = startMs + index * 1000L / PlaybackFps
                     index++
                     if (!isActive) break
                 }
@@ -313,7 +317,9 @@ actual fun EmbeddedVideoPlayer(
 
 /** 解格上限 fps：螢幕本來就 60Hz 上下，30 格夠順，也把 CPU 與複製量減一半（實測這條源是 60fps）。 */
 private const val PlaybackFps = 30
-private const val FrameNanos = 1_000_000_000L / PlaybackFps
+
+/** 落後音訊超過這個毫秒數的格才丟掉。 */
+private const val StaleWindowMs = 500L
 private const val SampleRate = 48000
 
 private fun formatClock(totalMs: Long): String = "%d:%02d".format(totalMs / 60_000, (totalMs / 1000) % 60)
@@ -377,15 +383,19 @@ private fun readCmdOutput(command: List<String>, timeoutSec: Long = 15): String?
     }
 }.getOrNull()
 
-/** 兩條行程共用的前半段：`-re` 讓 ffmpeg 自己按原速率輸出；`-ss` 放 `-i` 前面＝跳著讀，不用從頭解。 */
+/** 兩個輸出共用的前半段：`-re` 讓 ffmpeg 自己按原速率輸出；`-ss` 放 `-i` 前面＝跳著讀，不用從頭解。 */
 private fun ffmpegCommand(startMs: Long, source: String): List<String> = listOf(
     "ffmpeg", "-v", "error", "-re",
     "-ss", (startMs / 1000).toString(), "-i", source,
 )
 
 /**
- * 一趟播放：一條 ffmpeg 吐格、一條吐聲音。`close()` 一定要呼叫，
- * 否則 ffmpeg 會挂在後面繼續吃 CPU（暫停與關閉都走這裡）。
+ * 一趟播放：**一條** ffmpeg 同時出影與聲。`close()` 一定要呼叫，
+ * 否則 ffmpeg 会挂在後面繼續吃 CPU 與頻寬（暫停與關閉都走這裡）。
+ *
+ * 聲音那路是「第二個輸出＝一個會成長的 wav 暫存檔」，我們尾讀它餵給 SourceDataLine。
+ * 這樣同一個檔只抓一次；先前開兩條行程各抓一次，實測等於把他那條 ~150–280KB/s 的
+ * 鏈路流量翻倍，影片（570KB/s）直接播成四分之一速。
  */
 private class MovieDecoder private constructor(
     source: String,
@@ -394,6 +404,7 @@ private class MovieDecoder private constructor(
     maxH: Int,
     startMs: Long,
     private val errLog: File,
+    private val wavFile: File?,
 ) {
     // 等比縮到顯示框內，且**不放大**（原檔比框小就照原尺寸，白燒 CPU 沒意義）
     private val fit = minOf(maxW.toFloat() / info.width, maxH.toFloat() / info.height, 1f)
@@ -401,55 +412,71 @@ private class MovieDecoder private constructor(
     private val outH = (info.height * fit).toInt().coerceAtLeast(16)
     private val frameBytes = outW * outH * 4
     private val buffer = ByteArray(frameBytes)
-    val startedAt = System.nanoTime()
 
-    private val video = ProcessBuilder(
+    private val process = ProcessBuilder(
         ffmpegCommand(startMs, source) + listOf(
-            // 只取視訊、 fps 封頂：不封頂就是每秒解 60 格、每格还要走三次複製，CPU 白燒一倍
+            // 只取視訊、fps 封頂：不封頂就是每秒解 60 格、每格还要走三次複製，CPU 白燒一倍
             "-map", "0:v:0", "-an",
             "-vf", "scale=$outW:$outH,fps=$PlaybackFps",
             "-f", "rawvideo", "-pix_fmt", "bgra", "pipe:1",
+        ) + if (wavFile == null) emptyList() else listOf(
+            // `-flush_packets 1`：隨寫隨刷。不給的話尾讀那端要等 stdio 緩衝塞滿才看到資料，
+            // 聽起來就是聲音比畫面慢一大段。
+            "-map", "0:a:0?", "-vn", "-ac", "2", "-ar", "$SampleRate",
+            "-flush_packets", "1", "-f", "wav", wavFile.absolutePath,
         ),
     ).redirectError(errLog).start()
 
-    // stderr 一定要有人收：丟給暫存檔而不是管線，否則管線塞滿會把 ffmpeg 一起卡死（實測踩過類似坑）
-    private val input = DataInputStream(BufferedInputStream(video.inputStream, frameBytes * 2))
+    // stderr 一定要有人收：丟給暫存檔而不是管線，否則管線塞滿會把 ffmpeg 一起卡死
+    private val input = DataInputStream(BufferedInputStream(process.inputStream, frameBytes))
+    private val audioBytes = AtomicLong(0L)
 
-    private val audioProcess: Process?
+    @Volatile
+    private var stopped = false
 
-    init {
-        var process: Process? = null
-        if (info.hasAudio) {
-            val candidate = runCatching {
-                ProcessBuilder(
-                    ffmpegCommand(startMs, source) + listOf(
-                        "-map", "0:a:0?", "-vn",
-                        "-ac", "2", "-ar", "$SampleRate", "-f", "s16le", "pipe:1",
-                    ),
-                ).redirectError(ProcessBuilder.Redirect.DISCARD).start()
-            }.getOrNull()
-            val line = candidate?.let { openAudioLine() }
-            if (candidate == null || line == null) {
-                runCatching { candidate?.destroy() }
+    @Volatile
+    private var audioReady = false
+
+    private val audioThread: Thread? = wavFile?.let { file ->
+        Thread {
+            val line = openAudioLine()
+            if (line == null) {
+                mediaProbe("內嵌播放：開不到音訊輸出，這趟只會有畫面")
             } else {
-                process = candidate
-                Thread {
-                    runCatching {
-                        line.start()
-                        val stream = BufferedInputStream(candidate.inputStream)
+                runCatching {
+                    line.start()
+                    audioReady = true
+                    val raf = RandomAccessFile(file, "r")
+                    val dataStart = waitForDataChunk(raf)
+                    if (dataStart >= 0) {
+                        raf.seek(dataStart)
                         val payload = ByteArray(8192)
-                        while (true) {
-                            val read = stream.read(payload)
-                            if (read <= 0) break
+                        while (!stopped) {
+                            val available = raf.length() - raf.filePointer
+                            if (available <= 0) {
+                                if (!process.isAlive) break
+                                Thread.sleep(10)
+                                continue
+                            }
+                            val want = minOf(available, payload.size.toLong()).toInt()
+                            val read = raf.read(payload, 0, want)
+                            if (read <= 0) {
+                                Thread.sleep(5)
+                                continue
+                            }
                             line.write(payload, 0, read)
+                            audioBytes.addAndGet(read.toLong())
                         }
+                    } else {
+                        mediaProbe("內嵌播放：wav 裡找不到 data 區塊，這趟沒聲音")
                     }
-                    runCatching { line.stop() }
-                    runCatching { line.close() }
-                }.apply { isDaemon = true; name = "nashira-audio"; start() }
+                    runCatching { raf.close() }
+                }
+                runCatching { line.stop() }
+                runCatching { line.close() }
+                audioReady = false
             }
-        }
-        audioProcess = process
+        }.apply { isDaemon = true; name = "nashira-audio"; start() }
     }
 
     /** 讀一格到緩衝區；讀不完（到檔尾或行程被殺）回 false。 */
@@ -477,28 +504,67 @@ private class MovieDecoder private constructor(
         }
     }
 
+    /** 音訊時鐘（毫秒）；沒音軌、或音訊線開不起來時回 null＝改用「解出第幾格」當時鐘。 */
+    fun audioPositionMs(): Long? =
+        if (wavFile == null || !audioReady) null else audioBytes.get() * 1000L / BytesPerAudioSecond
+
     /** 讀到一半斷掉時，把 ffmpeg 的再見話說出來（正常播完是 0 出口，不噯）。 */
     fun reportFailure() {
         runCatching {
-            if (!video.isAlive && video.exitValue() != 0) {
-                mediaProbe("吐格行程挂了 exit=${video.exitValue()} ${errLog.readText().trim().takeLast(300)}")
+            if (!process.isAlive && process.exitValue() != 0) {
+                mediaProbe("吐格行程挂了 exit=${process.exitValue()} ${errLog.readText().trim().takeLast(300)}")
             }
         }
     }
 
     fun close() {
-        runCatching { video.destroy() }
-        runCatching { audioProcess?.destroy() }
-        // 音訊線交給那條幫浦執行緒收（它在寫入中 close 會丟出異常，已被 runCatching 包住）
+        stopped = true
+        runCatching { process.destroy() }
+        // 幫浦執行緒可能正堵在 line.write 上（聲音還有半緩衝區沒放完）：
+        // 等它一小拍再收，否則會累積一堆「對著已關閉的線寫資料」的執行緒。
+        runCatching { audioThread?.join(300) }
         runCatching { errLog.delete() }
+        runCatching { wavFile?.delete() }
     }
 
     companion object {
+        // 48000 Hz × 16 位元 × 2 聲道 = 每秒 192000 位元組
+        private const val BytesPerAudioSecond = SampleRate.toLong() * 2L * 2L
+
+        /** 找 wav 的 `data` 區塊起點（本體在它後面 8 個位元組）。回 -1＝沒找到。 */
+        private fun waitForDataChunk(raf: RandomAccessFile): Long {
+            val head = ByteArray(4096)
+            var tries = 0
+            while (tries < 300) {
+                val size = raf.length()
+                if (size >= 12) {
+                    val take = minOf(size, head.size.toLong()).toInt()
+                    raf.seek(0)
+                    raf.readFully(head, 0, take)
+                    for (i in 0..take - 4) {
+                        if (head[i] == 'd'.code.toByte() && head[i + 1] == 'a'.code.toByte() &&
+                            head[i + 2] == 't'.code.toByte() && head[i + 3] == 'a'.code.toByte()
+                        ) {
+                            return i + 8L
+                        }
+                    }
+                }
+                tries++
+                Thread.sleep(10)
+            }
+            return -1L
+        }
+
         /** ffmpeg 不存在、暫存檔開不了……一律回 null，讓上面顯示封面就好，別把整個應用程式弄炸。 */
         fun create(source: String, info: MovieInfo, maxW: Int, maxH: Int, startMs: Long): MovieDecoder? =
             runCatching {
-                val errLog = File.createTempFile("nashira-play-err-", ".log")
-                MovieDecoder(source, info, maxW, maxH, startMs, errLog)
+                val errLog = File.createTempFile("nashira-play-err-", ".log").apply { deleteOnExit() }
+                val wav = if (info.hasAudio) {
+                    File.createTempFile("nashira-play-audio-", ".wav").apply { deleteOnExit() }
+                } else {
+                    null
+                }
+                MovieDecoder(source, info, maxW, maxH, startMs, errLog, wav)
             }.onFailure { mediaProbe("建解碼器失敗：${it.message}") }.getOrNull()
     }
 }
