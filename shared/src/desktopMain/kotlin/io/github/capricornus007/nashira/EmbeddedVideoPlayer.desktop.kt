@@ -41,6 +41,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import de.connect2x.trixnity.client.MatrixClient
+import io.github.capricornus007.nashira.matrix.MediaSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
@@ -82,7 +84,8 @@ import javax.sound.sampled.SourceDataLine
  */
 @Composable
 actual fun EmbeddedVideoPlayer(
-    url: String?,
+    client: MatrixClient,
+    source: MediaSource,
     bytes: ByteArray?,
     poster: ImageBitmap?,
     boxWidth: Dp,
@@ -111,18 +114,37 @@ actual fun EmbeddedVideoPlayer(
         onDispose { stale?.let { runCatching { it.delete() } } }
     }
 
-    LaunchedEffect(url, bytes != null) {
+    LaunchedEffect(client, source, bytes != null) {
         if (input != null) return@LaunchedEffect
         withContext(Dispatchers.IO) {
-            val streamed = url?.let { probeMovie(it) }
-            if (streamed == null && url != null) mediaProbe("內嵌播放：串流探測沒成功，改試手上這份檔")
-            if (streamed != null) {
-                mediaProbe("內嵌播放：走串流 $url")
-                input = url
-                info = streamed
+            // 串流候選依序試（每一個都是「點開就能播」，差別在哪家伺服器讓不讓免驗證下載）：
+            // 1) 本機代理：帶著**活著的**憑證，matrix.org 這種把舊的免驗證端點關掉的只有這條
+            // 2) 原站的公開下載端點：t2bot.io 這類橋站還開著（實測 206＋accept-ranges: bytes）
+            val candidates = buildList {
+                mediaStreamUrl(client, source)?.let(::add)
+                (source as? MediaSource.Plain)?.let { plain -> mxcToPublicUrl(plain.mxcUrl)?.let(::add) }
+            }
+            var resolved: Pair<String, MovieInfo>? = null
+            candidates.forEachIndexed { index, candidate ->
+                if (resolved != null) return@forEachIndexed
+                val probed = probeMovie(candidate)
+                if (probed != null) resolved = candidate to probed
+                else mediaProbe("內嵌播放：串流候選 ${index + 1} 探測不通")
+            }
+            resolved?.let { (where, meta) ->
+                mediaProbe("內嵌播放：走串流（第 ${candidates.indexOf(where) + 1} 個候選）")
+                input = where
+                info = meta
                 return@withContext
             }
-            val data = bytes ?: return@withContext
+            // 兩條串流都不通才退回整份檔：檢視器手上那份（可能還沒抓到、甚至是 0 位元組），
+            // 再不通就直接向原站要一份。
+            val data = bytes?.takeIf { it.isNotEmpty() }
+                ?: (source as? MediaSource.Plain)?.let { downloadBytesFromOrigin(it.mxcUrl) }?.takeIf { it.isNotEmpty() }
+            if (data == null) {
+                mediaProbe("內嵌播放：串流與整檔都不通 ${source}")
+                return@withContext
+            }
             val file = writePlayableFile(data) ?: return@withContext
             val probed = probeMovie(file.absolutePath)
             if (probed == null) {
@@ -309,7 +331,8 @@ private class MovieInfo(
 
 /** 問尺寸與長度：解格要按顯示框縮，長度給進度條與拖動。網址與檔案都走同一條 ffprobe。 */
 private fun probeMovie(source: String): MovieInfo? = readCmdOutput(
-    listOf(
+    timeoutSec = 10,
+    command = listOf(
         "ffprobe", "-v", "error",
         "-show_entries", "format=duration:stream=codec_type,width,height",
         "-of", "default=noprint_wrappers=1",

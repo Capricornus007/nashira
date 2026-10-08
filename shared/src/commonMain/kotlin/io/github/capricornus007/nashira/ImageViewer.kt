@@ -79,7 +79,9 @@ fun ImageViewer(
                     is MediaSource.Encrypted -> service.getEncryptedMedia(source.file, maxSize = 32L * 1024 * 1024)
                 }.getOrThrow()
                 val bytes = media.toByteArray(this) ?: return@runCatching
-                fileBytes = bytes
+                // 0 位元組在實測裡真的出現過（家伺服器對某些遠端媒體回了個空 body），
+                // 當成「抓到檔」會把下載鈕與內嵌播放的退路一起騙過去。
+                fileBytes = bytes.takeIf { it.isNotEmpty() }
                 // 影片：首格只當「內嵌播放器還沒解出第一格時墊的圖」；下載仍存原檔
                 val decoded = if (isVideo) {
                     decodeVideoFrame(bytes, maxDimension = 2048)
@@ -130,7 +132,8 @@ fun ImageViewer(
                 // 有公網網址就直接串流（點開立刻播）；整檔還在下載、或加密房拿不到網址，
                 // 才退回用手上這份位元組落地播放。
                 isVideo -> EmbeddedVideoPlayer(
-                    url = mediaStreamUrl(source, client.userId.full),
+                    client = client,
+                    source = source,
                     bytes = playable,
                     poster = loaded,
                     boxWidth = 900.dp,

@@ -4,6 +4,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.unit.Dp
+import de.connect2x.trixnity.client.MatrixClient
+import io.github.capricornus007.nashira.matrix.MediaSource
 
 /**
  * 全螢幕檢視器裡的**內嵌影片播放**（Telegram／Discord 式：圖片與影片共用同一個殼，
@@ -18,12 +20,11 @@ import androidx.compose.ui.unit.Dp
  */
 @Composable
 expect fun EmbeddedVideoPlayer(
-    /**
-     * 可直接串流的公網網址（`mxc://` 換成的 download URL），有就優先用它：
-     * 點開立刻能播，不用等整檔下載完（用戶 2026-10-08「憑什麼視頻非得那麼久」）。
-     */
-    url: String?,
-    /** 已經抓在手上的整份檔案（檢視器為了「下載」抓著它）；[url] 不可用時用它落地再播。 */
+    /** 用它向「活的」登入憑證要一條本機串流網址（見 [mediaStreamUrl]）。 */
+    client: MatrixClient,
+    /** 媒體來源：`mxc://` 可以直接串流；加密的那種一定要整檔解密後才播。 */
+    source: MediaSource,
+    /** 已經抓在手上的整份檔案（檢視器為了「下載」抓著它）；串流不通時用它落地再播。 */
     bytes: ByteArray?,
     /** 還解不出格時先墊這張（通常是後端給的封面或首格）。 */
     poster: ImageBitmap?,
