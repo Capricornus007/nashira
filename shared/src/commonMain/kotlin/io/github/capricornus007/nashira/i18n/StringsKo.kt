@@ -31,6 +31,7 @@ object KoStrings : Strings by EnStrings {
     override val formatBold = "굵게"
     override val formatItalics = "이탤릭체"
     override val formatStrikethrough = "취소선"
+    override val formatUnderline = "밑줄"
     override val formatCodeBlock = "코드 블록"
     override val formatQuote = "인용"
     override val formatLink = "링크"

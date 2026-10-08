@@ -1898,7 +1898,9 @@ private fun TimelinePane(
                 else -> htmlEscape(text).replace("\n", "<br>") + imgs
             }
             val body = buildString {
-                append(text)
+                // 底線那對標籤只存在於 formatted_body：body 裡要拿掉，
+                // 否則不渲染 HTML 的客戶端會看到字面 `<u>`（用戶 2026-10-08 點名不可以）。
+                append(stripMarkupForBody(text))
                 emotes.forEach { append(" :").append(it.shortcode).append(':') }
             }.trim()
             val target = replyTo?.eventId

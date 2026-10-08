@@ -96,7 +96,19 @@ fun markdownToHtml(text: String): String? {
 /** 快速決斷：值不值得跑一趟完整解析。 */
 private fun containsMarkdownMarkup(text: String): Boolean =
     text.indexOf('*') >= 0 || text.indexOf('~') >= 0 || text.indexOf('`') >= 0 || text.indexOf('[') >= 0 ||
+        text.indexOf("<u>") >= 0 ||
         LINE_MARKUP.containsMatchIn(text) || ESCAPE_MARKUP.containsMatchIn(text)
+
+/**
+ * 給 `body`（純文字回退欄）用：把**我們自己插的**底線標籤去掉。
+ *
+ * 為什麼只清這一对、`**粗體**` 那些照留：Markdown 符號在純文字裡本來就读得懂，
+ * 而 `<u>` 留著的話，不認 HTML 的客戶端就會看到一堆標籤字（用戶 2026-10-08
+ * 明確要求「不能有這種風險」）。Element 的 WYSIWYG 模式同一套做法
+ * （`createMessageContent.ts` 走 `richToPlain`，body 是去標籤後的純文字）。
+ */
+fun stripMarkupForBody(text: String): String =
+    if (text.indexOf('<') < 0) text else text.replace("<u>", "").replace("</u>", "")
 
 /** 行首標記：`>` 引用、`- `/`* `/`+ ` 項目符號、`1. ` 編號。`(?m)` 讓每行的行首都算。 */
 private val LINE_MARKUP = Regex("""(?m)^\s*(?:>|[-*+]\s|\d+\.\s)""")
@@ -176,6 +188,20 @@ private fun inlineMarkdownToHtml(raw: String): String {
                     out.append("<a href=\"").append(htmlAttribute(safe)).append("\">")
                         .append(emphasized(label)).append("</a>")
                     i = link + 1
+                }
+            }
+            // 底線：Markdown 沒有這種寫法，Element 的 WYSIWYG 也是直接發原生 `<u>`
+            //（matrix-rich-text-editor `container_node.rs:1083`）。這裡只放行 `<u>…</u>`
+            // 這一對，其他尖括號一律照字面轉義——別讓輸入框變成 HTML 注入的入口。
+            // ⚠️ 不要改成 `__文字__`：CommonMark 把雙下劃線當粗體。
+            c == '<' && raw.startsWith("<u>", i) -> {
+                val close = raw.indexOf("</u>", i + 3)
+                val content = if (close < 0) null else raw.substring(i + 3, close)
+                if (content == null || !content.isWrappable()) {
+                    out.append(htmlEscape("<")); i++
+                } else {
+                    out.append("<u>").append(emphasized(content)).append("</u>")
+                    i = close + "</u>".length
                 }
             }
             else -> {

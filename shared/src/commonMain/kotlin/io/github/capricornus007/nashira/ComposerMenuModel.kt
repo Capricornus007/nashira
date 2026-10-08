@@ -49,6 +49,7 @@ enum class ComposerShortcut(val display: String, val key: Key, val shift: Boolea
     Bold("Ctrl+B", Key.B),
     Italics("Ctrl+I", Key.I),
     Strikethrough("Ctrl+Shift+X", Key.X, shift = true),
+    Underline("Ctrl+U", Key.U),
     CodeBlock("Ctrl+Shift+M", Key.M, shift = true),
     Quote("Ctrl+Shift+.", Key.Period, shift = true),
     Link("Ctrl+K", Key.K),
@@ -59,6 +60,7 @@ enum class ComposerShortcut(val display: String, val key: Key, val shift: Boolea
             ComposerFormat.Bold -> Bold
             ComposerFormat.Italics -> Italics
             ComposerFormat.Strikethrough -> Strikethrough
+            ComposerFormat.Underline -> Underline
             ComposerFormat.CodeBlock -> CodeBlock
             ComposerFormat.Quote -> Quote
             ComposerFormat.Link -> Link
@@ -159,6 +161,9 @@ fun buildComposerMenu(
         ComposerMenuItem(strings.menuDelete, enabled = hasSelection, destructive = true) {
             composerDeleteSelection(state)
         },
+        // Telegram 在「刪除」與「文字格式」之間有一條分隔線（剪貼群組與格式化群組分開）；
+        // 用戶 2026-10-07 那張 64Gram 截圖就是照它比的。
+        ComposerMenuItem(label = "", isSeparator = true),
         ComposerMenuItem(
             label = strings.menuFormat,
             submenu = ComposerFormat.entries.map { format ->

@@ -49,6 +49,7 @@ interface Strings {
     val formatBold: String
     val formatItalics: String
     val formatStrikethrough: String
+    val formatUnderline: String
     val formatCodeBlock: String
     val formatQuote: String
     val formatLink: String

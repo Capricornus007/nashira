@@ -12,13 +12,23 @@ import io.github.capricornus007.nashira.i18n.Strings
  * 換成 `org.matrix.custom.html`。
  *
  * 項目與順序照 Element Web 的 composer format bar（`Formatting` 列舉：
- * bold／italics／strikethrough／code／quote／insert_link）。它沒有底線鍵、
- * 也沒有清單鍵，我們就不自己加。
+ * bold／italics／strikethrough／code／quote／insert_link）。
+ *
+ * **底線是這輪補上的例外**（用戶 2026-10-07 拿 Telegram 的右鍵選單點名「你要不仔細看看」）：
+ * Element 的舊格式條確實沒有底線鍵，但「底線」本身不是自創——
+ * spec 的建議放行清單裡就有 `u`；Element Web 的 WYSIWYG 模式發的就是原生 `<u>`
+ * （matrix-rich-text-editor `container_node.rs:1083` 那句註解：
+ * “Underline format is absent from Markdown. Let's use raw HTML.”）；
+ * 渲染端 Element Web（sanitize-html 清單含 `u`）、Element X（`TAG_U -> TextDecoration.Underline`）、
+ * Nheko、FluffyChat 全部吃得下，我們自己的 `htmlToRichText` 也早就認 `u`。
+ * ⚠️ 千萬別改成 `__文字__`：CommonMark 把雙下劃線當**粗體**（Element 的測試檔
+ * `Markdown-test.ts:186` 就寫著 `__not__` → `<strong>not</strong>`）。
  */
 enum class ComposerFormat {
     Bold,
     Italics,
     Strikethrough,
+    Underline,
     CodeBlock,
     Quote,
     Link,
@@ -28,6 +38,7 @@ enum class ComposerFormat {
         Bold -> strings.formatBold
         Italics -> strings.formatItalics
         Strikethrough -> strings.formatStrikethrough
+        Underline -> strings.formatUnderline
         CodeBlock -> strings.formatCodeBlock
         Quote -> strings.formatQuote
         Link -> strings.formatLink
@@ -62,6 +73,9 @@ fun applyComposerFormat(state: TextFieldState, format: ComposerFormat) {
         ComposerFormat.Bold -> state.wrapWith("**", "**")
         ComposerFormat.Italics -> state.wrapWith("*", "*")
         ComposerFormat.Strikethrough -> state.wrapWith("~~", "~~")
+        // 底線沒有 Markdown 寫法，插的是原生 `<u>`／`</u>`（與 Element WYSIWYG 同一產出）；
+        // 送出時 `markdownToHtml` 原樣放行，`body` 那側會把標籤去掉（見 stripMarkupForBody）。
+        ComposerFormat.Underline -> state.wrapWith("<u>", "</u>")
         ComposerFormat.CodeBlock -> state.wrapWith("```\n", "\n```")
         ComposerFormat.Quote -> state.toggleQuote()
         ComposerFormat.Link -> state.wrapLink()
