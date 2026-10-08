@@ -3016,8 +3016,9 @@ private fun TimelinePane(
                             // 圖片與影片都進同一個全螢幕檢視器；影片在裡面內嵌播放。
                             // 之前是「點影片→抓整檔→交給系統播放器」，實測會
                             // 延遲好幾秒、連點就開好幾個外部視窗（用戶 2026-10-08 #151）。
-                            // 相簿傳整組、從點的那一格開始，進去就能連翻。
-                            viewerTarget = MediaViewer(media, at)
+                            // mediaStripFrom：連翻範圍照 Telegram 放大到整個聊天室的媒體序列，
+                            // 不是只翻同一組相簿（用戶 2026-10-08：「電報是直接可以切換聊天內所有圖片的」）。
+                            viewerTarget = mediaStripFrom(loaded, media, at)
                         },
                         onDownloadImage = { img ->
                             scope.launch {

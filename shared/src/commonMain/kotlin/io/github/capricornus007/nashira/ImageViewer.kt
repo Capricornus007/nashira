@@ -69,6 +69,35 @@ data class MediaViewer(
 )
 
 /**
+ * 照 Telegram 把連翻範圍放大到**整個聊天室的媒體序列**。
+ * tdesktop 的全螢幕檢視器翻的不是「這一組」，而是那份聊天媒體切片：
+ * `overlay_widget.cpp:3002-3064 sharedMediaType()` 把照片／影片歸成一類，
+ * `_index`（`:685`）是那份切片裡的序號，`moveToNext`（`:5905-5913`）就是序號加減一。
+ * 所以從相簿裡點開一張，左右鍵能一路翻到更早其他訊息裡的圖。
+ *
+ * [loaded] 是時間線目前載入的那一段（**新→舊**），這裡翻成舊→新再攤平，
+ * 相簿那幾張依序進清單，「組內相鄰」天然成立。
+ * 找不到起點（來源比對不上）就退回原本傳進來的那一組——寧可少翻，不要翻錯。
+ */
+internal fun mediaStripFrom(
+    loaded: List<io.github.capricornus007.nashira.matrix.TimelineMessage>,
+    media: List<MessageBody.Image>,
+    at: Int,
+): MediaViewer {
+    val strip = ArrayList<MessageBody.Image>(loaded.size)
+    loaded.asReversed().forEach { message ->
+        when (val body = message.body) {
+            is MessageBody.Image -> if (!body.isSticker) strip += body
+            is MessageBody.Album -> body.items.forEach { if (!it.isSticker) strip += it }
+            else -> Unit
+        }
+    }
+    val anchor = media.getOrNull(at) ?: return MediaViewer(media, at.coerceIn(media.indices))
+    val found = strip.indexOfFirst { it.source == anchor.source }
+    return if (found >= 0) MediaViewer(strip, found) else MediaViewer(media, at)
+}
+
+/**
  * 全螢幕圖片檢視器（Discord／Element 式）：
  * 雙指縮放＋平移、雙擊在 1x／2.5x 間切換、點背景關閉、右上角下載。
  * 原圖走 getMedia（時間線用的是縮圖），下載也用同一份位元組。

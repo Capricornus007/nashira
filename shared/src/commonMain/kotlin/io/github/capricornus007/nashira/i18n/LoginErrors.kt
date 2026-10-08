@@ -36,10 +36,13 @@ fun friendlyError(t: Throwable): String {
         // 「403」要用**獨立數字**去配：事件 ID、位元組數裡出現 403 這三個連號很常見，
         // 用 contains("403") 會把別的錯誤翻成「權限不足」（#90 那條「先讓錯誤說真話」的延伸）。
         msg.contains("M_FORBIDDEN") || HTTP_403.containsMatchIn(msg) -> {
-            // 有原話就只講原話，別再替伺服器猜原因
+            // 有原話就只講原話；摳不到原話時**把原始回應貼出來**，
+            // 不要再退回那句我自己編的「權限不足或已超出配額」——用戶 2026-10-08 裝了
+            // 0.1.88 再刪一次，看到的還是那句舊話，代表 Trixnity 丟出來的字串裡
+            // 根本沒有 `"error"` 欄位可摳。那種情況下唯一誠實的做法是把原文給他看。
             val reason = serverReason(msg)
             if (reason != null) "伺服器拒絕了這個操作（伺服器原話：$reason）"
-            else "伺服器拒絕了這個操作：權限不足或已超出配額"
+            else "伺服器拒絕了這個操作（伺服器原始回應：${msg.take(300).ifBlank { "空" }}）"
         }
         msg.contains("M_LIMIT_EXCEEDED") ->
             "嘗試次數太多，請稍後再試"
