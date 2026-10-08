@@ -47,6 +47,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
@@ -233,6 +234,14 @@ actual fun EmbeddedVideoPlayer(
             ) ?: return@withContext false
             var done = false
             var firstFrameLogged = false
+            // 看門狗要**平行跑**：真正的卡法是 `readFrame()` 永遠不返回（2026-10-08 那次
+            // 卡在 ffmpeg 的 `Overwrite? [y/N]` 提示上：行程活著、不出口、也不吐資料），
+            // 放在迴圈裡任何一处都輪不到執行。
+            val framesRead = java.util.concurrent.atomic.AtomicInteger(0)
+            val watchdog = launch {
+                delay(NoFrameWatchdogMs)
+                if (framesRead.get() == 0) decoder.warnIfNoOutput()
+            }
             try {
                 var index = 0
                 while (true) {
@@ -262,9 +271,11 @@ actual fun EmbeddedVideoPlayer(
                         }
                     }
                     index++
+                    framesRead.incrementAndGet()
                     if (!isActive) break
                 }
             } finally {
+                watchdog.cancel()
                 decoder.close()
             }
             done && isActive
@@ -401,6 +412,9 @@ actual fun EmbeddedVideoPlayer(
 
 /** 解格上限 fps：螢幕本來就 60Hz 上下，30 格夠順，也把 CPU 與複製量減一半（實測這條源是 60fps）。 */
 private const val PlaybackFps = 30
+
+/** 第一格等这么久還是不來，就把 stderr 唸進日誌。 */
+private const val NoFrameWatchdogMs = 6_000L
 
 /** 落後音訊超過這個毫秒數的格才丟掉。 */
 private const val StaleWindowMs = 500L
@@ -665,6 +679,16 @@ private class MovieDecoder private constructor(
     /** 音訊時鐘（毫秒）；沒音軌、或音訊線開不起來時回 null＝改用「解出第幾格」當時鐘。 */
     fun audioPositionMs(): Long? =
         if (wavFile == null || !audioReady) null else audioBytes.get() * 1000L / BytesPerAudioSecond
+
+    /** 第一格迟迟不來時的主動交代：行程還活著卻沒輸出，多半是卡在什麼「等人回話」上。 */
+    fun warnIfNoOutput() {
+        runCatching {
+            val err = runCatching { errLog.readText().trim() }.getOrNull().orEmpty()
+            val alive = process.isAlive
+            val exit = if (alive) "（還在跑）" else process.exitValue().toString()
+            mediaProbe("內嵌播放：${NoFrameWatchdogMs}ms 內一格都沒有；alive=$alive exit=$exit stderr=${err.take(300).ifBlank { "(空)" }}")
+        }
+    }
 
     /** 讀到一半斷掉時，把 ffmpeg 的再見話說出來（正常播完是 0 出口，不噯）。 */
     fun reportFailure() {
