@@ -1852,6 +1852,13 @@ private fun TimelinePane(
                 // 全部可顯示事件被過濾掉（治理房整片 server_acl）或房間訊息數 0 時沒有可滾動內容，
                 // 使用者無從觸發載入——直接自動往前翻，直到撈到能顯示的訊息或沒有更多為止。
                 val needsAutoLoad = shown == 0 && canLoad && autoLoads < MaxAutoLoads
+                // 用戶 2026-10-08「爲啥今天之外的訊息不能自動加載啊」：靜態讀程式碼分不出是
+                // `canLoadMore` 根本沒開、`loadingBefore` 卡住沒复位、還是 `lastVisible` 判斷錯
+                // （清單裡還夾著日期分隔線，索引跟訊息數本來就不是同一套），所以把四個值都寫進日誌。
+                mediaProbe(
+                    "往前載入 shown=$shown lastVisible=$lastVisible canLoad=$canLoad " +
+                        "loading=$loading atOldest=$atOldest autoLoads=$autoLoads",
+                )
                 if ((atOldest || needsAutoLoad) && canLoad && !loading) {
                     if (needsAutoLoad) autoLoads += 1
                     timelineScope.launch { timeline.loadBefore() }
@@ -2058,6 +2065,21 @@ private fun TimelinePane(
         it.sender == roomRepository.client.userId && it.eventId != null
     }
     var downloadNotice by remember(room.roomId) { mutableStateOf<String?>(null) }
+    // 提示與錯誤都要**自己消失**（用戶 2026-10-08：「爲啥這東西不會自動消失啊」）。
+    // 這兩條以前會一路掛在輸入框上方：擋住對話、而且同一句錯誤他早就看過了。
+    // 錯誤給 12 秒（現在會附伺服器的原始回應，字很長，4 秒讀不完），一般提示 4 秒。
+    LaunchedEffect(sendError) {
+        if (sendError != null) {
+            delay(12_000)
+            sendError = null
+        }
+    }
+    LaunchedEffect(downloadNotice) {
+        if (downloadNotice != null) {
+            delay(4_000)
+            downloadNotice = null
+        }
+    }
     val imageSaver = rememberImageSaver()
     // 只有桌面有底欄那顆麥克風靜音鈕（audioDeviceSettingsSupported），Android 上恆
     // false：手機既沒有開關可擋錄音，也不該提示用戶去點一顆不存在的鈕。
