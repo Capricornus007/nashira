@@ -150,7 +150,10 @@ fun ImageViewer(
         // 事件掛在**根 Box** 上（onPreviewKeyEvent 是預覽、先於子節點），
         // 這樣焦點在關閉鈕／下載鈕上時方向鍵也照樣翻。
         val pagerFocus = remember { FocusRequester() }
-        LaunchedEffect(Unit) {
+        // 每一次換格都要重新要焦點：從影片切回圖片時，子樹整個換掉（內嵌播放器那層消失了），
+        // 原本持焦的節點跟著銷毀，焦點就掉到沒有物件——用戶 2026-10-08 實測
+        // 「從視頻切換到圖片就切換不回去了」就是這個。只請求一次（Unit）撐不過換格。
+        LaunchedEffect(index, items.size) {
             if (items.size > 1) runCatching { pagerFocus.requestFocus() }
         }
         val transformState = rememberTransformableState { zoomChange, panChange, _ ->

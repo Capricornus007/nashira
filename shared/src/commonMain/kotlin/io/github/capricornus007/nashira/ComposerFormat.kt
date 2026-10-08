@@ -97,7 +97,22 @@ private fun TextFieldState.wrapLink() {
 private fun TextFieldState.wrapWith(prefix: String, suffix: String) {
     val start = selection.min
     val end = selection.max
-    val inner = text.substring(start, end)
+    val full = text.toString()
+    val inner = full.substring(start, end)
+    // 再按一次是**取消**，不是繼續疊（用戶 2026-10-08 按了五下底線，
+    // 框裡變成 `<u><u><u><u><u>你好</u></u></u></u></u>`）。
+    // 判別條件：選取範圍正好被同一對標記夾著（套完之後選取就停在標記內側，
+    // 所以「同一處再按一次」一定命中這裡）。Telegram／Element 的格式鈕都是開關。
+    if (start >= prefix.length && end + suffix.length <= full.length &&
+        full.substring(start - prefix.length, start) == prefix &&
+        full.substring(end, end + suffix.length) == suffix
+    ) {
+        edit {
+            replace(start - prefix.length, end + suffix.length, inner)
+            selection = TextRange(start - prefix.length, start - prefix.length + inner.length)
+        }
+        return
+    }
     edit {
         replace(start, end, prefix + inner + suffix)
         // 選取範圍跟著搬：同一鍵再按一次是換標記，不是把游標丟到尾巴
