@@ -78,6 +78,8 @@ internal suspend fun watchNotifications(client: MatrixClient, myUserId: UserId) 
             val text = when (body) {
                 is MessageBody.Text -> body.text
                 is MessageBody.Image -> if (body.isSticker) strings.notifSticker else strings.notifImage
+                // 相簿是時間線才做的併組，通知逐則事件永遠不會是 Album；這是穷尽分支的保险
+                is MessageBody.Album -> strings.notifImage
                 is MessageBody.Voice -> strings.voiceMessage
                 is MessageBody.Attachment -> body.name
                 MessageBody.Undecryptable -> strings.notifUndecryptable

@@ -10,9 +10,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -43,25 +47,42 @@ import de.connect2x.trixnity.client.MatrixClient
 import de.connect2x.trixnity.client.media.MediaService
 import de.connect2x.trixnity.utils.toByteArray
 import io.github.capricornus007.nashira.matrix.MediaSource
+import io.github.capricornus007.nashira.matrix.MessageBody
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+
+/**
+ * 全螢幕檢視器的一組媒體＋目前位置。相簿傳整組，單張傳只有一筆的組，
+ * 這樣檢視器只有一條路徑（都能連翻、都有計數），不必分兩種狀態。
+ */
+data class MediaViewer(
+    val items: List<MessageBody.Image>,
+    val index: Int,
+)
 
 /**
  * 全螢幕圖片檢視器（Discord／Element 式）：
  * 雙指縮放＋平移、雙擊在 1x／2.5x 間切換、點背景關閉、右上角下載。
  * 原圖走 getMedia（時間線用的是縮圖），下載也用同一份位元組。
+ *
+ * [items] 大于一筆時就是相簿：左右兩側給連翻鈕、方向鍵也能翻，
+ * 從時間線點的那一格開始（[index]），翻完整組才結束——照 Telegram／Element 的燈光箱。
  */
 @Composable
 fun ImageViewer(
     client: MatrixClient,
-    source: MediaSource,
-    caption: String,
-    fileName: String,
-    mimeType: String?,
+    items: List<MessageBody.Image>,
+    index: Int,
+    onSelectIndex: (Int) -> Unit,
     /** 「抓不到檔」時的提示文案（用呼叫端的 strings，不在這裡硬寫字串）。 */
     downloadFailedLabel: String,
     onDismiss: () -> Unit,
 ) {
+    val current = items[index.coerceIn(items.indices)]
+    val source = current.source
+    val caption = current.caption
+    val mimeType = current.mimeType
+    val fileName = current.caption.ifBlank { "nashira-media" }
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false),
@@ -113,8 +134,8 @@ fun ImageViewer(
             }.onFailure { failed = true }
         }
 
-        var scale by remember { mutableFloatStateOf(1f) }
-        var offset by remember { mutableStateOf(Offset.Zero) }
+        var scale by remember(key) { mutableFloatStateOf(1f) }
+        var offset by remember(key) { mutableStateOf(Offset.Zero) }
         val transformState = rememberTransformableState { zoomChange, panChange, _ ->
             scale = (scale * zoomChange).coerceIn(1f, 6f)
             offset = if (scale > 1f) offset + panChange else Offset.Zero
@@ -222,6 +243,55 @@ fun ImageViewer(
                     IconButton(onClick = onDismiss) {
                         Icon(Icons.Filled.Close, contentDescription = null, tint = Color.White)
                     }
+                }
+            }
+            // 相簿連翻：左右兩側的箭頭鈕＋左上角計數，照 Element 的燈光箱
+            //（到頭就停用，不是繞回——繞回讓人以為整組在循環，找不到「結束」）。
+            // 不接方向鍵：桌面端 Dialog 沒拿到焦點時鍵盤事件根本進不來，
+            // 擺一個「可能不會動」的按鍵比擺一個看得見按得動的鈕更糟。
+            if (items.size > 1) {
+                val safeIndex = index.coerceIn(items.indices)
+                IconButton(
+                    enabled = safeIndex > 0,
+                    onClick = { onSelectIndex(safeIndex - 1) },
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .padding(start = 8.dp)
+                        .background(Color.Black.copy(alpha = 0.45f), CircleShape),
+                ) {
+                    Icon(
+                        Icons.Filled.KeyboardArrowLeft,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(34.dp),
+                    )
+                }
+                IconButton(
+                    enabled = safeIndex < items.lastIndex,
+                    onClick = { onSelectIndex(safeIndex + 1) },
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .padding(end = 8.dp)
+                        .background(Color.Black.copy(alpha = 0.45f), CircleShape),
+                ) {
+                    Icon(
+                        Icons.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(34.dp),
+                    )
+                }
+                Surface(
+                    color = Color.Black.copy(alpha = 0.55f),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.align(Alignment.TopStart).padding(top = 36.dp, start = 12.dp),
+                ) {
+                    Text(
+                        text = "${safeIndex + 1} / ${items.size}",
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    )
                 }
             }
             SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = 32.dp))

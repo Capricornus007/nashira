@@ -162,6 +162,16 @@ sealed interface MessageBody {
         val sizeBytes: Long? = null,
     ) : MessageBody
 
+    /**
+     * 相簿（一次發出的多張圖／影片）。排版照 Telegram：
+     * 整組共用一則說明文字、圖片併排，格數上限 10。
+     * [items] 的順序就是 Telegram 那組裡的順序（橋站是按順序送進 Matrix 的）。
+     */
+    data class Album(
+        val items: List<Image>,
+        val caption: String,
+    ) : MessageBody
+
     /** 檔案／音訊／影片：先用檔名標示，還沒做內建播放 */
     data class Attachment(val name: String) : MessageBody
 
@@ -207,6 +217,12 @@ data class TimelineMessage(
     val edited: Boolean = false,
     /** 這則是回覆（m.in_reply_to）：目標事件 ID。UI 以此畫 Discord 式「↩ 名字: 預覽」。 */
     val replyToEventId: EventId? = null,
+    /**
+     * 相簿區塊包含的所有事件 ID（含區塊本身那一則）。
+     * 併組之後「被回覆的事件」「已讀位置」可能落在組裡任何一張上，
+     * 只比對區塊頭那則的 eventId 會找不到、把回覆預覽跟已讀標記悄悄弄丟。
+     */
+    val albumMemberIds: List<EventId> = emptyList(),
 )
 
 /** 伺服器全文搜尋回傳的訊息；搜尋結果不會改動目前時間線，只供結果清單定位。 */
@@ -807,6 +823,20 @@ class RoomRepository(val client: MatrixClient) {
     suspend fun forwardMessage(targetRoom: RoomId, message: TimelineMessage): Result<String> = runCatching {
         when (val body = message.body) {
             is MessageBody.Text -> sendText(targetRoom, body.text).getOrThrow()
+            is MessageBody.Album -> {
+                // 轉寄出去不會再變成相簿：Matrix 端沒有欄位能把幾則訊息串成一組
+                //（見 MediaAlbum.kt 的實查），所以逐張原樣重發，整組的說明文字掛在第一張上。
+                var forwarded = ""
+                body.items.forEachIndexed { i, item ->
+                    forwarded = forwardMessage(
+                        targetRoom,
+                        message.copy(
+                            body = item.copy(caption = if (i == 0) body.caption.ifBlank { item.caption } else ""),
+                        ),
+                    ).getOrThrow()
+                }
+                forwarded
+            }
             is MessageBody.Image -> {
                 val info = ImageInfo(
                     width = body.width,

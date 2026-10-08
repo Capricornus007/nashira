@@ -187,6 +187,7 @@ import kotlin.math.roundToInt
 import io.github.capricornus007.nashira.matrix.MatrixSession
 import io.github.capricornus007.nashira.matrix.RoomRepository
 import io.github.capricornus007.nashira.matrix.MediaSource
+import io.github.capricornus007.nashira.matrix.containsEvent
 import io.github.capricornus007.nashira.matrix.RoomSummary
 import de.connect2x.trixnity.core.model.RoomId
 import io.github.capricornus007.nashira.matrix.UnreadState
@@ -2041,8 +2042,9 @@ private fun TimelinePane(
     var viewSourceLoading by remember(room.roomId) { mutableStateOf(false) }
     // 「轉寄」選目標房間
     var forwardTarget by remember(room.roomId) { mutableStateOf<TimelineMessage?>(null) }
-    // 全螢幕圖片檢視器與下載結果提示
-    var viewerTarget by remember(room.roomId) { mutableStateOf<MessageBody.Image?>(null) }
+    // 全螢幕圖片檢視器與下載結果提示。相簿是「整組 + 停在哪一格」，
+    // 單張就是只有這一筆的組，檢視器因此一律能連翻。
+    var viewerTarget by remember(room.roomId) { mutableStateOf<MediaViewer?>(null) }
     // 刪除確認：Discord 式「不可復原」+ Element 式選填原因（redact reason）
     var deleteTarget by remember(room.roomId) { mutableStateOf<TimelineMessage?>(null) }
     var deleteReason by remember(room.roomId) { mutableStateOf("") }
@@ -2247,6 +2249,7 @@ private fun TimelinePane(
                                     is MessageBody.Text -> body.text
                                     is MessageBody.Image ->
                                         if (body.isSticker) strings.notifSticker else strings.notifImage
+                                    is MessageBody.Album -> strings.notifImage
                                     is MessageBody.Voice -> strings.voiceMessage
                                     is MessageBody.Attachment -> body.name
                                     MessageBody.Undecryptable -> strings.notifUndecryptable
@@ -2907,7 +2910,9 @@ private fun TimelinePane(
                     // 「上方」（真機座標實證：放前面反而落到訊息下方、日期錯位一塊）。
                     // Discord 回覆上下文：目標事件在目前視窗內才拿得到名字/預覽；
                     // 不在視窗（更早的歷史）就只畫「回覆」不帶內容。
-                    val replyTarget = msg.replyToEventId?.let { rid -> loaded.firstOrNull { it.eventId == rid } }
+                    // containsEvent：相簿併組之後，被回覆的那一則可能落在區塊裡任何一張上，
+                    // 只比對區塊頭那則的 eventId 會「明明回覆過卻顯示不出名字」。
+                    val replyTarget = msg.replyToEventId?.let { rid -> loaded.firstOrNull { it.containsEvent(rid) } }
                     val remoteReply = msg.replyToEventId?.full
                         ?.takeIf { replyTarget == null }
                         ?.let { replyContexts[it] }
@@ -3005,11 +3010,12 @@ private fun TimelinePane(
                                 }
                             }
                         },
-                        onOpenImage = { img ->
+                        onOpenImage = { media, at ->
                             // 圖片與影片都進同一個全螢幕檢視器；影片在裡面內嵌播放。
                             // 之前是「點影片→抓整檔→交給系統播放器」，實測會
                             // 延遲好幾秒、連點就開好幾個外部視窗（用戶 2026-10-08 #151）。
-                            viewerTarget = img
+                            // 相簿傳整組、從點的那一格開始，進去就能連翻。
+                            viewerTarget = MediaViewer(media, at)
                         },
                         onDownloadImage = { img ->
                             scope.launch {
@@ -3061,7 +3067,7 @@ private fun TimelinePane(
                     )
                     // 已讀提示（Element 式 ✓）：掛在自己最新一則訊息的正下方，
                     // 有人 m.read 到這則就顯示人數；reverseLayout 下這裡是視覺下方。
-                    if (msg.eventId == lastOwnEventId && ownReadCount > 0) {
+                    if (lastOwnEventId != null && msg.containsEvent(lastOwnEventId) && ownReadCount > 0) {
                         Row(
                             Modifier.fillMaxWidth().padding(end = 22.dp),
                             horizontalArrangement = Arrangement.End,
@@ -3526,14 +3532,13 @@ private fun TimelinePane(
     }
 
 
-    // 全螢幕圖片檢視器：雙指縮放／雙擊縮放／下載
-    viewerTarget?.let { img ->
+    // 全螢幕圖片檢視器：雙指縮放／雙擊縮放／下載；相簿还能整組連翻
+    viewerTarget?.let { viewer ->
         ImageViewer(
             client = roomRepository.client,
-            source = img.source,
-            caption = img.caption,
-            fileName = img.caption.ifBlank { "nashira-media" },
-            mimeType = img.mimeType,
+            items = viewer.items,
+            index = viewer.index,
+            onSelectIndex = { viewerTarget = viewer.copy(index = it) },
             downloadFailedLabel = strings.downloadFailed,
             onDismiss = { viewerTarget = null },
         )
@@ -3598,6 +3603,7 @@ internal fun bodyPreview(body: MessageBody): String? = when (body) {
     // 預覽列也要 pangu：它是「↩ 名字: 預覽」那一行的內容來源
     is MessageBody.Text -> body.text.lineSequence().firstOrNull { it.isNotBlank() }?.take(60)?.let { pangu(it) }
     is MessageBody.Image -> if (body.isSticker) "貼圖" else "圖片"
+    is MessageBody.Album -> "圖片"
     is MessageBody.Voice -> "語音訊息"
     is MessageBody.Attachment -> body.name
     MessageBody.Undecryptable -> null
@@ -3690,7 +3696,8 @@ private fun MessageRow(
     onForward: () -> Unit,
     onToggleReaction: (String, EventId?) -> Unit,
     onTogglePin: () -> Unit,
-    onOpenImage: (MessageBody.Image) -> Unit = {},
+    /** 開全螢幕檢視器：傳整組媒體與起點（相簿要多筆、單張只有一筆）。 */
+    onOpenImage: (List<MessageBody.Image>, Int) -> Unit = { _, _ -> },
     onDownloadImage: (MessageBody.Image) -> Unit = {},
     onHideImage: (MessageBody.Image) -> Unit = {},
     /** 回覆上下文（Discord 式「↩ 名字: 預覽」）：目標在視窗內才有值。 */
@@ -4386,7 +4393,7 @@ private fun MessageBodyContent(
     strings: io.github.capricornus007.nashira.i18n.Strings,
     modifier: Modifier = Modifier,
     isOwn: Boolean = false,
-    onOpenImage: ((MessageBody.Image) -> Unit)? = null,
+    onOpenImage: ((List<MessageBody.Image>, Int) -> Unit)? = null,
 ) {
     val ui = LocalUiState.current
     when (body) {
@@ -4454,11 +4461,18 @@ private fun MessageBodyContent(
                     // 佔位點一下直接取消隱藏，不用再進選單
                     { if (mxc != null) ui.hiddenMedia = ui.hiddenMedia - mxc }
                 } else {
-                    onOpenImage?.let { open -> { open(body) } }
+                    onOpenImage?.let { open -> { open(listOf(body), 0) } }
                 },
                 hiddenLabel = if (hidden) strings.hiddenImage else null,
             )
         }
+        is MessageBody.Album -> MessageAlbum(
+            client = client,
+            album = body,
+            strings = strings,
+            modifier = modifier,
+            onOpen = { at -> onOpenImage?.invoke(body.items, at) },
+        )
         is MessageBody.Voice -> VoiceBubble(
             client = client,
             source = body.source,
@@ -4618,6 +4632,8 @@ private fun MessageBody.previewText(strings: io.github.capricornus007.nashira.i1
     when (this) {
         is MessageBody.Text -> text.oneLinePreview()
         is MessageBody.Image -> if (isSticker) strings.stickerMessage else strings.imageMessage
+        // 相簿的預覽优先給整組那則說明文字；沒有說明就是「圖片」（Telegram 也是這樣）
+        is MessageBody.Album -> caption.takeIf { it.isNotBlank() }?.oneLinePreview() ?: strings.imageMessage
         is MessageBody.Voice -> strings.voiceMessage
         is MessageBody.Attachment -> name
         MessageBody.Undecryptable -> strings.undecryptable

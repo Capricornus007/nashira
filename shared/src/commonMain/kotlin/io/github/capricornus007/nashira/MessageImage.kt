@@ -77,6 +77,12 @@ fun MessageImage(
     /** 影片的時長與檔大小（m.video 的 info）：兩個都過小才允許**行內連播**。 */
     durationMs: Long? = null,
     sizeBytes: Long? = null,
+    /**
+     * 相簿格子：寬與高都由外層的格子決定，這裡不再套單張的 264.dp 上限、
+     * 也不照圖片比例自己撐高（一律裁切填滿）。少了這個開關，相簿裡一張長條圖
+     * 會把整列撐到 480dp 高。
+     */
+    insideAlbumCell: Boolean = false,
 ) {
     val key = remember(source) { source.cacheKey() }
     var bitmap by remember(key) { mutableStateOf(MediaBitmapCache.get(key)) }
@@ -132,9 +138,17 @@ fun MessageImage(
 
     // 事件裡的長寬只用來保留版位，避免圖片載入後把整條時間線往下推
     val ratio = ratioOf(width, height, bitmap)
-    val frame = modifier
-        .widthIn(max = maxWidth)
-        .then(if (isSticker) Modifier else Modifier.clip(RoundedCornerShape(12.dp)))
+    val frame = if (insideAlbumCell) {
+        // 相簿格子：圓角由這格自己裁（6dp，跟 Telegram 的格子一樣是「小圓角、緊貼著排」），
+        // 尺寸一律聽外層的，不再套 264.dp 上限、也不照圖片比例撐高。
+        modifier.clip(RoundedCornerShape(6.dp))
+    } else {
+        modifier
+            .widthIn(max = maxWidth)
+            .then(if (isSticker) Modifier else Modifier.clip(RoundedCornerShape(12.dp)))
+    }
+    // 單張照自己的比例撐高；相簿格子由外層決定，填滿即可（超出部分裁掉）
+    val sizing = if (insideAlbumCell) Modifier.fillMaxSize() else Modifier.fillMaxWidth().aspectRatio(ratio)
     // 動態貼圖：有多格就照每一格自帶的停留時間輪播（Telegram 的貼圖就是動的，
     // 用戶 2026-10-07 點名「為什麼貼紙是靜態的」）。
     val loaded = animatedFrameOrNull(key, frames) ?: bitmap
@@ -156,7 +170,7 @@ fun MessageImage(
     when {
         // 隱藏的圖片：佔位可點擊恢復（Element 的「隱藏」也是可逆的）
         hiddenLabel != null -> Box(
-            frame.fillMaxWidth().height(96.dp),
+            if (insideAlbumCell) frame.fillMaxSize() else frame.fillMaxWidth().height(96.dp),
             contentAlignment = Alignment.Center,
         ) {
             Text(
@@ -167,8 +181,7 @@ fun MessageImage(
         }
         loaded != null -> Box(
             frame
-                .fillMaxWidth()
-                .aspectRatio(ratio)
+                .then(sizing)
                 .then(if (onOpen != null) Modifier.clickable(onClick = onOpen) else Modifier),
         ) {
             if (autoplayInline) {
@@ -218,12 +231,12 @@ fun MessageImage(
         // 貼圖的佔位不畫灰底：多數貼圖有透明背景，灰塊會在載入前一閃，看起來
         // 像是「貼圖壞了」。圖片訊息保留灰底（裁切圓角需要一個可見的版位）。
         else -> if (isSticker) {
-            Box(frame.fillMaxWidth().aspectRatio(ratio), contentAlignment = Alignment.Center) {
+            Box(frame.then(sizing), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
             }
         } else {
             Box(
-                frame.fillMaxWidth().aspectRatio(ratio)
+                frame.then(sizing)
                     .background(MaterialTheme.colorScheme.surfaceContainerHigh),
                 contentAlignment = Alignment.Center,
             ) {

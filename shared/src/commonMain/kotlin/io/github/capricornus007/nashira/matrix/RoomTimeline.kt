@@ -153,10 +153,13 @@ class RoomTimeline(
                 val edits = aggregateEdits(events)
                 emit(
                     TimelinePage(
-                        // elements 是舊→新，UI 要新→舊
-                        messages = events.asReversed().mapNotNull { event ->
-                            toMessage(event, members, reactions, pinnedIds, edits)
-                        },
+                        // elements 是舊→新，UI 要新→舊。相簿併組要在「舊→新」上做
+                        // （時間差往後加才有意義），所以併完再翻回 UI 要的順序。
+                        messages = groupMediaAlbums(
+                            events.mapNotNull { event ->
+                                toMessage(event, members, reactions, pinnedIds, edits)
+                            },
+                        ).asReversed(),
                         eventCount = state.elements.size,
                         canLoadMore = state.canLoadBefore,
                         loadingBefore = loadingBefore.value,
