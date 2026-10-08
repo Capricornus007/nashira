@@ -53,6 +53,9 @@ private const val InlineVideoMaxDurationMs = 30_000L
 /** 行內連播的檔大小上限：再大的抓起來就不是一兩秒的事。 */
 private const val InlineVideoMaxBytes = 20L * 1024 * 1024
 
+/** 事件沒帶 `duration` 時（實測佔 43%），改用這個大小上限當作「應該是短片」的代理判斷。 */
+private const val InlineVideoFallbackMaxBytes = 8L * 1024 * 1024
+
 /**
  * 時間線裡的圖片／貼圖。未加密房走 mxc 縮圖端點，加密房用事件自帶的金鑰解檔案，
  * 兩者都經 Trixnity 的媒體快取；解出來的位圖按來源鍵記憶，滾動不會重新下載。
@@ -140,9 +143,16 @@ fun MessageImage(
     // 長影片在時間線裡連播會把「點開要看的那一條」也一起拖死，所以只放行短的。
     // （查證過的 Telegram X 做法：行內那條天生靜音、逐影格解、多條同時跑——
     //   `TGMessageVideo.java:112` 那個變數就叫 `mutedVideoFile`。）
+    // ⚠️ `duration` 不能當**必要**條件：實測這個伺服器的 216 筆 m.video 裡有 92 筆（43%）
+    // 根本沒帶 duration（橋站不寫），照「一定要有長度」判的話這四成永遠不會連播——
+    // 用戶就會又回一句「並沒有動」。缺長度時改用檔大小當代理判斷。
+    val shortEnough = when {
+        durationMs != null -> durationMs in 1..InlineVideoMaxDurationMs
+        sizeBytes != null -> sizeBytes <= InlineVideoFallbackMaxBytes
+        else -> false // 兩個都不知道：寧可不動，也不要冒「一屏全是影片一起抓」的風險
+    }
     val autoplayInline = isVideo && !isSticker && hiddenLabel == null &&
-        durationMs != null && durationMs in 1..InlineVideoMaxDurationMs &&
-        (sizeBytes == null || sizeBytes <= InlineVideoMaxBytes)
+        shortEnough && (sizeBytes == null || sizeBytes <= InlineVideoMaxBytes)
     when {
         // 隱藏的圖片：佔位可點擊恢復（Element 的「隱藏」也是可逆的）
         hiddenLabel != null -> Box(
