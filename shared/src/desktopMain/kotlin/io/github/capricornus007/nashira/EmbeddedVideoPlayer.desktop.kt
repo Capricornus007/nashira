@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import de.connect2x.trixnity.client.MatrixClient
 import io.github.capricornus007.nashira.matrix.MediaSource
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
@@ -118,7 +119,13 @@ actual fun EmbeddedVideoPlayer(
         onDispose { stale?.let { runCatching { it.delete() } } }
     }
 
+    // ⚠️ 寫 Compose 狀態一定要回到**合成的上下文**：桌面端（skiko）是「按需重畫」，
+    // 從 `Dispatchers.IO` 直接寫 `mutableStateOf` 不會把畫面叫醒——實測症狀就是
+    // ffmpeg 明明在吐格（同參數在 shell 裡 12 秒 375 格）、聲音也照播，
+    // 畫面卻永久停在轉圈與 0:00（用戶 2026-10-08 連回報三次「卡加載」）。
+    // 本倉 `MessageImage.kt` 早就有同一條慣例：抓 `coroutineContext.minusKey(Job)` 當回流目標。
     LaunchedEffect(client, source, bytes != null) {
+        val uiContext = coroutineContext.minusKey(Job)
         if (input != null) return@LaunchedEffect
         withContext(Dispatchers.IO) {
             // 串流候選依序試（每一個都是「點開就能播」，差別在哪家伺服器讓不讓免驗證下載）：
@@ -162,9 +169,11 @@ actual fun EmbeddedVideoPlayer(
                 mediaProbe("內嵌播放：本檔也解不出來（${data.size} 位元組）")
             } else {
                 mediaProbe("內嵌播放：落地本檔播放 ${data.size} 位元組")
-                tempFile = file
-                input = file.absolutePath
-                info = probed
+                withContext(uiContext) {
+                    tempFile = file
+                    input = file.absolutePath
+                    info = probed
+                }
             }
         }
     }
@@ -174,25 +183,32 @@ actual fun EmbeddedVideoPlayer(
     // 從同一個位置續播——之後是純本地播放，跟網路再無關係，也就不會再卡。
     // 這是「立刻能開始看」與「看得順」兩個都要的作法，取捨放在這裡而不是丟給用戶選。
     LaunchedEffect(input, source, inline) {
+        val uiContext = coroutineContext.minusKey(Job)
         val current = input ?: return@LaunchedEffect
         if (inline) return@LaunchedEffect // 氣泡那側不搶頻寬：要看的不是它
         if (!current.startsWith("http")) return@LaunchedEffect // 已經是本地檔
         val plain = source as? MediaSource.Plain ?: return@LaunchedEffect
-        val file = withContext(Dispatchers.IO) { downloadOriginToFile(plain.mxcUrl, LocalSwitchMaxBytes) }
-            ?: return@LaunchedEffect
+        val job = coroutineContext[kotlinx.coroutines.Job]
+        val file = withContext(Dispatchers.IO) {
+            downloadOriginToFile(plain.mxcUrl, LocalSwitchMaxBytes) { job?.isActive == true }
+        } ?: return@LaunchedEffect
         val probed = withContext(Dispatchers.IO) { probeMovie(file.absolutePath) }
         if (probed == null) {
             runCatching { file.delete() }
             return@LaunchedEffect
         }
         mediaProbe("內嵌播放：整檔已落地 ${file.length()} 位元組，改從本機續播")
-        resumeMs = positionMs
-        info = probed
-        tempFile = file
-        input = file.absolutePath
+        val at = positionMs
+        withContext(uiContext) {
+            resumeMs = at
+            info = probed
+            tempFile = file
+            input = file.absolutePath
+        }
     }
 
     LaunchedEffect(input, info, playing, generation, resumeMs) {
+        val uiContext = coroutineContext.minusKey(Job)
         val sourcePath = input ?: return@LaunchedEffect
         val meta = info ?: return@LaunchedEffect
         if (!playing) return@LaunchedEffect
@@ -210,6 +226,7 @@ actual fun EmbeddedVideoPlayer(
                 fps = if (inline) InlineFps else PlaybackFps,
             ) ?: return@withContext false
             var done = false
+            var firstFrameLogged = false
             try {
                 var index = 0
                 while (true) {
@@ -225,8 +242,18 @@ actual fun EmbeddedVideoPlayer(
                     // 每一格都會被判成過期格——用戶 2026-10-08 實測回報的
                     // 「只有聲音沒有畫面、進度一直 0:00」就是那樣來的。
                     if (audioMs == null || frameMs >= audioMs - StaleWindowMs) {
-                        decoder.toBitmap()?.let { frame = it }
-                        positionMs = startMs + (audioMs ?: frameMs)
+                        val shown = decoder.toBitmap()
+                        val at = startMs + (audioMs ?: frameMs)
+                        withContext(uiContext) {
+                            if (shown != null) {
+                                frame = shown
+                                if (firstFrameLogged.not()) {
+                                    firstFrameLogged = true
+                                    mediaProbe("內嵌播放：第一格已顯示（第 ${index + 1} 格）")
+                                }
+                            }
+                            positionMs = at
+                        }
                     }
                     index++
                     if (!isActive) break
@@ -389,7 +416,11 @@ private fun formatClock(totalMs: Long): String = "%d:%02d".format(totalMs / 60_0
  * 只走原站的公開下載端點——那條不需要憑證；家伺服器那側要憑證，
  * 而代理不給外部程序用（見 `MediaStream.desktop.kt`），抓不到就老實回 null。
  */
-private fun downloadOriginToFile(mxcUrl: String, capBytes: Long): File? = runCatching {
+private fun downloadOriginToFile(
+    mxcUrl: String,
+    capBytes: Long,
+    shouldContinue: () -> Boolean,
+): File? = runCatching {
     val url = mxcToPublicUrl(mxcUrl) ?: return@runCatching null
     val connection = java.net.URL(url).openConnection() as? java.net.HttpURLConnection ?: return@runCatching null
     connection.connectTimeout = 8_000
@@ -401,6 +432,7 @@ private fun downloadOriginToFile(mxcUrl: String, capBytes: Long): File? = runCat
     val file = File.createTempFile("nashira-play-", ".bin").apply { deleteOnExit() }
     var total = 0L
     var overflow = false
+    var aborted = false
     connection.inputStream.use { input ->
         file.outputStream().buffered(64 * 1024).use { output ->
             val chunk = ByteArray(64 * 1024)
@@ -412,11 +444,18 @@ private fun downloadOriginToFile(mxcUrl: String, capBytes: Long): File? = runCat
                     overflow = true
                     break
                 }
+                // ⚠️ 這條是阻塞在 socket 上的，協程取消不會自動中斷它：
+                // 用戶關掉檢視窗之後還繼續把幾十 MB 抓完、並在 /tmp 留一個沒人刪的檔。
+                // 所以每讀一塊就问一次「還要不要」，不要了就刪掉半成品。
+                if (!shouldContinue()) {
+                    aborted = true
+                    break
+                }
                 output.write(chunk, 0, read)
             }
         }
     }
-    if (overflow || file.length() == 0L) {
+    if (aborted || overflow || file.length() == 0L) {
         runCatching { file.delete() }
         null
     } else {

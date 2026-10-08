@@ -2121,8 +2121,15 @@ private fun TimelinePane(
     }
     val fileLauncher = rememberFilePickerLauncher { picked ->
         scope.launch {
-            roomRepository.sendFile(room.roomId, picked)
+            // 影片**先壓再傳**（Telegram 的預設行為就是壓過才上傳）：全群都跟著變好，
+            // 而且壓出來的 mp4 帶 `+faststart`，對方不必等整檔就能開播。
+            // 壓縮可能要幾十秒，所以把 `sending` 立起來——否則畫面完全沒反應，
+            // 看起來就像程式卡死（他對「轉圈不說話」的忍度是零，2026-10-08 已經發過火）。
+            sending = true
+            val payload = compressVideoForSending(picked)
+            roomRepository.sendFile(room.roomId, payload)
                 .onFailure { sendError = io.github.capricornus007.nashira.i18n.friendlyError(it) }
+            sending = false
         }
     }
 
