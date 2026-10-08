@@ -5,8 +5,6 @@ import com.sun.net.httpserver.HttpHandler
 import com.sun.net.httpserver.HttpServer
 import de.connect2x.trixnity.client.MatrixClient
 import de.connect2x.trixnity.client.store.AuthenticationStore
-import de.connect2x.trixnity.clientserverapi.client.ClassicMatrixClientAuthProviderData
-import de.connect2x.trixnity.clientserverapi.client.MatrixClientAuthProviderDataStore
 import io.github.capricornus007.nashira.matrix.MediaSource
 import java.io.IOException
 import java.io.InputStream
@@ -30,7 +28,8 @@ import java.util.concurrent.TimeUnit
  * - 憑證**不能放到 ffmpeg 的命令列**上：`/proc/<pid>/cmdline` 是本機任何程序都讀得到的。
  *   所以憑證只留在這個 JVM 裡，外面的程序只看到一個沒有秘密的本機網址。
  *
- * 憑證來源是 `client.di` 裡那個**活的** auth 資料（會跟著續期更新）。
+ * 憑證來源是 `client.di.get<AuthenticationStore>()` 裡那筆**活的** auth 資料
+ * （實測：DB 內那把與 `session.properties` 那把 sha 不同，DB 才是續期後的活鑰匙）。
  * 第一版圖省事讀磁碟上的 `session.properties`，實測被 matrix.org 打回 401：
  * 那個檔案只在登入當下寫一次，Trixnity 換過 token 之後它就是作廢的舊鑰匙
  * （用戶 2026-10-08「卡在 0:00 不動」的根因）。
@@ -48,43 +47,51 @@ internal actual suspend fun mediaStreamUrl(client: MatrixClient, source: MediaSo
 }
 
 /**
- * 向**活著的** client 要 access token。兩條路：
- * 1) Koin 裡的 `MatrixClientAuthProviderDataStore`——Trixnity 續期後就是寫在這裡；
- * 2) 退一條：`AuthenticationStore` 那筆 `providerData`（序列化過的登入回應 JSON）裡的 `access_token`。
+ * 向**活著的** client 要 access token：`client.di.get<AuthenticationStore>()` 裡那筆
+ * `providerData`（Trixnity 自己序列化的登入資料）中的 `accessToken`。
  *
- * 都拿不到就回 null（呼叫端退回整檔下載），而且一定要留一行日誌：
- * 2026-10-08 第一版讀的是磁碟上的 `session.properties`，那份只在登入當下寫一次，
- * 續期後就是作廢的舊鑰匙（拿去要媒體一律 401），而當時只留下一句「沒有可用的登入憑證」，
- * 我因此多繞了一輪。
+ * 為什麼不用磁碟上那份：`~/.nashira/session.properties` 只在登入當下寫一次
+ * （`TokenStorage.save` 全專案只有登入流程兩個呼叫點），Trixnity 續期換掉的 token 不會寫回去，
+ * 拿它去要媒體一律 401。實測過：DB 內那把與 `session.properties` 那把 sha 不同。
+ *
+ * 拿不到就回 null（呼叫端退回整檔下載），但**一定要留一行日誌說為什麼**——
+ * 第一版只留一句「沒有可用的登入憑證」，害我多繞了一整輪去猜是帳號問題。
  */
 private suspend fun liveAccessToken(client: MatrixClient): String? {
-    val attempts = mutableListOf<String>()
-
-    // 1) Trixnity 自己的「認證存放點」（續期後就是寫在這裡）
-    val fromProvider = runCatching { client.di.get<MatrixClientAuthProviderDataStore>().getAuthData() }
-    fromProvider.exceptionOrNull()?.let { attempts += "AuthProviderDataStore:${it::class.simpleName}" }
-    (fromProvider.getOrNull() as? ClassicMatrixClientAuthProviderData)?.accessToken?.let {
-        mediaProbe("串流代理：憑證取自 AuthProviderDataStore")
-        return it
-    }
-
-    // 2) store 層：同一份資料的實體（providerData 是序列化過的登入回應）
-    val fromStore = runCatching {
+    // ⚠️ Trixnity 5.8.1 **沒有**把 `MatrixClientAuthProviderDataStore` 綁進 Koin——
+    // 它是 `MatrixClient.create(...)` 方法本體裡的區域變數（查證：zipgrep 全 jar 只命中
+    // `AuthenticationStoreMatrixClientAuthProviderDataStore` 與 `MatrixClientKt`，
+    // 後者的 new/binding 都在 create 的區域槽，從未進任何 `module { single ... }`），
+    // 所以 `di.get<MatrixClientAuthProviderDataStore>()` 必然拋 NoDefinitionFoundException。
+    // 唯一綁得住的 key 是 `AuthenticationStore`（`CreateStoreModuleKt` 有 singleOf）。
+    val result = runCatching {
         tokenOf(client.di.get<AuthenticationStore>().getAuthentication()?.providerData)
     }
-    fromStore.exceptionOrNull()?.let { attempts += "AuthenticationStore:${it::class.simpleName}" }
-    fromStore.getOrNull()?.let {
-        mediaProbe("串流代理：憑證取自 AuthenticationStore")
-        return it
+    result.exceptionOrNull()?.let {
+        mediaProbe("串流代理：AuthenticationStore 讀失敗 ${it::class.qualifiedName}，退回整檔下載")
+        return null
     }
-
-    mediaProbe("串流代理：兩處都拿不到憑證（${if (attempts.isEmpty()) "都回空值" else attempts.joinToString(" / ")}），退回整檔下載")
-    return null
+    val token = result.getOrNull()
+    if (token == null) {
+        mediaProbe("串流代理：活的憑證是空值，退回整檔下載")
+        return null
+    }
+    mediaProbe("串流代理：取得活的憑證")
+    return token
 }
 
-/** 從序列化的登入回應裡取 `access_token`（照 Matrix 的欄位名，不用正則、少一個坑）。 */
+/**
+ * 從 `Authentication.providerData` 取 `accessToken`。
+ *
+ * ⚠️ 欄位名是 **`accessToken`（駝峰）**，不是 Matrix 線上的 `access_token`：
+ * 那欄存的是 Trixnity 自己的 `ClassicMatrixClientAuthProviderData` 序列化結果，
+ * 常數池欄位名就是 baseUrl／accessToken／accessTokenExpiresInMs／refreshToken。
+ * 我先前照協定找 `"access_token":"` → 永遠回 null、還不拋例外，
+ * 日誌只顯示「都回空值」，多繞了一整輪（2026-10-08 實測）。
+ * 另外這層 providerData 是**內層字串**、沒有再跳脫一次，所以不用處理 `\"`。
+ */
 private fun tokenOf(providerData: String?): String? = providerData
-    ?.substringAfter("\"access_token\":\"", "")
+    ?.substringAfter("\"accessToken\":\"", "")
     ?.substringBefore('"')
     ?.takeIf { it.isNotEmpty() }
 

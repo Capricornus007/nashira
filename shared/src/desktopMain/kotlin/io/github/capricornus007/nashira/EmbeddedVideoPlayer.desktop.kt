@@ -156,8 +156,14 @@ actual fun EmbeddedVideoPlayer(
             }
             // 兩條串流都不通才退回整份檔：檢視器手上那份（可能還沒抓到、甚至是 0 位元組），
             // 再不通就直接向原站要一份。
+            // ⚠️ 第三條退路不能省：0.1.76 拿掉「開啟時預抓整檔」之後，
+            // 家伺服器自己存的媒體（代理拿不到憑證、原站又不給免驗證下載，matrix.org 就是這種）
+            // 會三條路全空、完全播不出來。用**活著的 client** 抓一份才補得上這個洞
+            // （加密房的影片也只有這條走得通）。代價是整份檔會進記憶體，
+            // 我們的 heap 上限 384MB——真遇到幾百 MB 的檔會失敗，但不會比現在「播不了」更糟。
             val data = bytes?.takeIf { it.isNotEmpty() }
                 ?: (source as? MediaSource.Plain)?.let { downloadBytesFromOrigin(it.mxcUrl) }?.takeIf { it.isNotEmpty() }
+                ?: fetchMediaBytesForPlayback(client, source)?.takeIf { it.isNotEmpty() }
             if (data == null) {
                 mediaProbe("內嵌播放：串流與整檔都不通 ${source}")
                 return@withContext
