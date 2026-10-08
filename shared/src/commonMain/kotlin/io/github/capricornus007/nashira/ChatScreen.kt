@@ -4538,20 +4538,34 @@ private fun EmoticonInline(
     client: de.connect2x.trixnity.client.MatrixClient,
     emote: InlineEmoticon,
 ) {
-    var bitmap by remember(emote.mxc) { mutableStateOf(MediaBitmapCache.get(emote.mxc)) }
-    LaunchedEffect(client, emote.mxc) {
-        if (bitmap == null) {
-            val bytes = fetchMediaBytes(client, MediaSource.Plain(emote.mxc))
-            if (bytes != null) {
-                val decoded = decodeImageBitmap(bytes, maxDimension = 96)
-                if (decoded != null) {
-                    MediaBitmapCache.put(emote.mxc, decoded)
-                    bitmap = decoded
-                }
-            }
+    val key = emote.mxc
+    var bitmap by remember(key) { mutableStateOf(MediaBitmapCache.get(key)) }
+    var frames by remember(key) { mutableStateOf(MediaFramesCache.get(key)) }
+    LaunchedEffect(client, key) {
+        if (bitmap != null) return@LaunchedEffect
+        val bytes = fetchMediaBytes(client, MediaSource.Plain(key)) ?: return@LaunchedEffect
+        val decoded = withContext(Dispatchers.Default) {
+            // 便宜的先試：Skia 解得動的（PNG／靜態 WebP／GIF／動態 WebP）不要動不動起一條 ffmpeg。
+            // Telegram 過來的自訂表情有兩種长相：webp 動畫與 **video/webm**（實測這個伺服器的
+            // 25 則 custom emoji 全是 512×512 的 webm），後者 Skia 一格也解不出來（用戶 2026-10-08
+            // #77「動態貼紙依舊沒實現」同源的那條線）。
+            val animated = decodeAnimatedFrames(bytes, maxDimension = EmoticonSizePx)
+            if (animated.size >= 2) animated
+            else if (looksLikeVideo(bytes)) decodeAnimatedVideoFrames(bytes, EmoticonSizePx, EmoticonMaxFrames)
+            else emptyList()
+        }
+        if (decoded.size >= 2) {
+            MediaFramesCache.put(key, decoded)
+            frames = decoded
+        }
+        val still = decoded.firstOrNull()?.bitmap ?: decodeImageBitmap(bytes, maxDimension = 96)
+        if (still != null) {
+            MediaBitmapCache.put(key, still)
+            bitmap = still
         }
     }
-    val loaded = bitmap
+    // 有格就照格循環（與時間線／貼圖面板同一個 `animatedFrameOrNull`），否則用靜態那一張
+    val loaded = animatedFrameOrNull(key, frames) ?: bitmap
     if (loaded != null) {
         Image(
             bitmap = loaded,
@@ -4563,6 +4577,24 @@ private fun EmoticonInline(
         // 載入中／失敗：alt 文字（Element 也這樣退場）
         Text(emote.alt.ifBlank { "▫" }, style = MaterialTheme.typography.labelSmall)
     }
+}
+
+/** 行內自訂表情顯示區只有 1.4em（實測 24–34px），解到 64px 已經綽綽有餘，也把快取壓在 0.4MB/條。 */
+private const val EmoticonSizePx = 64
+private const val EmoticonMaxFrames = 24
+
+/**
+ * 只看開頭的 magic bytes 判斷「這是不是影片容器」（Matroska/WebM 的 EBML 與 MP4 的 `ftyp`）。
+ * 靠它決定要不要起 ffmpeg——每起一條就是幾十毫秒與一趟行程，
+ * 而訊息裡大多數自訂表情本來就是 webp，不該白燒。
+ */
+private fun looksLikeVideo(bytes: ByteArray): Boolean {
+    if (bytes.size < 12) return false
+    val ebml = bytes[0] == 0x1A.toByte() && bytes[1] == 0x45.toByte() &&
+        bytes[2] == 0xDF.toByte() && bytes[3] == 0xA3.toByte()
+    val ftyp = bytes[4] == 'f'.code.toByte() && bytes[5] == 't'.code.toByte() &&
+        bytes[6] == 'y'.code.toByte() && bytes[7] == 'p'.code.toByte()
+    return ebml || ftyp
 }
 
 private fun MessageBody.previewText(strings: io.github.capricornus007.nashira.i18n.Strings): String =
