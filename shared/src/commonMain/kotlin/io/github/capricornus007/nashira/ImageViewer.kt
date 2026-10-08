@@ -65,6 +65,7 @@ fun ImageViewer(
         properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false),
     ) {
         val key = source.cacheKeyShared()
+        val isVideo = mimeType?.startsWith("video/") == true
         var bitmap by remember(key) { mutableStateOf<ImageBitmap?>(MediaBitmapCache.get(key)) }
         var failed by remember(key) { mutableStateOf(false) }
         // 下載用原檔位元組（影片存 webm 原樣、圖片存原解析度），不重編碼
@@ -79,8 +80,8 @@ fun ImageViewer(
                 }.getOrThrow()
                 val bytes = media.toByteArray(this) ?: return@runCatching
                 fileBytes = bytes
-                // 影片類媒體在檢視器裏先以首幀顯示；下載仍存原檔
-                val decoded = if (mimeType?.startsWith("video/") == true) {
+                // 影片：首格只當「內嵌播放器還沒解出第一格時墊的圖」；下載仍存原檔
+                val decoded = if (isVideo) {
                     decodeVideoFrame(bytes, maxDimension = 2048)
                 } else {
                     decodeImageBitmap(bytes, maxDimension = 2048)
@@ -122,7 +123,20 @@ fun ImageViewer(
                 },
         ) {
             val loaded = bitmap
+            val playable = fileBytes
             when {
+                // 影片：走內嵌播放器（同一個全螢幕殼、控制列疊在上面），
+                // 不再另開外部視窗——用戶 2026-10-08「就不能弄的跟 tg discord 那種嗎」。
+                // 有公網網址就直接串流（點開立刻播）；整檔還在下載、或加密房拿不到網址，
+                // 才退回用手上這份位元組落地播放。
+                isVideo -> EmbeddedVideoPlayer(
+                    url = mediaStreamUrl(source, client.userId.full),
+                    bytes = playable,
+                    poster = loaded,
+                    boxWidth = 900.dp,
+                    boxHeight = 900.dp,
+                    modifier = Modifier.fillMaxSize(),
+                )
                 loaded != null -> androidx.compose.foundation.Image(
                     bitmap = loaded,
                     contentDescription = caption.takeIf { it.isNotBlank() },

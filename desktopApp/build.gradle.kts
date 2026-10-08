@@ -86,6 +86,10 @@ compose.desktop {
                 "java.desktop",
                 "java.logging",
                 "jdk.crypto.ec",
+                // 內嵌影片播放的本機串流代理（MediaStream.desktop.kt）用的是 com.sun.net.httpserver，
+                // 不在上面那 7 個裡——少了它，裝出來的包一開影片就 NoClassDefFoundError，
+                // 而且 CI 照綠（編譯期不看 runtime 模組清單）。
+                "jdk.httpserver",
             )
             packageName = "nashira"
             // 版號單一來源＝gradle.properties 的 nashiraVersion（release.yml 打 tag 讀同一行）

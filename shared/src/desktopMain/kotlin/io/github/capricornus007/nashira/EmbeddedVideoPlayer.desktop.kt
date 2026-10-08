@@ -1,0 +1,487 @@
+package io.github.capricornus007.nashira
+
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.toComposeImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
+import org.jetbrains.skia.Bitmap
+import org.jetbrains.skia.ColorAlphaType
+import org.jetbrains.skia.ColorType
+import org.jetbrains.skia.Image
+import org.jetbrains.skia.ImageInfo
+import java.io.BufferedInputStream
+import java.io.DataInputStream
+import java.io.File
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.TimeUnit
+import javax.sound.sampled.AudioFormat
+import javax.sound.sampled.AudioSystem
+import javax.sound.sampled.DataLine
+import javax.sound.sampled.SourceDataLine
+
+/**
+ * 全螢幕檢視器裡的**內嵌影片播放**：圖片與影片共用同一個殼，控制列疊在畫面上。
+ *
+ * 使用者 2026-10-08 的原話：「爲什麼要變成點開 mpv 窗口啊…………我點好幾次它延遲好幾秒
+ * 然後點開好幾個窗口，就不能弄的跟 tg discord 那種嗎？點開圖片視頻都是有統一 ui 的內置」。
+ *
+ * 為什麼是現在這個做法（每一條都量過，別再走回頭路）：
+ * - 不捆 FFmpeg 函式庫：bytedeco 那顆 jar **解開 129MB**（libavcodec.so 單檔 33.5MB）。
+ * - 不依賴系統 libVLC：別人沒裝就壞，而且 VLC 是 GPL。
+ * - 不試 mpv `--wid` 嵌入：實測在 JDK 21 上拿不到 AWT 畫布的 X11 視窗 id（兩種反射都回 -1）。
+ * - 走「兩條 ffmpeg 行程」：一條吐定長 BGRA 格、一條吐 PCM 給 JVM 自己的 javax.sound
+ *   （這臺機器實測 SourceDataLine 開得起來、寫得進去，9 顆 mixer）。
+ *   **兩邊都加 `-re`**，讓 ffmpeg 自己按原速率輸出，所以不需要自己對時鐘；
+ *   暫停＝殺行程並記住毫秒，繼續／拖動＝帶 `-ss` 重開。
+ * - 像素格式：實測 `ColorType.BGRA_8888` 配 ffmpeg `-pix_fmt bgra`（名字對名字，
+ *   不靠「小端到底是 RGBA 還是 ARGB」的記憶——那個猜錯就整片紅藍對調）。
+ * - **能串流就先串流**：mp4 的 moov 常在檔尾，喂 `pipe:0` 解不動（實測過），
+ *   但餵「可 seek 的檔案或 http URL」就可以。給 URL＝點開立刻播，不用等整檔下載完
+ *   （用戶 2026-10-08「憑什麼視頻非得那麼久」）。
+ * - 音頻那條會把同一段流量再抓一次：換到的是「不用自己寫對時鐘」，代價寫在這裡，別當它不存在。
+ */
+@Composable
+actual fun EmbeddedVideoPlayer(
+    url: String?,
+    bytes: ByteArray?,
+    poster: ImageBitmap?,
+    boxWidth: Dp,
+    boxHeight: Dp,
+    modifier: Modifier,
+) {
+    val density = LocalDensity.current
+    val maxW = with(density) { boxWidth.roundToPx() }.coerceAtLeast(64)
+    val maxH = with(density) { boxHeight.roundToPx() }.coerceAtLeast(64)
+
+    // ffmpeg 要的輸入：網址（串流）或落地後的暫存檔路徑。这两个是「一次解析、之後不再改」，
+    // 所以檢視器那边的下載完成（bytes 從 null 變成整份）不會把正在播的畫面重頭來過。
+    var input by remember { mutableStateOf<String?>(null) }
+    var info by remember { mutableStateOf<MovieInfo?>(null) }
+    var tempFile by remember { mutableStateOf<File?>(null) }
+
+    var frame by remember { mutableStateOf<ImageBitmap?>(null) }
+    var playing by remember { mutableStateOf(true) }
+    var positionMs by remember { mutableLongStateOf(0L) }
+    var resumeMs by remember { mutableLongStateOf(0L) }
+    var generation by remember { mutableIntStateOf(0) }
+    val durationMs = (info?.durationSec ?: 0L) * 1000L
+
+    DisposableEffect(tempFile) {
+        val stale = tempFile
+        onDispose { stale?.let { runCatching { it.delete() } } }
+    }
+
+    LaunchedEffect(url, bytes != null) {
+        if (input != null) return@LaunchedEffect
+        withContext(Dispatchers.IO) {
+            val streamed = url?.let { probeMovie(it) }
+            if (streamed == null && url != null) mediaProbe("內嵌播放：串流探測沒成功，改試手上這份檔")
+            if (streamed != null) {
+                mediaProbe("內嵌播放：走串流 $url")
+                input = url
+                info = streamed
+                return@withContext
+            }
+            val data = bytes ?: return@withContext
+            val file = writePlayableFile(data) ?: return@withContext
+            val probed = probeMovie(file.absolutePath)
+            if (probed == null) {
+                runCatching { file.delete() }
+                mediaProbe("內嵌播放：本檔也解不出來（${data.size} 位元組）")
+            } else {
+                mediaProbe("內嵌播放：落地本檔播放 ${data.size} 位元組")
+                tempFile = file
+                input = file.absolutePath
+                info = probed
+            }
+        }
+    }
+
+    LaunchedEffect(input, info, playing, generation, resumeMs) {
+        val source = input ?: return@LaunchedEffect
+        val meta = info ?: return@LaunchedEffect
+        if (!playing) return@LaunchedEffect
+        val startMs = resumeMs
+        val ended = withContext(Dispatchers.IO) {
+            val decoder = MovieDecoder.create(source, meta, maxW, maxH, startMs)
+                ?: return@withContext false
+            var done = false
+            try {
+                var index = 0
+                while (true) {
+                    if (!decoder.readFrame()) {
+                        decoder.reportFailure()
+                        done = true
+                        break
+                    }
+                    // 落後超過兩格就丟掉這張（只讀不轉），否則越積越慢、聲音先跑掉
+                    val late = System.nanoTime() - (decoder.startedAt + index * FrameNanos)
+                    if (late > 2 * FrameNanos) {
+                        index++
+                        continue
+                    }
+                    decoder.toBitmap()?.let { frame = it }
+                    positionMs = startMs + index * 1000L / PlaybackFps
+                    index++
+                    if (!isActive) break
+                }
+            } finally {
+                decoder.close()
+            }
+            done && isActive
+        }
+        if (ended) {
+            // 播到檔尾：起點歸零，讓他再點播放鈕能從頭看（停在尾端會一點就立刻又結束）
+            playing = false
+            resumeMs = 0L
+            positionMs = durationMs
+        }
+    }
+
+    Box(
+        modifier
+            .fillMaxSize()
+            .pointerInput(playing, generation, input) {
+                // 點畫面＝播放／暫停（Telegram 桌面端就是這個手勢）。這裡要把事件吃掉，
+                // 否則會被外層「點背景關閉」的監聽一起收走——點一下圖就關掉視窗很怪。
+                detectTapGestures {
+                    if (input == null) return@detectTapGestures
+                    if (playing) resumeMs = positionMs
+                    playing = !playing
+                    generation += 1
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        val shown = frame ?: poster
+        if (shown != null) {
+            Image(
+                bitmap = shown,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Fit,
+                filterQuality = FilterQuality.High,
+            )
+        } else {
+            CircularProgressIndicator(Modifier.size(32.dp), strokeWidth = 3.dp, color = Color.White)
+        }
+        Column(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .widthIn(max = 560.dp)
+                .padding(bottom = 24.dp, start = 16.dp, end = 16.dp)
+                .background(Color.Black.copy(alpha = 0.62f), RoundedCornerShape(14.dp))
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Box(
+                    Modifier
+                        .size(30.dp)
+                        .clickable {
+                            if (playing) resumeMs = positionMs
+                            playing = !playing
+                            generation += 1
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (playing) {
+                        // 暫停＝兩條豎棒。Icons.Filled.Pause **不在 material-icons-core 那 40 個裡**
+                        // （專案只引 core，擴充集要 30MB），所以自己畫，不為一顆圖示拉整個套件。
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            repeat(2) {
+                                Box(
+                                    Modifier
+                                        .size(width = 4.dp, height = 16.dp)
+                                        .background(Color.White, RoundedCornerShape(1.dp)),
+                                )
+                            }
+                        }
+                    } else {
+                        Icon(
+                            imageVector = Icons.Filled.PlayArrow,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(26.dp),
+                        )
+                    }
+                }
+                Text(formatClock(positionMs), color = Color.White, style = MaterialTheme.typography.labelMedium)
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .height(18.dp)
+                        .pointerInput(durationMs) {
+                            detectTapGestures { offset ->
+                                if (durationMs <= 0) return@detectTapGestures
+                                val fraction = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
+                                resumeMs = (fraction * durationMs).toLong()
+                                positionMs = resumeMs
+                                generation += 1
+                                if (!playing) playing = true
+                            }
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(4.dp)
+                            .background(Color.White.copy(alpha = 0.28f), RoundedCornerShape(2.dp)),
+                    ) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth(
+                                    if (durationMs <= 0) 0f
+                                    else (positionMs.toFloat() / durationMs).coerceIn(0f, 1f),
+                                )
+                                .height(4.dp)
+                                .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp)),
+                        )
+                    }
+                }
+                Text(formatClock(durationMs), color = Color.White, style = MaterialTheme.typography.labelMedium)
+            }
+        }
+    }
+}
+
+/** 解格上限 fps：螢幕本來就 60Hz 上下，30 格夠順，也把 CPU 與複製量減一半（實測這條源是 60fps）。 */
+private const val PlaybackFps = 30
+private const val FrameNanos = 1_000_000_000L / PlaybackFps
+private const val SampleRate = 48000
+
+private fun formatClock(totalMs: Long): String = "%d:%02d".format(totalMs / 60_000, (totalMs / 1000) % 60)
+
+private fun writePlayableFile(bytes: ByteArray): File? = runCatching {
+    File.createTempFile("nashira-play-", ".bin").apply { writeBytes(bytes) }
+}.getOrNull()
+
+private class MovieInfo(
+    val width: Int,
+    val height: Int,
+    val durationSec: Long,
+    val hasAudio: Boolean,
+)
+
+/** 問尺寸與長度：解格要按顯示框縮，長度給進度條與拖動。網址與檔案都走同一條 ffprobe。 */
+private fun probeMovie(source: String): MovieInfo? = readCmdOutput(
+    listOf(
+        "ffprobe", "-v", "error",
+        "-show_entries", "format=duration:stream=codec_type,width,height",
+        "-of", "default=noprint_wrappers=1",
+        source,
+    ),
+)?.let { out ->
+    var w = 0
+    var h = 0
+    var seconds = 0.0
+    var audio = false
+    out.lineSequence().map { it.trim() }.forEach { line ->
+        when {
+            line.startsWith("width=") -> w = line.removePrefix("width=").toIntOrNull() ?: w
+            line.startsWith("height=") -> h = line.removePrefix("height=").toIntOrNull() ?: h
+            line.startsWith("duration=") -> seconds = line.removePrefix("duration=").toDoubleOrNull() ?: seconds
+            line.startsWith("codec_type=audio") -> audio = true
+        }
+    }
+    if (w <= 0 || h <= 0) null else MovieInfo(w, h, seconds.toLong(), audio)
+}
+
+/**
+ * 跑一條命令把 stdout 全收下來；超時或非零出口回 null。
+ *
+ * ⚠️ 讀 stdout 一定不能在當前執行緒上：`readBytes()` 會一直堵到程序自己結束，
+ * 那樣後面的 `waitFor(timeout)` 根本沒機會跑——ffprobe 卡在一個慢連結上時，
+ * 整個播放流程就永久轉圈（2026-10-08 檢查自己這段時發現的）。
+ */
+private fun readCmdOutput(command: List<String>, timeoutSec: Long = 15): String? = runCatching {
+    val process = ProcessBuilder(command).redirectErrorStream(false).start()
+    val collected = CompletableFuture.supplyAsync {
+        runCatching { process.inputStream.use { it.readBytes() } }.getOrNull()
+    }
+    if (!process.waitFor(timeoutSec, TimeUnit.SECONDS)) {
+        process.destroyForcibly()
+        mediaProbe("命令超過 ${timeoutSec}s：${command.first()}")
+        null
+    } else if (process.exitValue() != 0) {
+        null
+    } else {
+        collected.get(2, TimeUnit.SECONDS)?.decodeToString()
+    }
+}.getOrNull()
+
+/** 兩條行程共用的前半段：`-re` 讓 ffmpeg 自己按原速率輸出；`-ss` 放 `-i` 前面＝跳著讀，不用從頭解。 */
+private fun ffmpegCommand(startMs: Long, source: String): List<String> = listOf(
+    "ffmpeg", "-v", "error", "-re",
+    "-ss", (startMs / 1000).toString(), "-i", source,
+)
+
+/**
+ * 一趟播放：一條 ffmpeg 吐格、一條吐聲音。`close()` 一定要呼叫，
+ * 否則 ffmpeg 會挂在後面繼續吃 CPU（暫停與關閉都走這裡）。
+ */
+private class MovieDecoder private constructor(
+    source: String,
+    info: MovieInfo,
+    maxW: Int,
+    maxH: Int,
+    startMs: Long,
+    private val errLog: File,
+) {
+    // 等比縮到顯示框內，且**不放大**（原檔比框小就照原尺寸，白燒 CPU 沒意義）
+    private val fit = minOf(maxW.toFloat() / info.width, maxH.toFloat() / info.height, 1f)
+    private val outW = (info.width * fit).toInt().coerceAtLeast(16)
+    private val outH = (info.height * fit).toInt().coerceAtLeast(16)
+    private val frameBytes = outW * outH * 4
+    private val buffer = ByteArray(frameBytes)
+    val startedAt = System.nanoTime()
+
+    private val video = ProcessBuilder(
+        ffmpegCommand(startMs, source) + listOf(
+            // 只取視訊、 fps 封頂：不封頂就是每秒解 60 格、每格还要走三次複製，CPU 白燒一倍
+            "-map", "0:v:0", "-an",
+            "-vf", "scale=$outW:$outH,fps=$PlaybackFps",
+            "-f", "rawvideo", "-pix_fmt", "bgra", "pipe:1",
+        ),
+    ).redirectError(errLog).start()
+
+    // stderr 一定要有人收：丟給暫存檔而不是管線，否則管線塞滿會把 ffmpeg 一起卡死（實測踩過類似坑）
+    private val input = DataInputStream(BufferedInputStream(video.inputStream, frameBytes * 2))
+
+    private val audioProcess: Process?
+
+    init {
+        var process: Process? = null
+        if (info.hasAudio) {
+            val candidate = runCatching {
+                ProcessBuilder(
+                    ffmpegCommand(startMs, source) + listOf(
+                        "-map", "0:a:0?", "-vn",
+                        "-ac", "2", "-ar", "$SampleRate", "-f", "s16le", "pipe:1",
+                    ),
+                ).redirectError(ProcessBuilder.Redirect.DISCARD).start()
+            }.getOrNull()
+            val line = candidate?.let { openAudioLine() }
+            if (candidate == null || line == null) {
+                runCatching { candidate?.destroy() }
+            } else {
+                process = candidate
+                Thread {
+                    runCatching {
+                        line.start()
+                        val stream = BufferedInputStream(candidate.inputStream)
+                        val payload = ByteArray(8192)
+                        while (true) {
+                            val read = stream.read(payload)
+                            if (read <= 0) break
+                            line.write(payload, 0, read)
+                        }
+                    }
+                    runCatching { line.stop() }
+                    runCatching { line.close() }
+                }.apply { isDaemon = true; name = "nashira-audio"; start() }
+            }
+        }
+        audioProcess = process
+    }
+
+    /** 讀一格到緩衝區；讀不完（到檔尾或行程被殺）回 false。 */
+    fun readFrame(): Boolean = runCatching {
+        input.readFully(buffer)
+        true
+    }.getOrDefault(false)
+
+    /** 把剛讀到的那一格變成 Compose 的圖（每格新開一個 Bitmap，裝的是複製進去的像素）。 */
+    fun toBitmap(): ImageBitmap? {
+        val bitmap = Bitmap()
+        return runCatching {
+            val ok = bitmap.installPixels(
+                ImageInfo(outW, outH, ColorType.BGRA_8888, ColorAlphaType.UNPREMUL),
+                buffer,
+                outW * 4,
+            )
+            require(ok)
+            val image = Image.makeFromBitmap(bitmap)
+            val result = image.toComposeImageBitmap()
+            image.close()
+            result
+        }.getOrNull().also {
+            runCatching { bitmap.close() }
+        }
+    }
+
+    /** 讀到一半斷掉時，把 ffmpeg 的再見話說出來（正常播完是 0 出口，不噯）。 */
+    fun reportFailure() {
+        runCatching {
+            if (!video.isAlive && video.exitValue() != 0) {
+                mediaProbe("吐格行程挂了 exit=${video.exitValue()} ${errLog.readText().trim().takeLast(300)}")
+            }
+        }
+    }
+
+    fun close() {
+        runCatching { video.destroy() }
+        runCatching { audioProcess?.destroy() }
+        // 音訊線交給那條幫浦執行緒收（它在寫入中 close 會丟出異常，已被 runCatching 包住）
+        runCatching { errLog.delete() }
+    }
+
+    companion object {
+        /** ffmpeg 不存在、暫存檔開不了……一律回 null，讓上面顯示封面就好，別把整個應用程式弄炸。 */
+        fun create(source: String, info: MovieInfo, maxW: Int, maxH: Int, startMs: Long): MovieDecoder? =
+            runCatching {
+                val errLog = File.createTempFile("nashira-play-err-", ".log")
+                MovieDecoder(source, info, maxW, maxH, startMs, errLog)
+            }.onFailure { mediaProbe("建解碼器失敗：${it.message}") }.getOrNull()
+    }
+}
+
+private fun openAudioLine(): SourceDataLine? = runCatching {
+    val format = AudioFormat(AudioFormat.Encoding.PCM_SIGNED, SampleRate.toFloat(), 16, 2, 4, SampleRate.toFloat(), false)
+    (AudioSystem.getLine(DataLine.Info(SourceDataLine::class.java, format)) as? SourceDataLine)
+        ?.takeIf { line -> runCatching { line.open(format); true }.getOrDefault(false) }
+}.getOrNull()
