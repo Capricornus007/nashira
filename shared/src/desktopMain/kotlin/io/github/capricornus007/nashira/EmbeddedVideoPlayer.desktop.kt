@@ -530,7 +530,12 @@ private fun readCmdOutput(command: List<String>, timeoutSec: Long = 15): String?
 
 /** 兩個輸出共用的前半段：`-re` 讓 ffmpeg 自己按原速率輸出；`-ss` 放 `-i` 前面＝跳著讀，不用從頭解。 */
 private fun ffmpegCommand(startMs: Long, source: String): List<String> = listOf(
-    "ffmpeg", "-v", "error", "-re",
+    // `-y` 是必須的，不是修飾：wav 那路輸出是**檔案**，而我們用 createTempFile 先把它建出來了，
+    // ffmpeg 看到輸出檔已存在就會在 stdin 上問「Overwrite? [y/N]」——stdin 不是終端機，
+    // 於是整條行程永久卡在那個問題：wav 0 位元組、一格都不吐、畫面進度死在 0:00。
+    // （實測證據：/tmp/nashira-play-err-*.log 內容就是
+    //   `File '…wav' already exists. Overwrite? [y/N]`，用戶 2026-10-08「結果依舊」的真兇。）
+    "ffmpeg", "-v", "error", "-y", "-re",
     "-ss", (startMs / 1000).toString(), "-i", source,
 )
 
@@ -571,9 +576,16 @@ private class MovieDecoder private constructor(
             "-map", "0:a:0?", "-vn", "-ac", "2", "-ar", "$SampleRate",
             "-flush_packets", "1", "-f", "wav", wavFile.absolutePath,
         ),
-    ).redirectError(errLog).start()
+    )
+        // stderr 一定要有人收：丟給暫存檔而不是管線，否則管線塞滿會把 ffmpeg 一起卡死
+        .apply {
+            redirectError(errLog)
+            // stdin 給 /dev/null：任何需要人回答的提示都要立刻拿到 EOF 變成「看得見的錯誤」，
+            // 而不是無聲地永遠卡住（上面那個 `-y` 的教訓）。
+            redirectInput(ProcessBuilder.Redirect.from(java.io.File("/dev/null")))
+        }
+        .start()
 
-    // stderr 一定要有人收：丟給暫存檔而不是管線，否則管線塞滿會把 ffmpeg 一起卡死
     private val input = DataInputStream(BufferedInputStream(process.inputStream, frameBytes))
     private val audioBytes = AtomicLong(0L)
 
