@@ -3520,6 +3520,7 @@ private fun TimelinePane(
             caption = img.caption,
             fileName = img.caption.ifBlank { "nashira-media" },
             mimeType = img.mimeType,
+            downloadFailedLabel = strings.downloadFailed,
             onDismiss = { viewerTarget = null },
         )
     }
@@ -4433,6 +4434,8 @@ private fun MessageBodyContent(
                 caption = body.caption,
                 modifier = modifier,
                 mimeType = body.mimeType,
+                durationMs = body.durationMs,
+                sizeBytes = body.sizeBytes,
                 onOpen = if (hidden) {
                     // 佔位點一下直接取消隱藏，不用再進選單
                     { if (mxc != null) ui.hiddenMedia = ui.hiddenMedia - mxc }

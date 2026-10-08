@@ -31,5 +31,12 @@ expect fun EmbeddedVideoPlayer(
     /** 畫面要塞進多大的框；解格時照它縮，避免整幀原解析度進記憶體。 */
     boxWidth: Dp,
     boxHeight: Dp,
+    /**
+     * 行內模式（時間線氣泡裡那種）：**靜音、迴圈、不畫控制列**，解格也降到 15fps。
+     * 這是 Telegram X 的規則（`TGMessageVideo.java:112` 那個變數乾脆就叫
+     * `mutedVideoFile`——影格解碼那條路根本不建立音軌），
+     * 也順勢避開「多條同時有聲音」的衝突：聲音一律留給點開的全螢幕。
+     */
+    inline: Boolean = false,
     modifier: Modifier = Modifier,
 )

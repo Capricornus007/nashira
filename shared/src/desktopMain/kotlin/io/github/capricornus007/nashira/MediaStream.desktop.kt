@@ -58,22 +58,35 @@ internal actual suspend fun mediaStreamUrl(client: MatrixClient, source: MediaSo
  * 我因此多繞了一輪。
  */
 private suspend fun liveAccessToken(client: MatrixClient): String? {
+    val attempts = mutableListOf<String>()
+
+    // 1) Trixnity 自己的「認證存放點」（續期後就是寫在這裡）
     val fromProvider = runCatching { client.di.get<MatrixClientAuthProviderDataStore>().getAuthData() }
-    fromProvider.exceptionOrNull()?.let { mediaProbe("串流代理：auth 存放點不可用 ${it::class.qualifiedName}") }
-    (fromProvider.getOrNull() as? ClassicMatrixClientAuthProviderData)?.accessToken?.let { return it }
-    val fromStore = runCatching {
-        val providerData = client.di.get<AuthenticationStore>().getAuthentication()?.providerData ?: return@runCatching null
-        providerData
-            .substringAfter("\"access_token\":\"", "")
-            .substringBefore('"')
-            .takeIf { it.isNotEmpty() }
-    }.getOrNull()
-    if (fromStore == null) {
-        val kind = fromProvider.getOrNull()?.let { it::class.simpleName } ?: "null"
-        mediaProbe("串流代理：拿不到活著的憑證（存放點回 $kind），退回整檔下載")
+    fromProvider.exceptionOrNull()?.let { attempts += "AuthProviderDataStore:${it::class.simpleName}" }
+    (fromProvider.getOrNull() as? ClassicMatrixClientAuthProviderData)?.accessToken?.let {
+        mediaProbe("串流代理：憑證取自 AuthProviderDataStore")
+        return it
     }
-    return fromStore
+
+    // 2) store 層：同一份資料的實體（providerData 是序列化過的登入回應）
+    val fromStore = runCatching {
+        tokenOf(client.di.get<AuthenticationStore>().getAuthentication()?.providerData)
+    }
+    fromStore.exceptionOrNull()?.let { attempts += "AuthenticationStore:${it::class.simpleName}" }
+    fromStore.getOrNull()?.let {
+        mediaProbe("串流代理：憑證取自 AuthenticationStore")
+        return it
+    }
+
+    mediaProbe("串流代理：兩處都拿不到憑證（${if (attempts.isEmpty()) "都回空值" else attempts.joinToString(" / ")}），退回整檔下載")
+    return null
 }
+
+/** 從序列化的登入回應裡取 `access_token`（照 Matrix 的欄位名，不用正則、少一個坑）。 */
+private fun tokenOf(providerData: String?): String? = providerData
+    ?.substringAfter("\"access_token\":\"", "")
+    ?.substringBefore('"')
+    ?.takeIf { it.isNotEmpty() }
 
 private fun mxcParts(mxcUrl: String): Pair<String, String>? {
     val rest = mxcUrl.removePrefix("mxc://")

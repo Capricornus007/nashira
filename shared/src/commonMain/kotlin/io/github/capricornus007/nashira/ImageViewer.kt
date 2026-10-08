@@ -58,6 +58,8 @@ fun ImageViewer(
     caption: String,
     fileName: String,
     mimeType: String?,
+    /** 「抓不到檔」時的提示文案（用呼叫端的 strings，不在這裡硬寫字串）。 */
+    downloadFailedLabel: String,
     onDismiss: () -> Unit,
 ) {
     Dialog(
@@ -72,6 +74,10 @@ fun ImageViewer(
         var fileBytes by remember(key) { mutableStateOf<ByteArray?>(null) }
         LaunchedEffect(client, key) {
             if (bitmap != null) return@LaunchedEffect
+            // 影片**不預抓整份檔**：實測那條 9.69MiB 的檔案會跟內嵌播放的串流搶同一條管子，
+            // 結果兩邊都慢到像壞掉（用戶 2026-10-08「加載死慢」）。
+            // 第一格由播放器自己解出來，「下載」鈕按下去時才抓（見下面那個按鈕）。
+            if (isVideo) return@LaunchedEffect
             runCatching {
                 val service = client.di.get<MediaService>()
                 val media = when (source) {
@@ -178,8 +184,12 @@ fun ImageViewer(
                     IconButton(
                         onClick = {
                             scope.launch {
-                                val bytes = fileBytes
-                                if (bytes == null) return@launch
+                                // 影片走這條時通常還沒有位元組（不再預抓），現點現抓
+                                val bytes = fileBytes ?: fetchMediaBytesForPlayback(client, source)
+                                if (bytes == null || bytes.isEmpty()) {
+                                    snackbar.showSnackbar(downloadFailedLabel)
+                                    return@launch
+                                }
                                 val ext = when {
                                     mimeType?.contains("webp") == true -> "webp"
                                     mimeType?.contains("jpeg") == true || mimeType?.contains("jpg") == true -> "jpg"
@@ -193,8 +203,11 @@ fun ImageViewer(
                             }
                         },
                     ) {
-                        // icons-core 沒有 Download 圖示；用文字箭頭（與貼圖重試磚同模式）
-                        Text("↓", color = Color.White, style = MaterialTheme.typography.titleMedium)
+                        Icon(
+                            BarIcons.Download,
+                            contentDescription = null,
+                            tint = Color.White,
+                        )
                     }
                     IconButton(onClick = onDismiss) {
                         Icon(Icons.Filled.Close, contentDescription = null, tint = Color.White)

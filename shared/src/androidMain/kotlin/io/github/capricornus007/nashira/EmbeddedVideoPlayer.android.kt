@@ -24,6 +24,7 @@ actual fun EmbeddedVideoPlayer(
     poster: ImageBitmap?,
     boxWidth: Dp,
     boxHeight: Dp,
+    inline: Boolean,
     modifier: Modifier,
 ) {
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

@@ -47,6 +47,12 @@ private val StickerMaxWidth = 148.dp
 /** 圖片訊息的最大寬度；再寬會把發送者名字擠掉，Discord 也大約是這個比例。 */
 private val ImageMaxWidth = 264.dp
 
+/** 行內連播的時長上限（毫秒）。 */
+private const val InlineVideoMaxDurationMs = 30_000L
+
+/** 行內連播的檔大小上限：再大的抓起來就不是一兩秒的事。 */
+private const val InlineVideoMaxBytes = 20L * 1024 * 1024
+
 /**
  * 時間線裡的圖片／貼圖。未加密房走 mxc 縮圖端點，加密房用事件自帶的金鑰解檔案，
  * 兩者都經 Trixnity 的媒體快取；解出來的位圖按來源鍵記憶，滾動不會重新下載。
@@ -65,6 +71,9 @@ fun MessageImage(
     onOpen: (() -> Unit)? = null,
     /** 隱藏時顯示的佔位文案；null 表示未隱藏。 */
     hiddenLabel: String? = null,
+    /** 影片的時長與檔大小（m.video 的 info）：兩個都過小才允許**行內連播**。 */
+    durationMs: Long? = null,
+    sizeBytes: Long? = null,
 ) {
     val key = remember(source) { source.cacheKey() }
     var bitmap by remember(key) { mutableStateOf(MediaBitmapCache.get(key)) }
@@ -126,6 +135,14 @@ fun MessageImage(
     // 動態貼圖：有多格就照每一格自帶的停留時間輪播（Telegram 的貼圖就是動的，
     // 用戶 2026-10-07 點名「為什麼貼紙是靜態的」）。
     val loaded = animatedFrameOrNull(key, frames) ?: bitmap
+    // 行內連播的門檻。依據是用戶 2026-10-08 的觀察「64gram 那是短的倆都有、長的只有後者」，
+    // 加上他這條鏈路的實測：影片本身 570KB/s、管子只有 150–280KB/s，
+    // 長影片在時間線裡連播會把「點開要看的那一條」也一起拖死，所以只放行短的。
+    // （查證過的 Telegram X 做法：行內那條天生靜音、逐影格解、多條同時跑——
+    //   `TGMessageVideo.java:112` 那個變數就叫 `mutedVideoFile`。）
+    val autoplayInline = isVideo && !isSticker && hiddenLabel == null &&
+        durationMs != null && durationMs in 1..InlineVideoMaxDurationMs &&
+        (sizeBytes == null || sizeBytes <= InlineVideoMaxBytes)
     when {
         // 隱藏的圖片：佔位可點擊恢復（Element 的「隱藏」也是可逆的）
         hiddenLabel != null -> Box(
@@ -144,6 +161,19 @@ fun MessageImage(
                 .aspectRatio(ratio)
                 .then(if (onOpen != null) Modifier.clickable(onClick = onOpen) else Modifier),
         ) {
+            if (autoplayInline) {
+                // 靜音、迴圈、不畫控制列；點這塊的點擊仍然往上冒給 onOpen（開全螢幕有聲音）
+                EmbeddedVideoPlayer(
+                    client = client,
+                    source = source,
+                    bytes = null,
+                    poster = loaded,
+                    boxWidth = maxWidth,
+                    boxHeight = maxWidth,
+                    inline = true,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
             Image(
                 bitmap = loaded,
                 contentDescription = caption.takeIf { it.isNotBlank() },
@@ -153,7 +183,8 @@ fun MessageImage(
                 //（用戶 2026-09-29 對照 Telegram：「tg 無論點開之前還是點開之後都沒那麼糊」）。
                 filterQuality = FilterQuality.High,
             )
-            if (isVideo) {
+            }
+            if (isVideo && !autoplayInline) {
                 // 影片一律是「第一格當 poster＋中間一顆播放鈕」（Element 也這樣），
                 // 否則看起來就是一張普通照片，沒人知道點下去會怎樣。
                 // 用 PlayArrow 圖示，不要拿字型裡的 "▶" 湊：那個字元在這套字型下是

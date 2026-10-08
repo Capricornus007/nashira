@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import de.connect2x.trixnity.client.MatrixClient
 import io.github.capricornus007.nashira.matrix.MediaSource
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import org.jetbrains.skia.Bitmap
@@ -92,6 +93,7 @@ actual fun EmbeddedVideoPlayer(
     poster: ImageBitmap?,
     boxWidth: Dp,
     boxHeight: Dp,
+    inline: Boolean,
     modifier: Modifier,
 ) {
     val density = LocalDensity.current
@@ -139,6 +141,12 @@ actual fun EmbeddedVideoPlayer(
                 info = meta
                 return@withContext
             }
+            // 行內模式**不退回去抓整份檔**：氣泡那麼小一塊，為了它先拖 10MB 下來，
+            // 等於把「點開要看的那一條」的頻寬吃掉——串流不通就留封面，等用戶點開再說。
+            if (inline) {
+                mediaProbe("內嵌播放：行內串流不通，保留封面")
+                return@withContext
+            }
             // 兩條串流都不通才退回整份檔：檢視器手上那份（可能還沒抓到、甚至是 0 位元組），
             // 再不通就直接向原站要一份。
             val data = bytes?.takeIf { it.isNotEmpty() }
@@ -167,8 +175,17 @@ actual fun EmbeddedVideoPlayer(
         if (!playing) return@LaunchedEffect
         val startMs = resumeMs
         val ended = withContext(Dispatchers.IO) {
-            val decoder = MovieDecoder.create(sourcePath, meta, maxW, maxH, startMs)
-                ?: return@withContext false
+            if (inline) {
+                // 快速滾動時會一口氣經過很多條影片：先等一小拍，被滾走的會被取消、
+                // 根本不會起 ffmpeg（行內那條也是要搶你那條不寬的管子的）。
+                delay(InlineStartDelayMs)
+                if (!isActive) return@withContext false
+            }
+            val decoder = MovieDecoder.create(
+                sourcePath, meta, maxW, maxH, startMs,
+                audio = !inline && meta.hasAudio,
+                fps = if (inline) InlineFps else PlaybackFps,
+            ) ?: return@withContext false
             var done = false
             try {
                 var index = 0
@@ -197,19 +214,29 @@ actual fun EmbeddedVideoPlayer(
             done && isActive
         }
         if (ended) {
-            // 播到檔尾：起點歸零，讓他再點播放鈕能從頭看（停在尾端會一點就立刻又結束）
-            playing = false
-            resumeMs = 0L
-            positionMs = durationMs
+            if (inline) {
+                // 行內：假裝沒事，從頭再放（Telegram 的行內影片／GIF 就是無限循環）
+                resumeMs = 0L
+                positionMs = 0L
+                generation += 1
+            } else {
+                // 全螢幕播到檔尾：起點歸零，讓他再點播放鈕能從頭看
+                //（停在尾端會一點就立刻又結束）
+                playing = false
+                resumeMs = 0L
+                positionMs = durationMs
+            }
         }
     }
 
     Box(
         modifier
             .fillMaxSize()
-            .pointerInput(playing, generation, input) {
-                // 點畫面＝播放／暫停（Telegram 桌面端就是這個手勢）。這裡要把事件吃掉，
+            .pointerInput(playing, generation, input, inline) {
+                // 全螢幕時點畫面＝播放／暫停（Telegram 桌面端就是這個手勢）。這裡要把事件吃掉，
                 // 否則會被外層「點背景關閉」的監聽一起收走——點一下圖就關掉視窗很怪。
+                // 行內模式不搶點擊：那一側的點擊語意是「開全螢幕」。
+                if (inline) return@pointerInput
                 detectTapGestures {
                     if (input == null) return@detectTapGestures
                     if (playing) resumeMs = positionMs
@@ -231,6 +258,7 @@ actual fun EmbeddedVideoPlayer(
         } else {
             CircularProgressIndicator(Modifier.size(32.dp), strokeWidth = 3.dp, color = Color.White)
         }
+        if (inline) return@Box
         Column(
             Modifier
                 .align(Alignment.BottomCenter)
@@ -320,6 +348,12 @@ private const val PlaybackFps = 30
 
 /** 落後音訊超過這個毫秒數的格才丟掉。 */
 private const val StaleWindowMs = 500L
+
+/** 行內連播的 fps：氣泡那麼小、又是靜音，15fps 看起來就夠（也把手機以外的 CPU 減一半）。 */
+private const val InlineFps = 15
+
+/** 行內連播起播前的等待：快速滾動時被滾走的氣泡不該各起一條 ffmpeg。 */
+private const val InlineStartDelayMs = 250L
 private const val SampleRate = 48000
 
 private fun formatClock(totalMs: Long): String = "%d:%02d".format(totalMs / 60_000, (totalMs / 1000) % 60)
@@ -403,6 +437,7 @@ private class MovieDecoder private constructor(
     maxW: Int,
     maxH: Int,
     startMs: Long,
+    fps: Int,
     private val errLog: File,
     private val wavFile: File?,
 ) {
@@ -417,7 +452,7 @@ private class MovieDecoder private constructor(
         ffmpegCommand(startMs, source) + listOf(
             // 只取視訊、fps 封頂：不封頂就是每秒解 60 格、每格还要走三次複製，CPU 白燒一倍
             "-map", "0:v:0", "-an",
-            "-vf", "scale=$outW:$outH,fps=$PlaybackFps",
+            "-vf", "scale=$outW:$outH,fps=$fps",
             "-f", "rawvideo", "-pix_fmt", "bgra", "pipe:1",
         ) + if (wavFile == null) emptyList() else listOf(
             // `-flush_packets 1`：隨寫隨刷。不給的話尾讀那端要等 stdio 緩衝塞滿才看到資料，
@@ -447,7 +482,7 @@ private class MovieDecoder private constructor(
                     line.start()
                     audioReady = true
                     val raf = RandomAccessFile(file, "r")
-                    val dataStart = waitForDataChunk(raf)
+                    val dataStart = waitForDataChunk(raf) { !stopped && process.isAlive }
                     if (dataStart >= 0) {
                         raf.seek(dataStart)
                         val payload = ByteArray(8192)
@@ -532,10 +567,12 @@ private class MovieDecoder private constructor(
         private const val BytesPerAudioSecond = SampleRate.toLong() * 2L * 2L
 
         /** 找 wav 的 `data` 區塊起點（本體在它後面 8 個位元組）。回 -1＝沒找到。 */
-        private fun waitForDataChunk(raf: RandomAccessFile): Long {
+        private fun waitForDataChunk(raf: RandomAccessFile, alive: () -> Boolean): Long {
             val head = ByteArray(4096)
-            var tries = 0
-            while (tries < 300) {
+            // 沒有次數上限：串流剛開始時 ffmpeg 要先抓 moov（常在檔尾），
+            // 前幾秒連一個音訊封包都寫不出來是正常的（實測 2026-10-08：
+            // 原本 300 次×10ms 的上限一到，這趟播放就永久沒聲音）。
+            while (alive()) {
                 val size = raf.length()
                 if (size >= 12) {
                     val take = minOf(size, head.size.toLong()).toInt()
@@ -549,22 +586,28 @@ private class MovieDecoder private constructor(
                         }
                     }
                 }
-                tries++
                 Thread.sleep(10)
             }
             return -1L
         }
 
         /** ffmpeg 不存在、暫存檔開不了……一律回 null，讓上面顯示封面就好，別把整個應用程式弄炸。 */
-        fun create(source: String, info: MovieInfo, maxW: Int, maxH: Int, startMs: Long): MovieDecoder? =
-            runCatching {
-                val errLog = File.createTempFile("nashira-play-err-", ".log").apply { deleteOnExit() }
-                val wav = if (info.hasAudio) {
-                    File.createTempFile("nashira-play-audio-", ".wav").apply { deleteOnExit() }
-                } else {
-                    null
-                }
-                MovieDecoder(source, info, maxW, maxH, startMs, errLog, wav)
+        fun create(
+            source: String,
+            info: MovieInfo,
+            maxW: Int,
+            maxH: Int,
+            startMs: Long,
+            audio: Boolean,
+            fps: Int,
+        ): MovieDecoder? = runCatching {
+            val errLog = File.createTempFile("nashira-play-err-", ".log").apply { deleteOnExit() }
+            val wav = if (audio) {
+                File.createTempFile("nashira-play-audio-", ".wav").apply { deleteOnExit() }
+            } else {
+                null
+            }
+            MovieDecoder(source, info, maxW, maxH, startMs, fps, errLog, wav)
             }.onFailure { mediaProbe("建解碼器失敗：${it.message}") }.getOrNull()
     }
 }

@@ -156,6 +156,9 @@ sealed interface MessageBody {
         val height: Int?,
         val isSticker: Boolean,
         val mimeType: String? = null,
+        /** 影片的時長與檔大小（m.video 的 `info`）：決定時間線要不要**行內連播**用。 */
+        val durationMs: Long? = null,
+        val sizeBytes: Long? = null,
     ) : MessageBody
 
     /** 檔案／音訊／影片：先用檔名標示，還沒做內建播放 */
@@ -1227,6 +1230,8 @@ private fun videoBody(
         // 同 imageBody：用縮圖當畫面時，mimeType 不能還是 `video/*`，
         // 否則 MessageImage 會對一張 JPEG 去抽影片第一幀。
         mimeType = if (poster != null) null else info?.mimeType,
+        durationMs = info?.duration,
+        sizeBytes = info?.size,
     )
 }
 
