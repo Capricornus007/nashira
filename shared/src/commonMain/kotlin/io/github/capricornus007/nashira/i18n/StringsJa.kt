@@ -303,6 +303,8 @@ object JaStrings : Strings by EnStrings {
     override val actionDownload = "ダウンロード"
     override val actionShowInChat = "チャットに表示"
     override val actionSaveAs = "名前を付けて保存…"
+    override val viewAllPhotos = "すべての写真"
+    override val mediaGalleryEmpty = "このルームにはまだ写真がありません"
     override val syncConnecting = "接続中…メッセージは自動的に反映されます"
     override val connectionFailed = "サーバーに接続できませんでした"
     override val connectionFailedHint =

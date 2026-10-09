@@ -1,5 +1,13 @@
 package io.github.capricornus007.nashira
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -13,7 +21,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
@@ -46,7 +53,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -107,6 +113,8 @@ data class MediaSlot(
 class MediaViewerActions(
     val showInChat: (String) -> Unit,
     val forward: (String) -> Unit,
+    /** 開附件面板（整個房間的媒體格子）。用戶 2026-10-09：「那你倒是先去做啊？」 */
+    val viewAll: () -> Unit,
 )
 
 /** 剛送出、索引還沒掃到的那一格：用它反查時間線裡那則訊息，才拿得到發送者顯示名。 */
@@ -141,6 +149,35 @@ internal fun mediaStripFrom(
     media: List<MessageBody.Image>,
     at: Int,
 ): MediaViewer {
+    val merged = mergedMediaSlots(loaded, roomIndex)
+    val strip = merged.values.sortedBy { it.timestamp }
+    val anchor = media.getOrNull(at) ?: return MediaViewer(strip, strip.indices.lastOrNull() ?: 0)
+    val found = strip.indexOfFirst { it.identity == anchor.source.identity() }
+    if (found >= 0) return MediaViewer(strip, found)
+    // 起點不在清單上（剛送出、索引還沒掃到它）：就地補一格，別讓檢視器變成空的
+    val slot = MediaSlot(
+        eventId = anchor.source.identity(),
+        identity = anchor.source.identity(),
+        timestamp = Clock.System.now().toEpochMilliseconds(),
+        caption = anchor.caption,
+        sender = loaded.firstOrNull { it.body.mentionsMedia(anchor) }?.senderName.orEmpty(),
+        body = anchor,
+    )
+    val withAnchor = (strip + slot).sortedBy { it.timestamp }
+    return MediaViewer(withAnchor, withAnchor.indexOf(slot).coerceAtLeast(0))
+}
+
+/**
+ * 「整個房間的媒體」＝本機索引 ＋ 畫面這一段，靠 mxc 認同一張圖。
+ * 時間線那側手上有完整金鑰，會蓋掉索引裡那個等金鑰的空格。
+ *
+ * 抽出來是因為「檢視所有照片」的格子清單與檢視器的連翻清單**必須同一份**：
+ * 在清單裡點第 40 格，開起來就要停在第 40 張，兩邊各排一次就會錯位。
+ */
+internal fun mergedMediaSlots(
+    loaded: List<io.github.capricornus007.nashira.matrix.TimelineMessage>,
+    roomIndex: List<io.github.capricornus007.nashira.matrix.MediaIndexEntry>,
+): LinkedHashMap<String, MediaSlot> {
     val merged = LinkedHashMap<String, MediaSlot>()
     roomIndex.forEach { entry ->
         if (entry.msgtype != "m.image" && entry.msgtype != "m.video") return@forEach
@@ -175,22 +212,9 @@ internal fun mediaStripFrom(
             )
         }
     }
-    val strip = merged.values.sortedBy { it.timestamp }
-    val anchor = media.getOrNull(at) ?: return MediaViewer(strip, strip.indices.lastOrNull() ?: 0)
-    val found = strip.indexOfFirst { it.identity == anchor.source.identity() }
-    if (found >= 0) return MediaViewer(strip, found)
-    // 起點不在清單上（剛送出、索引還沒掃到它）：就地補一格，別讓檢視器變成空的
-    val slot = MediaSlot(
-        eventId = anchor.source.identity(),
-        identity = anchor.source.identity(),
-        timestamp = Clock.System.now().toEpochMilliseconds(),
-        caption = anchor.caption,
-        sender = loaded.firstOrNull { it.body.mentionsMedia(anchor) }?.senderName.orEmpty(),
-        body = anchor,
-    )
-    val withAnchor = (strip + slot).sortedBy { it.timestamp }
-    return MediaViewer(withAnchor, withAnchor.indexOf(slot).coerceAtLeast(0))
+    return merged
 }
+
 
 /**
  * 全螢幕圖片檢視器（Discord／Element 式）：
@@ -315,11 +339,12 @@ fun ImageViewer(
         val saver = rememberImageSaver()
         val downloader = rememberMediaDownloader()
         val scope = rememberCoroutineScope()
-        // 右下那顆調色盤＝換檢視器底色（Element 同一顆）。底色一換，所有圖示與文字的
-        // 顏色都要跟著翻，否則白字壓白底等於看不見。
-        var lightBackdrop by remember { mutableStateOf(false) }
-        val chromeTint = if (lightBackdrop) Color.Black else Color.White
-        val chromePill = if (lightBackdrop) Color.White.copy(alpha = 0.72f) else Color.Black.copy(alpha = 0.55f)
+        // 外圍圖示的顏色固定白：上一版這裡擺了一顆「換底色」（照 Element 的刷子），
+        // 用戶 2026-10-09 兩句點名：「爲什麼照片查看要弄甚麼日夜切換按鈕？」＋
+        // 「这他妈是編輯頁面好嗎」——那顆刷子在 Telegram 是**編輯**頁的入口，
+        // 不是換主題。我們沒有編輯功能，擺一顆「看照片時切換晝夜」的钮等於自己發明。
+        val chromeTint = Color.White
+        val chromePill = Color.Black.copy(alpha = 0.55f)
         // 旋轉是純顯示（不改檔案本身），換圖就要回到正，別讓上一張的 90 度跟過來
         var rotation by remember(key) { mutableFloatStateOf(0f) }
         var menuOpen by remember { mutableStateOf(false) }
@@ -365,7 +390,7 @@ fun ImageViewer(
                         }
                     }
                 }
-                .background(if (lightBackdrop) Color.White.copy(alpha = 0.94f) else Color.Black.copy(alpha = 0.92f))
+                .background(Color.Black.copy(alpha = 0.97f))
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onTap = { onDismiss() },
@@ -486,9 +511,6 @@ fun ImageViewer(
                         .align(Alignment.BottomEnd)
                         .padding(end = 12.dp, bottom = 8.dp),
                 ) {
-                    IconButton(onClick = { lightBackdrop = !lightBackdrop }) {
-                        Icon(BarIcons.Appearance, contentDescription = null, tint = chromeTint)
-                    }
                     IconButton(
                         // 這一格還在等金鑰時按不动：沒金鑰根本存不出檔，
                         // 讓它按了才報「抓不到」等於把内部狀態問題丟給使用者
@@ -518,8 +540,6 @@ fun ImageViewer(
                         IconButton(onClick = { menuOpen = !menuOpen }) {
                             Icon(Icons.Filled.MoreVert, contentDescription = null, tint = chromeTint)
                         }
-                        // 「檢視所有照片」這輪不進選單：那是附件面板（#108 剩那半），
-                        // 做出來之前擺一顆按了沒反應的項目比缺顆更糟
                         DropdownMenu(
                             expanded = menuOpen,
                             onDismissRequest = { menuOpen = false },
@@ -555,6 +575,14 @@ fun ImageViewer(
                                 onClick = {
                                     menuOpen = false
                                     actions.forward(slot.eventId)
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(strings.viewAllPhotos) },
+                                leadingIcon = { Icon(BarIcons.Gallery, contentDescription = null) },
+                                onClick = {
+                                    menuOpen = false
+                                    actions.viewAll()
                                 },
                             )
                             DropdownMenuItem(
@@ -615,6 +643,113 @@ fun ImageViewer(
 
             // 提示往上挪：左下的計數與右下的動作列都住在底部，疊在它們上面就等於沒顯示
             SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = 76.dp))
+        }
+    }
+}
+
+/**
+ * 附件面板的「所有照片」：整個房間已索引的媒體格子（用戶 2026-10-09
+ * 「這個群組只能點開看五個照片，我記得電報那邊是可以直接一次性整理查看媒體數的」）。
+ *
+ * 清單與檢視器的連翻用的是同一份 [mergedMediaSlots]，所以點第 N 格開起來就停在第 N 張。
+ * 加密房那些還沒補到金鑰的格子先顯示佔位並請上層去補（[onRequestResolve]），
+ * 補到才換成縮圖——不會出現「點了開起來是空白」。
+ */
+@Composable
+fun MediaGallery(
+    client: MatrixClient,
+    slots: List<MediaSlot>,
+    resolved: Map<String, MessageBody.Image?>,
+    onRequestResolve: (String) -> Unit,
+    onOpen: (Int) -> Unit,
+    onDismiss: () -> Unit,
+    strings: Strings,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false),
+    ) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.97f))
+                .clickable(onClick = onDismiss),
+        ) {
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 16.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = strings.viewAllPhotos,
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = "${slots.size}",
+                        color = Color.White.copy(alpha = 0.7f),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Filled.Close, contentDescription = null, tint = Color.White)
+                    }
+                }
+                if (slots.isEmpty()) {
+                    Text(
+                        text = strings.mediaGalleryEmpty,
+                        color = Color.White.copy(alpha = 0.7f),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.fillMaxWidth().padding(24.dp),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
+                } else {
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(112.dp),
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                            start = 12.dp, end = 12.dp, bottom = 16.dp,
+                        ),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        itemsIndexed(slots) { position, slot ->
+                            val body = slot.body ?: resolved[slot.eventId]
+                            Box(
+                                Modifier
+                                    .aspectRatio(1f)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color.White.copy(alpha = 0.06f)),
+                            ) {
+                                if (body != null) {
+                                    MessageImage(
+                                        client = client,
+                                        source = body.source,
+                                        width = body.width,
+                                        height = body.height,
+                                        isSticker = false,
+                                        caption = body.caption,
+                                        mimeType = body.mimeType,
+                                        durationMs = body.durationMs,
+                                        sizeBytes = body.sizeBytes,
+                                        insideAlbumCell = true,
+                                        modifier = Modifier.fillMaxSize(),
+                                        onOpen = { onOpen(position) },
+                                    )
+                                } else {
+                                    // 這格還在等金鑰：進到畫面才請上層去補，不自己發請求
+                                    LaunchedEffect(slot.eventId) { onRequestResolve(slot.eventId) }
+                                    CircularProgressIndicator(
+                                        Modifier.align(Alignment.Center).padding(18.dp),
+                                        color = Color.White,
+                                        strokeWidth = 2.dp,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

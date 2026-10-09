@@ -2068,6 +2068,8 @@ private fun TimelinePane(
     // 全螢幕圖片檢視器與下載結果提示。相簿是「整組 + 停在哪一格」，
     // 單張就是只有這一筆的組，檢視器因此一律能連翻。
     var viewerTarget by remember(room.roomId) { mutableStateOf<MediaViewer?>(null) }
+    // 附件面板的「所有照片」（從檢視器三點選單進去）
+    var mediaGalleryOpen by remember(room.roomId) { mutableStateOf(false) }
     // 房間媒體索引：連翻要翻得完整間房，靠的是這份「掃過整個房間」的清單，
     // 不是畫面目前載入的那一段（用戶 2026-10-09：「電報是直接可以切換聊天內所有圖片的」）。
     // 開房時先讀本機已有的（秒出），背景再把還沒掃的歷史補上來。
@@ -3640,6 +3642,28 @@ private fun TimelinePane(
         }
     }
 
+    if (mediaGalleryOpen) {
+        val gallerySlots = remember(mediaIndexEntries.size, messages) {
+            mergedMediaSlots(messages.orEmpty(), mediaIndexEntries.toList()).values
+                .sortedBy { it.timestamp }
+        }
+        MediaGallery(
+            client = roomRepository.client,
+            slots = gallerySlots,
+            resolved = resolvedIndexedMedia,
+            onRequestResolve = { id ->
+                if (!resolvedIndexedMedia.containsKey(id)) {
+                    scope.launch {
+                        resolvedIndexedMedia[id] = resolveIndexedMedia(roomRepository.client, room.roomId, id)
+                    }
+                }
+            },
+            onOpen = { position -> viewerTarget = MediaViewer(gallerySlots, position) },
+            onDismiss = { mediaGalleryOpen = false },
+            strings = strings,
+        )
+    }
+
     // 全螢幕圖片檢視器：雙指縮放／雙擊縮放／下載；相簿还能整組連翻
     viewerTarget?.let { viewer ->
         ImageViewer(
@@ -3667,6 +3691,11 @@ private fun TimelinePane(
                 // 「轉傳」要的是那則訊息的內容。已經在畫面上的直接用它；
                 // 舊的（只在本機索引裡）用检视器那格的內容合成一份——轉寄只用 body（實查
                 // RoomRepository.forwardMessage），發送者欄位這裡沒有意義可言
+                // 「檢視所有照片」：關掉全螢幕改開格子清單（清單與連翻同一份，位置對得上）
+                viewAll = {
+                    viewerTarget = null
+                    mediaGalleryOpen = true
+                },
                 forward = { id ->
                     val slot = viewer.slots.firstOrNull { it.eventId == id }
                     val loaded = messages?.firstOrNull { it.eventId?.full == id }

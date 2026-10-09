@@ -180,6 +180,10 @@ interface Strings {
     val actionShowInChat: String
     /** 與「下載」分開的兩個動作照 Element：下載＝直接進下載夾，另存為＝選位置。 */
     val actionSaveAs: String
+    /** 檢視器選單與附件面板標題共用（Element 的 View all photos）。 */
+    val viewAllPhotos: String
+    /** 附件面板還掃不到東西時的說明（第一次開房間會看到）。 */
+    val mediaGalleryEmpty: String
     val actionHideImage: String
     val hiddenImage: String
     val downloadFailed: String

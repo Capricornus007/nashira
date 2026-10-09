@@ -189,6 +189,18 @@ object BarIcons {
         }.build()
     }
 
+    /** 附件面板／「檢視所有照片」：2x2 的格子，Element 與 Telegram 都是這個語彙。 */
+    val Gallery: ImageVector by lazy {
+        ImageVector.Builder(name = "Gallery", defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f).apply {
+            path(fill = SolidColor(Color.Black)) {
+                moveTo(3f, 3f); lineTo(10.5f, 3f); lineTo(10.5f, 10.5f); lineTo(3f, 10.5f); close()
+                moveTo(13.5f, 3f); lineTo(21f, 3f); lineTo(21f, 10.5f); lineTo(13.5f, 10.5f); close()
+                moveTo(3f, 13.5f); lineTo(10.5f, 13.5f); lineTo(10.5f, 21f); lineTo(3f, 21f); close()
+                moveTo(13.5f, 13.5f); lineTo(21f, 13.5f); lineTo(21f, 21f); lineTo(13.5f, 21f); close()
+            }
+        }.build()
+    }
+
     /**
      * 置頂／置底。用戶 2026-10-07 看了第一版直接問「你這圖標確定正常嗎」——
      * 那版用 `KeyboardArrowUp/Down`，在選單裡就是兩顆孤零零的 `^` `v`，
