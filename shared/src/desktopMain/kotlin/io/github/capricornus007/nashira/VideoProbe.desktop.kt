@@ -65,6 +65,7 @@ private fun runCapture(args: List<String>): ByteArray? = runCatching {
     val process = ProcessBuilder(args)
         .redirectError(ProcessBuilder.Redirect.DISCARD)
         .redirectInput(ProcessBuilder.Redirect.from(File("/dev/null")))
+        .withoutLauncherEnv()
         .start()
     val collected = CompletableFuture.supplyAsync {
         runCatching { process.inputStream.use { it.readBytes() } }.getOrNull()

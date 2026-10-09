@@ -196,7 +196,7 @@ internal object NativeAudioNodes {
     }.getOrDefault(emptyList())
 
     private fun runProcess(vararg cmd: String): String = runCatching {
-        val p = ProcessBuilder(*cmd).redirectErrorStream(true).start()
+        val p = ProcessBuilder(*cmd).redirectErrorStream(true).withoutLauncherEnv().start()
         val text = p.inputStream.bufferedReader().readText()
         if (!p.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)) {
             p.destroy()

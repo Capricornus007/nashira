@@ -1,5 +1,6 @@
 package io.github.capricornus007.nashira.matrix
 
+import io.github.capricornus007.nashira.withoutLauncherEnv
 import io.github.capricornus007.nashira.AudioSelection
 import io.github.capricornus007.nashira.mixerInfoFor
 import java.io.ByteArrayInputStream
@@ -68,7 +69,7 @@ actual class AudioPlayer actual constructor() {
         val cmd = ffplayCommand ?: return
         if (ffplay?.isAlive == true) return
         ffplay = runCatching {
-            ProcessBuilder(cmd, "-nodisp", "-autoexit", "-loglevel", "quiet", "-volume", AudioSelection.outputVolume.toString(), f.absolutePath).start()
+            ProcessBuilder(cmd, "-nodisp", "-autoexit", "-loglevel", "quiet", "-volume", AudioSelection.outputVolume.toString(), f.absolutePath).withoutLauncherEnv().start()
         }.getOrNull()
     }
 

@@ -40,7 +40,7 @@ private fun runSendCompress(picked: PickedFile): PickedFile? = runCatching {
         // moov 搬到檔頭：收到的人不必等整檔就能開播（mp4 的 moov 在檔尾時串流解不出第一格）
         "-movflags", "+faststart",
         dst.absolutePath,
-    ).redirectErrorStream(true).start()
+    ).redirectErrorStream(true).withoutLauncherEnv().start()
 
     // ⚠️ 一定要另外收 stdout／stderr：行程的輸出塞滿管線緩衝就會卡死（這個坑在播放那側踩過）
     val log = CompletableFuture.supplyAsync {

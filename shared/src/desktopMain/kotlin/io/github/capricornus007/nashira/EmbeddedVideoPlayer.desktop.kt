@@ -103,8 +103,8 @@ actual fun EmbeddedVideoPlayer(
     val maxW = with(density) { boxWidth.roundToPx() }.coerceAtLeast(64)
     val maxH = with(density) { boxHeight.roundToPx() }.coerceAtLeast(64)
 
-    // ffmpeg 要的輸入：網址（串流）或落地後的暫存檔路徑。这两个是「一次解析、之後不再改」，
-    // 所以檢視器那边的下載完成（bytes 從 null 變成整份）不會把正在播的畫面重頭來過。
+    // ffmpeg 要的輸入：網址（串流）或落地後的暫存檔路徑。這两个是「一次解析、之後不再改」，
+    // 所以檢視器那邊的下載完成（bytes 從 null 變成整份）不會把正在播的畫面重頭來過。
     var input by remember { mutableStateOf<String?>(null) }
     var info by remember { mutableStateOf<MovieInfo?>(null) }
     var tempFile by remember { mutableStateOf<File?>(null) }
@@ -566,7 +566,7 @@ private fun probeMovie(source: String): MovieInfo? = readCmdOutput(
  * 整個播放流程就永久轉圈（2026-10-08 檢查自己這段時發現的）。
  */
 private fun readCmdOutput(command: List<String>, timeoutSec: Long = 15): String? = runCatching {
-    val process = ProcessBuilder(command).redirectErrorStream(false).start()
+    val process = ProcessBuilder(command).redirectErrorStream(false).withoutLauncherEnv().start()
     val collected = CompletableFuture.supplyAsync {
         runCatching { process.inputStream.use { it.readBytes() } }.getOrNull()
     }
@@ -594,7 +594,7 @@ private fun ffmpegCommand(startMs: Long, source: String): List<String> = listOf(
 
 /**
  * 一趟播放：**一條** ffmpeg 同時出影與聲。`close()` 一定要呼叫，
- * 否則 ffmpeg 会挂在後面繼續吃 CPU 與頻寬（暫停與關閉都走這裡）。
+ * 否則 ffmpeg 會挂在後面繼續吃 CPU 與頻寬（暫停與關閉都走這裡）。
  *
  * 聲音那路是「第二個輸出＝一個會成長的 wav 暫存檔」，我們尾讀它餵給 SourceDataLine。
  * 這樣同一個檔只抓一次；先前開兩條行程各抓一次，實測等於把他那條 ~150–280KB/s 的
@@ -619,7 +619,7 @@ private class MovieDecoder private constructor(
 
     private val process = ProcessBuilder(
         ffmpegCommand(startMs, source) + listOf(
-            // 只取視訊、fps 封頂：不封頂就是每秒解 60 格、每格还要走三次複製，CPU 白燒一倍
+            // 只取視訊、fps 封頂：不封頂就是每秒解 60 格、每格還要走三次複製，CPU 白燒一倍
             "-map", "0:v:0", "-an",
             "-vf", "scale=$outW:$outH,fps=$fps",
             "-f", "rawvideo", "-pix_fmt", "bgra", "pipe:1",
@@ -637,6 +637,7 @@ private class MovieDecoder private constructor(
             // 而不是無聲地永遠卡住（上面那個 `-y` 的教訓）。
             redirectInput(ProcessBuilder.Redirect.from(java.io.File("/dev/null")))
         }
+        .withoutLauncherEnv()
         .start()
 
     private val input = DataInputStream(BufferedInputStream(process.inputStream, frameBytes))

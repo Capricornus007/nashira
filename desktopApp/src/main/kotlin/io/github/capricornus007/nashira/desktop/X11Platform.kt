@@ -1,6 +1,7 @@
 package io.github.capricornus007.nashira.desktop
 
 import java.io.File
+import io.github.capricornus007.nashira.withoutLauncherEnv
 
 /**
  * X11 平台調校，**必須在 AWT/Compose 初始化之前呼叫**。
@@ -56,7 +57,7 @@ private fun detectScale(): Int? {
 /** 先問 X server 的 resource database（xrdb -query），失敗再讀 ~/.Xresources。 */
 private fun xftDpi(): Float? {
     runCatching {
-        val process = ProcessBuilder("xrdb", "-query").redirectErrorStream(true).start()
+        val process = ProcessBuilder("xrdb", "-query").redirectErrorStream(true).withoutLauncherEnv().start()
         val output = process.inputStream.bufferedReader().use { it.readText() }
         process.waitFor()
         parseXftDpi(output)?.let { return it }

@@ -33,6 +33,7 @@ actual suspend fun startSsoLogin(homeserver: String): Result<Unit>? {
 private fun isSchemeHandlerRegistered(): Boolean = runCatching {
     val process = ProcessBuilder("xdg-mime", "query", "default", "x-scheme-handler/nashira")
         .redirectErrorStream(true)
+        .withoutLauncherEnv()
         .start()
     val output = process.inputStream.bufferedReader().readText().trim()
     process.waitFor()
@@ -68,6 +69,7 @@ private fun registerSchemeHandler(): Boolean = runCatching {
     )
     val process = ProcessBuilder("xdg-mime", "default", "nashira.desktop", "x-scheme-handler/nashira")
         .redirectErrorStream(true)
+        .withoutLauncherEnv()
         .start()
     process.waitFor() == 0 && isSchemeHandlerRegistered()
 }.getOrDefault(false)

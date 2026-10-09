@@ -20,7 +20,7 @@ actual fun decodeVideoFrame(bytes: ByteArray, maxDimension: Int): ImageBitmap? =
             "-frames:v", "1",
             "-vf", "scale='min($maxDimension,iw)':-1",
             "-f", "image2pipe", "-vcodec", "png", "pipe:1",
-        ).redirectErrorStream(false).start()
+        ).redirectErrorStream(false).withoutLauncherEnv().start()
         process.outputStream.use { it.flush() }
         process.inputStream.use { it.readBytes() }.also { process.waitFor() }
     } finally {
@@ -31,6 +31,6 @@ actual fun decodeVideoFrame(bytes: ByteArray, maxDimension: Int): ImageBitmap? =
 
 private val ffmpegAvailable: Boolean by lazy {
     runCatching {
-        ProcessBuilder("ffmpeg", "-version").redirectErrorStream(true).start().waitFor() == 0
+        ProcessBuilder("ffmpeg", "-version").redirectErrorStream(true).withoutLauncherEnv().start().waitFor() == 0
     }.getOrDefault(false)
 }

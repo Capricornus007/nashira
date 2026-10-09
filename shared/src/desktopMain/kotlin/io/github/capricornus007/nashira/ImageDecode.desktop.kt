@@ -134,7 +134,7 @@ actual fun decodeAnimatedVideoFrames(bytes: ByteArray, maxDimension: Int, maxFra
 
 /** 跑一條命令、把 stdout 全收下來；非零出口或開不起來都回 null。 */
 private fun runCapture(command: List<String>): ByteArray? = runCatching {
-    val process = ProcessBuilder(command).redirectErrorStream(false).start()
+    val process = ProcessBuilder(command).redirectErrorStream(false).withoutLauncherEnv().start()
     // 一定要先把 stdout 讀空再 waitFor：管線緩衝區年滿時寫端會堵死，
     // 那時 waitFor 永遠等不到（這個坑在 VideoFrame.desktop.kt 的註解裡記過）。
     val out = process.inputStream.use { it.readBytes() }

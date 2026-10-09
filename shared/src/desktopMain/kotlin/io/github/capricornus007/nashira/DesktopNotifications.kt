@@ -30,6 +30,7 @@ object DesktopNotifications : NotificationPlatform {
         runCatching {
             ProcessBuilder("notify-send", "--version")
                 .redirectErrorStream(true)
+                .withoutLauncherEnv()
                 .start()
                 .waitFor() == 0
         }.getOrDefault(false)
@@ -48,7 +49,7 @@ object DesktopNotifications : NotificationPlatform {
             add(body)
         }
         runCatching {
-            val process = ProcessBuilder(command).redirectErrorStream(true).start()
+            val process = ProcessBuilder(command).redirectErrorStream(true).withoutLauncherEnv().start()
             val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
             process.waitFor()
             output.lineSequence().lastOrNull { line -> line.toIntOrNull() != null }

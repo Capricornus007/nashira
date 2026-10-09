@@ -1,5 +1,6 @@
 package io.github.capricornus007.nashira.theme
 
+import io.github.capricornus007.nashira.withoutLauncherEnv
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -29,7 +30,7 @@ private fun portalColorScheme(): Int? = runCatching {
         "--object-path", "/org/freedesktop/portal/desktop",
         "--method", "org.freedesktop.portal.Settings.ReadOne",
         "org.freedesktop.appearance", "color-scheme",
-    ).start()
+    ).withoutLauncherEnv().start()
     try {
         if (!process.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)) {
             process.destroyForcibly()

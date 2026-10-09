@@ -50,6 +50,7 @@ import io.github.capricornus007.nashira.DesktopNotifications
 import io.github.capricornus007.nashira.DesktopSingleInstance
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
+import io.github.capricornus007.nashira.withoutLauncherEnv
 
 // 托盤選單的「第一幀」估計尺寸：真實尺寸由內容量出來，這裡只求初始窗口不要太離譜。
 private const val TRAY_MENU_EST_W = 200
@@ -193,7 +194,7 @@ fun main(args: Array<String>) {
                 // 舊寫法 `xdotool search --class … windowactivate --sync` 在這裡同步等，
                 // 而 --class 同時命中那顆 1x1 的工具窗口（它永遠不會被激活），
                 // --sync 就永遠不返回；EDT 一凍結，窗口已經 map 但不再重繪，
-                // 看起來就是「人不见了、位子還佔著」。
+                // 看起來就是「人不見了、位子還佔著」。
                 activateWindowAsync(w)
             }
         }
@@ -593,7 +594,7 @@ private fun activateWindowAsync(target: java.awt.Window) {
             val process = ProcessBuilder(
                 "xdotool", "search", "--class", "io-github-capricornus007-nashira",
                 "--name", "^Nashira$", "windowactivate",
-            ).redirectErrorStream(true).start()
+            ).redirectErrorStream(true).withoutLauncherEnv().start()
             val finished = process.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)
             if (!finished) process.destroyForcibly()
             finished && process.exitValue() == 0
@@ -710,6 +711,7 @@ private fun restartApplication(onExit: () -> Unit) {
             ProcessBuilder(cmd)
                 .redirectOutput(ProcessBuilder.Redirect.DISCARD)
                 .redirectError(ProcessBuilder.Redirect.DISCARD)
+                .withoutLauncherEnv()
                 .start()
         }
         if (started.isSuccess) {

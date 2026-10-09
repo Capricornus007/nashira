@@ -26,7 +26,7 @@ actual fun openLink(url: String) {
 
 /** 起來 xdg-open 就回 true；非阻塞——點擊常常在 EDT 上，不能等瀏覽器。 */
 private fun runXdgOpen(url: String): Boolean = runCatching {
-    val process = ProcessBuilder("xdg-open", url).redirectErrorStream(true).start()
+    val process = ProcessBuilder("xdg-open", url).redirectErrorStream(true).withoutLauncherEnv().start()
     Thread { runCatching { process.waitFor() } }.apply { isDaemon = true }.start()
     true
 }.getOrDefault(false)
