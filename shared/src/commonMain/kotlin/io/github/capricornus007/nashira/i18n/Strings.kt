@@ -184,6 +184,8 @@ interface Strings {
     val viewAllPhotos: String
     /** 附件面板還掃不到東西時的說明（第一次開房間會看到）。 */
     val mediaGalleryEmpty: String
+    /** 標題列那把小鎖的懸停說明。 */
+    val encryptedRoom: String
     val actionHideImage: String
     val hiddenImage: String
     val downloadFailed: String

@@ -35,8 +35,11 @@ internal val ComposerMarkupPreview = OutputTransformation {
         // 刪標記：同一處可能被多層標記包到，合併區間後**從尾端往前刪**
         val ranges = ArrayList<IntRange>()
         for (run in found) {
-            ranges += IntRange(run.openStart, run.openEnd)
-            ranges += IntRange(run.closeStart, run.closeEnd)
+            // openEnd／closeEnd 是 exclusive 端點（substring 用的那個），IntRange 是包含式：
+            // 直接塞進去會「多圈一格」，下面 last+1 再刪就吃掉標記後面那個**真字元**
+            //（用戶 2026-10-09 兩張截圖：28 個 1 加底線後只剩 27 個——「就是缺字」）
+            ranges += IntRange(run.openStart, run.openEnd - 1)
+            ranges += IntRange(run.closeStart, run.closeEnd - 1)
         }
         val merged = mergeRanges(ranges)
         for (i in merged.indices.reversed()) {

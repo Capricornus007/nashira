@@ -148,11 +148,14 @@ internal fun mediaStripFrom(
     roomIndex: List<io.github.capricornus007.nashira.matrix.MediaIndexEntry>,
     media: List<MessageBody.Image>,
     at: Int,
+    /** 點開那則訊息的事件 id（呼叫端在訊息列上，拿得到）。同一張圖被發兩次時靠它選對那一格。 */
+    anchorEventId: String? = null,
 ): MediaViewer {
     val merged = mergedMediaSlots(loaded, roomIndex)
     val strip = merged.values.sortedBy { it.timestamp }
     val anchor = media.getOrNull(at) ?: return MediaViewer(strip, strip.indices.lastOrNull() ?: 0)
-    val found = strip.indexOfFirst { it.identity == anchor.source.identity() }
+    val found = anchorEventId?.let { id -> strip.indexOfFirst { it.eventId == id } }
+        ?: strip.indexOfFirst { it.identity == anchor.source.identity() }
     if (found >= 0) return MediaViewer(strip, found)
     // 起點不在清單上（剛送出、索引還沒掃到它）：就地補一格，別讓檢視器變成空的
     val slot = MediaSlot(
@@ -179,9 +182,11 @@ internal fun mergedMediaSlots(
     roomIndex: List<io.github.capricornus007.nashira.matrix.MediaIndexEntry>,
 ): LinkedHashMap<String, MediaSlot> {
     val merged = LinkedHashMap<String, MediaSlot>()
+    // 鍵是**事件 id**，不是 mxc：同一張圖被兩個人各發一次是兩則訊息、兩格
+    //（實據：那間 6612 筆媒體的房間有 348 筆共用同一個 mxc，拿 mxc 去重就少 348 格）
     roomIndex.forEach { entry ->
         if (entry.msgtype != "m.image" && entry.msgtype != "m.video") return@forEach
-        merged[entry.identity] = MediaSlot(
+        merged[entry.eventId] = MediaSlot(
             eventId = entry.eventId,
             identity = entry.identity,
             timestamp = entry.timestamp,
@@ -200,8 +205,9 @@ internal fun mergedMediaSlots(
         val eventId = message.eventId?.full.orEmpty()
         images.forEachIndexed { position, image ->
             val identity = image.source.identity()
-            merged[identity] = MediaSlot(
-                // 索引拿不到事件 id 的舊訊息（多半是本地回顯）就拿身分鍵頂著，之後自然被蓋掉
+            // 本機回顯（還沒拿到事件 id）用身分鍵當鍵，其餘用事件 id：
+            // 這樣時間線這一側才會蓋掉索引裡同一則訊息的那格（含金鑰）
+            merged[eventId.ifEmpty { "outbox:" + identity }] = MediaSlot(
                 eventId = eventId.ifEmpty { identity },
                 identity = identity,
                 // 相簿那幾張同一則訊息、同一個時間戳；排完序自然相鄰

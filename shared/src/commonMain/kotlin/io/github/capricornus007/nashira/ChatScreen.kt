@@ -2257,7 +2257,22 @@ private fun TimelinePane(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             RoomAvatar(roomRepository, room, Modifier.size(34.dp).clip(CircleShape))
                             Column(Modifier.padding(start = 10.dp)) {
-                                Text(room.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(room.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+                                    // 這房間有沒有端到端加密，原本只能從「點開訊息看得到／看不到」倒推
+                                    //（用戶 2026-10-09：「應該順帶去弄個直接分出它是否加密的圖標」）。
+                                    // 位置照 Element：房名右邊一把小鎖。
+                                    if (room.encrypted) {
+                                        HoverTooltip(text = strings.encryptedRoom) {
+                                            Icon(
+                                                Icons.Filled.Lock,
+                                                contentDescription = strings.encryptedRoom,
+                                                modifier = Modifier.padding(start = 6.dp).size(15.dp),
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                    }
+                                }
                                 alias?.takeIf { it.substringBefore(':') != room.name }?.let {
                                     Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
@@ -3098,7 +3113,15 @@ private fun TimelinePane(
                             // mediaStripFrom：連翻範圍照 Telegram 放大到整個聊天室的媒體序列，
                             // 不是只翻同一組相簿（用戶 2026-10-08：「電報是直接可以切換聊天內所有圖片的」）。
                             // 資料源是「掃過整個房間的媒體索引」＋畫面這一段，所以不用先把聊天翻開。
-                            viewerTarget = mediaStripFrom(loaded, mediaIndexEntries.toList(), media, at)
+                            // 帶上點開那一則的事件 id：同一張圖在房間裡被發過兩次時，
+                            // 只有 id 能選對那一格（相簿的每一格各自是一個事件）
+                            viewerTarget = mediaStripFrom(
+                                loaded,
+                                mediaIndexEntries.toList(),
+                                media,
+                                at,
+                                anchorEventId = msg.albumMemberIds.getOrNull(at)?.full ?: msg.eventId?.full,
+                            )
                         },
                         onDownloadImage = { img ->
                             scope.launch {

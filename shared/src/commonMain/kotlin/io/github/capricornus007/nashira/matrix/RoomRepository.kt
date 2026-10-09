@@ -97,6 +97,8 @@ data class RoomSummary(
     val lastActivity: Long = 0L,
     /** `m.tag` 標籤（`m.favourite` / `m.lowpriority`）：收藏排最前、低優先排最後 */
     val tags: Set<String> = emptySet(),
+    /** 這房間開了端到端加密。標題列那把鎖與「這輪掃的是哪條路」都要看它。 */
+    val encrypted: Boolean = false,
 )
 
 data class PublicRoom(
@@ -425,6 +427,7 @@ class RoomRepository(val client: MatrixClient) {
         avatarUrl = room.avatarUrl,
         heroes = room.name?.heroes.orEmpty(),
         lastActivity = room.lastRelevantEventTimestamp?.toEpochMilliseconds() ?: 0L,
+        encrypted = room.encrypted,
     )
 
     private fun spaceSummary(room: Room): SpaceSummary = SpaceSummary(

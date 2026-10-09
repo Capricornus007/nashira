@@ -36,6 +36,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import de.connect2x.trixnity.client.MatrixClient
+import de.connect2x.trixnity.core.MatrixServerException
 import de.connect2x.trixnity.client.media.MediaService
 import de.connect2x.trixnity.utils.toByteArray
 import kotlinx.coroutines.async
@@ -680,6 +681,17 @@ private suspend fun loadMediaBitmap(
                 if (!usedOriginal && reason.contains("thumbnail", ignoreCase = true)) {
                     NoThumbnailServers.add(source.mxcHost())
                     mediaProbe("記下：${source.mxcHost()} 沒有動態縮圖，之後直接抓原檔")
+                }
+                // 4xx 是伺服器的**確定答覆**（404 沒這個檔、403 不給你讀、410 已刪），
+                // 不是暫時故障：同一個請求再退避重試三次只是讓畫面多轉十幾秒
+                //（用戶 2026-10-09「加載圖好慢」，日誌實據：同一個 mxc 連四次 404，
+                // 每次隔 1～3 秒，最後還是「改問原站也拿不到」）。
+                // 只擋「已經在抓原檔」那一輪：抓縮圖時的 404 可能是伺服端沒動態縮圖，
+                // 下一輪改抓原檔正是既定的退路。
+                val status = (t as? MatrixServerException)?.statusCode?.value
+                if (usedOriginal && status != null && status in 400..499 && status != 429) {
+                    mediaProbe("$reason → $status 是確定答覆，不再重試 $key")
+                    break
                 }
                 mediaProbe("第 ${attempt + 1} 次：$reason $key")
                 continue
