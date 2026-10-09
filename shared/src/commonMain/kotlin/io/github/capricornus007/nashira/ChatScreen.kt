@@ -1430,7 +1430,13 @@ private fun ChannelPane(
                         unread = unreadByRoom[room.roomId] ?: UnreadState(),
                         showPreview = showPreview,
                         strings = strings,
-                        onSelect = onSelect,
+                        // 選了房間就退出搜尋態（Telegram 點完回到正常清單，
+                        // 不會讓大標題一直藏著）
+                        onSelect = { room ->
+                            onSelect(room)
+                            query = ""
+                            searchOpened = false
+                        },
                     )
                 }
             }
