@@ -656,7 +656,7 @@ private fun restartApplication(onExit: () -> Unit) {
     // 万一沒人收屍（從終端機直接拉起來的那種），無上限的迴圈會永遠等下去，
     // 表現就是「按了重新啟動，結果只是關掉」。用 timeout 包，別用 shell 計數器——
     // 上一版寫 `$n` 被 Kotlin 當成自己的插值，編譯直接掛（我還把壞提交推上去了）。
-    // 殼裡每一跳都留字：我們这边只能證明「派出去了」，派出去之後死在哪裡只有殼自己知道。
+    // 殼裡每一跳都留字：我們這邊只能證明「派出去了」，派出去之後死在哪裡只有殼自己知道。
     val script = buildString {
         appendLine("echo '殼已起來，等舊行程 $pid 消失' >> $logPath")
         appendLine("timeout 15 sh -c 'while kill -0 $pid; do sleep 0.25; done'")
