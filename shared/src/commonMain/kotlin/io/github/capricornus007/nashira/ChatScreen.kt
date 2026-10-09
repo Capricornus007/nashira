@@ -1582,7 +1582,7 @@ private fun RoomListItem(
                             modifier = Modifier.padding(start = 5.dp).size(13.dp),
                             // 「有鎖」要比「沒鎖」跳出來：同一個顏色，透明度分層
                             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(
-                                alpha = if (room.encrypted) 1f else 0.35f,
+                                alpha = if (room.encrypted) 1f else 0.55f,
                             ),
                         )
                     }
@@ -2427,7 +2427,7 @@ private fun TimelinePane(
                                             contentDescription = if (room.encrypted) strings.encryptedRoom else strings.plainRoom,
                                             modifier = Modifier.padding(start = 6.dp).size(15.dp),
                                             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(
-                                                alpha = if (room.encrypted) 1f else 0.35f,
+                                                alpha = if (room.encrypted) 1f else 0.55f,
                                             ),
                                         )
                                     }

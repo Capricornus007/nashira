@@ -196,18 +196,25 @@ object BarIcons {
      * 兩個都標會讓清單多出一把灰鎖；這裡照他要的做，但把「沒鎖」畫得比較淡，
      * 讓「有鎖」仍然是掃視時先看到的那個。
      */
+    /**
+     * 「沒鎖上」的鎖。上一版右腳只比鎖身高 2.5/24（16 像素下約 1.7px），縮圖直接糊成
+     * 「還鎖著」——用戶 2026-10-09 拿截圖點名「鎖上的跟沒鎖上的分別代表」等於沒做。
+     * 這版把右腳抬到 y=5（缺口 5 個單位）並在切線處往上多留一截，SVG 先照 16px 渲染
+     * 比對過才進代碼：鎖上＝兩腳都接到鎖身，開＝右腳明確懸在鎖身上方。
+     */
     val LockOpen: ImageVector by lazy {
         ImageVector.Builder(name = "LockOpen", defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f).apply {
             path(fill = SolidColor(Color.Black)) {
                 // 鎖身
-                moveTo(4.5f, 10.5f); lineTo(19.5f, 10.5f); lineTo(19.5f, 21f); lineTo(4.5f, 21f); close()
-                // 弓：只從左側起、往右上開，右邊不閉合（閉合就是 LockOpen 變 Lock）
-                moveTo(7f, 10.5f); lineTo(4.6f, 10.5f); lineTo(4.6f, 7f)
-                curveTo(4.6f, 3.6f, 7.2f, 1.2f, 10.4f, 1.4f)
-                curveTo(13.2f, 1.6f, 15.2f, 3.8f, 15.2f, 6.6f)
-                lineTo(15.2f, 8f); lineTo(12.9f, 8f); lineTo(12.9f, 6.6f)
-                curveTo(12.9f, 4.9f, 11.7f, 3.7f, 10.2f, 3.7f)
-                curveTo(8.5f, 3.7f, 7f, 5f, 7f, 7f); close()
+                moveTo(4f, 10f); lineTo(20f, 10f); lineTo(20f, 21f); lineTo(4f, 21f); close()
+                // 弓：左腳接鎖身，右腳抬到 y=5 懸空
+                moveTo(6f, 10f); lineTo(6f, 6.5f)
+                curveTo(6f, 3.5f, 8.5f, 1.2f, 12f, 1.2f)
+                curveTo(15.5f, 1.2f, 18f, 3.5f, 18f, 6.5f)
+                lineTo(18f, 5f); lineTo(15.8f, 5f); lineTo(15.8f, 6.5f)
+                curveTo(15.8f, 4.6f, 14.2f, 3.3f, 12f, 3.3f)
+                curveTo(9.8f, 3.3f, 8.2f, 4.6f, 8.2f, 6.5f)
+                lineTo(8.2f, 10f); close()
             }
         }.build()
     }

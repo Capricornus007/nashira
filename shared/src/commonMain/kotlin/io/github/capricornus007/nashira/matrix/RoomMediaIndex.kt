@@ -14,6 +14,7 @@ import de.connect2x.trixnity.core.model.events.m.room.ImageInfo
 import de.connect2x.trixnity.core.model.events.m.room.RoomMessageEventContent
 import de.connect2x.trixnity.core.model.events.m.room.VideoInfo
 import io.github.capricornus007.nashira.i18n.friendlyError
+import io.github.capricornus007.nashira.mediaProbe
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
@@ -349,15 +350,24 @@ private suspend fun crawlPlainRoom(
     )
     // `/messages` 認的是 token，不是 event id：用 `/context` 換錨點 token，
     // 順帶給的那 100 條先吃掉
-    val context = client.api.room.getEventContext(roomId, anchor, filter = filterJson, limit = 100).getOrNull()
-        ?: return CrawlStop.Stopped
+    // 三個停下來的位置都要寫日誌、連伺服端給的原因：實測有一房掃到 48 條就停
+    //（到頭=false）而日誌一個字都沒有，等於叫用戶幫我們猜。
+    val context = client.api.room.getEventContext(roomId, anchor, filter = filterJson, limit = 100)
+        .onFailure { mediaProbe("媒體索引 ${roomId.full} /context 失敗：${it.message} → 這輪不掃") }
+        .getOrNull() ?: return CrawlStop.Stopped
     context.eventsBefore.orEmpty().forEach { onEvent(it.toIndexItem()) }
-    var token = context.start ?: return CrawlStop.Stopped
+    val start = context.start
+    if (start == null) {
+        mediaProbe("媒體索引 ${roomId.full} /context 沒給 start token → 這輪不掃")
+        return CrawlStop.Stopped
+    }
+    var token: String = start
     var previousToken: String? = null
     while (true) {
         currentCoroutineContext().ensureActive()
         val page = client.api.room
             .getEvents(roomId, from = token, dir = GetEvents.Direction.BACKWARDS, limit = MediaCrawlPageLimit, filter = filterJson)
+            .onFailure { mediaProbe("媒體索引 ${roomId.full} /messages 失敗：${it.message} → 停在 $token") }
             .getOrNull() ?: return CrawlStop.Stopped
         page.chunk.orEmpty().forEach { onEvent(it.toIndexItem()) }
         val next = page.end ?: return CrawlStop.ReachedStart
@@ -402,7 +412,10 @@ private suspend fun crawlEncryptedRoom(
             if (item == null) {
                 // 連續好幾筆都等不到：這房的鑰匙明顯不在這裝置上，
                 // 別再一筆等 0.9 秒（10k 條就是兩小時），後面直接取當下值
-                if (++misses >= MediaDecryptGiveUpStreak) stopWaiting = true
+                if (++misses >= MediaDecryptGiveUpStreak && !stopWaiting) {
+                    mediaProbe("媒體索引 ${roomId.full} 連續 $misses 條等不到金鑰 → 之後不再等（這裝置沒這段的鑰匙）")
+                    stopWaiting = true
+                }
             } else {
                 misses = 0
                 onEvent(item)
