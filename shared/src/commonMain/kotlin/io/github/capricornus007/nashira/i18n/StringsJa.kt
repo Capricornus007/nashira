@@ -281,6 +281,7 @@ object JaStrings : Strings by EnStrings {
     override fun audioDeviceDefaultNamed(name: String) = "$audioDeviceDefault: $name"
     override val trayOpen = "Nashira を開く"
     override val trayQuit = "終了"
+    override val trayRestart = "再起動"
     override val jumpToLatest = "最新へ移動"
     override val inputVolume = "入力音量"
     override val outputVolume = "出力音量"

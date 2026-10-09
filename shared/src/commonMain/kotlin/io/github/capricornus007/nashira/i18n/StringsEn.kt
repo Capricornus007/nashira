@@ -301,6 +301,7 @@ object EnStrings : Strings {
     override fun audioDeviceDefaultNamed(name: String) = "$audioDeviceDefault: $name"
     override val trayOpen = "Open Nashira"
     override val trayQuit = "Quit"
+    override val trayRestart = "Restart"
     override val jumpToLatest = "Jump to latest"
     override val inputVolume = "Input volume"
     override val outputVolume = "Output volume"

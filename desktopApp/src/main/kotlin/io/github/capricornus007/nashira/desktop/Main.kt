@@ -486,6 +486,20 @@ fun main(args: Array<String>) {
                                     color = MaterialTheme.colorScheme.onSurface,
                                 )
                                 Text(
+                                    strings.trayRestart,
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            trayMenuOpen = false
+                                            java.awt.EventQueue.invokeLater {
+                                                restartApplication { exitApplication() }
+                                            }
+                                        }
+                                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                                Text(
                                     strings.trayQuit,
                                     Modifier
                                         .fillMaxWidth()
@@ -592,4 +606,32 @@ private fun activateWindowAsync(target: java.awt.Window) {
         isDaemon = true
         name = "nashira-activate"
     }.start()
+}
+
+/**
+ * 重新啟動：派一個「等這個行程消失、再把啟動器叫起來」的殼程序，然後自己結束。
+ *
+ * 順序不能反，也不能直接先啟動新的：單實例鎖（DesktopSingleInstance）會讓新行程
+ * 看見舊的還活著，於是「把舊視窗叫出來然後自己退掉」，看起來就是按了沒反應
+ *（用戶 2026-10-09：「為什麼每次都得重開？你就不能設計個重啓按鈕在後臺圖標右鍵菜單嗎？」）。
+ */
+private fun restartApplication(onExit: () -> Unit) {
+    val launcher = System.getProperty("jpackage.app-path")
+        ?: runCatching {
+            java.io.File(System.getProperty("java.home")).parentFile?.parentFile
+                ?.let { appImage -> java.io.File(appImage, "bin/nashira").absolutePath }
+        }.getOrNull()
+    if (launcher == null || !java.io.File(launcher).canExecute()) {
+        // 找不到啟動器就退成純結束，別讓「重新啟動」變成「什麼都沒发生」
+        onExit()
+        return
+    }
+    val pid = ProcessHandle.current().pid()
+    runCatching {
+        ProcessBuilder("sh", "-c", "while kill -0 $pid 2>/dev/null; do sleep 0.2; done; exec '$launcher'")
+            .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+            .redirectErrorStream(true)
+            .start()
+    }
+    onExit()
 }

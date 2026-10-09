@@ -287,6 +287,7 @@ object KoStrings : Strings by EnStrings {
     override fun audioDeviceDefaultNamed(name: String) = "$audioDeviceDefault: $name"
     override val trayOpen = "Nashira 열기"
     override val trayQuit = "종료"
+    override val trayRestart = "다시 시작"
     override val jumpToLatest = "최신으로 이동"
     override val inputVolume = "입력 음량"
     override val outputVolume = "출력 음량"

@@ -1420,15 +1420,32 @@ private fun RoomListItem(
             RoomAvatar(roomRepository, room, Modifier.size(36.dp).clip(CircleShape))
             Column(Modifier.padding(start = 10.dp).weight(1f), verticalArrangement = Arrangement.spacedBy(0.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        room.name,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = if (unread.unread || room.isInvite) FontWeight.Bold else FontWeight.Normal,
-                        color = if (unread.unread || room.isInvite) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                    // 名稱＋鎖包在一個會填滿的 Row 裡：直接插在名稱與時間之間的話，
+                    // 名稱就不吃剩餘寬度，時間會跟著貼到名稱後面（版面跑掉）
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.weight(1f),
-                    )
+                    ) {
+                        Text(
+                            room.name,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = if (unread.unread || room.isInvite) FontWeight.Bold else FontWeight.Normal,
+                            color = if (unread.unread || room.isInvite) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        // 清單也要看得到（Element 兩邊都標）：標題列一次只有一間房，
+                        // 要比較「哪些房是加密的」只能從清單掃
+                        if (room.encrypted) {
+                            Icon(
+                                Icons.Filled.Lock,
+                                contentDescription = strings.encryptedRoom,
+                                modifier = Modifier.padding(start = 5.dp).size(13.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                     if (!room.isInvite) {
                         Spacer(Modifier.width(8.dp))
                         Text(

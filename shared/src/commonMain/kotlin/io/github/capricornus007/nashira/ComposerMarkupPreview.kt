@@ -95,7 +95,11 @@ private fun findMarkupRuns(source: String): List<MarkupRun> {
                     innerEnd = closeAt,
                     style = marker.style,
                 )
-                i = closeAt + marker.close.length
+                // 從**內層開頭**繼續掃，不是跳到這一對的結尾之後：
+                // `<u>**111**</u>` 這種巢狀，跳外層結尾會讓內層的 `**` 留在畫面上
+                //（用戶 2026-10-09 #49：「我一疊加就又現原形了，但確實不丟字了」）。
+                // 不會無限迴圈：canBeFormatted 要求內層非空，i 至少前進一格。
+                i = innerStart
                 continue
             }
         }

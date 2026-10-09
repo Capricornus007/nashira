@@ -343,6 +343,8 @@ interface Strings {
     fun audioDeviceIsDefault(name: String): String
     val trayOpen: String
     val trayQuit: String
+    /** 托盤右鍵選單：重啟程式（更新完套件不用再自己關再開） */
+    val trayRestart: String
     val jumpToLatest: String
     val inputVolume: String
     val outputVolume: String
