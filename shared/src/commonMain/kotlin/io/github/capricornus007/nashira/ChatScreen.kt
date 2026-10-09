@@ -2084,8 +2084,6 @@ private fun TimelinePane(
         mediaIndexEntries.clear()
         mediaIndexEntries.addAll(entries)
         if (meta.scannedToOldest) return@LaunchedEffect
-        // 先讓首屏把該載的載完才開始掃：這條線會跟時間線搶同一條網路連線與同一顆硬碟
-        delay(2500)
         // 寫 Compose 狀態要回到 UI context（桌面端在背景執行緒改狀態，畫面不會重畫）
         val uiContext = coroutineContext.minusKey(kotlinx.coroutines.Job)
         val outcome = try {

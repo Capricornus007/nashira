@@ -235,7 +235,10 @@ fun MessageImage(
             // 說明文字要**看得見**：以前 caption 只拿去當 contentDescription（無障礙文字），
             // 結果有人打了說明的圖片在時間線上完全看不到那句話（2026-10-08 做相簿時發現，
             // 相簿那側已經會顯示，兩邊不一致）。橋站的佔位 body（`image`／檔名）一律不畫。
-            if (!insideAlbumCell && looksLikeRealCaption(caption)) {
+            // 貼圖不畫下面那行「表情」：m.sticker 的 body 就是那個 emoji，
+            // Telegram／Element 都不把它當說明文字顯示（用戶 2026-10-09：
+            // 「我覺得貼紙下面帶表情是多餘的，你看看隔壁電報」）。
+            if (!insideAlbumCell && !isSticker && looksLikeRealCaption(caption)) {
                 Text(
                     text = pangu(caption.trim()),
                     style = MaterialTheme.typography.bodyMedium,

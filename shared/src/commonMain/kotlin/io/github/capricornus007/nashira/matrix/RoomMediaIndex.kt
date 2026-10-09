@@ -17,6 +17,7 @@ import io.github.capricornus007.nashira.i18n.friendlyError
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
@@ -188,6 +189,9 @@ private const val MediaIndexFlushEvery = 100
 private const val MediaDecryptWaitMillis = 900L
 private const val MediaDecryptGiveUpStreak = 3
 
+/** 加密房開跑前先讓首屏安定多久。 */
+private const val MediaCrawlEncryptedWarmupMillis = 2500L
+
 private class MediaCrawlBudgetReached : Throwable()
 
 /** 爬蟲停下来的原因。**「流結束」跟「掃到最舊」是兩件事**，混用會讓清單永久停在半截。 */
@@ -213,6 +217,11 @@ internal suspend fun crawlRoomMedia(
         ?: return MediaCrawlOutcome(0, false, 0, null)
 
     val known = existing.mapTo(mutableSetOf()) { it.eventId }
+    // 加密房是一筆一筆走（要解密、要寫庫），會跟首屏搶硬碟與連線，让它先安定一下；
+    // 未加密房一次 1000 條媒體、幾個請求就完，等那麼久只會讓計數慢下來
+    //（用戶 2026-10-09 拿 Element 的「第 6159 張照片，共 6159 張」點名：
+    // 「一開始就直接加載出來全部數目」）
+    if (room.encrypted) delay(MediaCrawlEncryptedWarmupMillis)
     val started = TimeSource.Monotonic.markNow()
     val pending = ArrayList<MediaIndexEntry>()
     var scanned = 0L
