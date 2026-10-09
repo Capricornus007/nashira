@@ -657,30 +657,47 @@ private fun restartApplication(onExit: () -> Unit) {
     // 表現就是「按了重新啟動，結果只是關掉」。用 timeout 包，別用 shell 計數器——
     // 上一版寫 `$n` 被 Kotlin 當成自己的插值，編譯直接掛（我還把壞提交推上去了）。
     // 殼裡每一跳都留字：我們這邊只能證明「派出去了」，派出去之後死在哪裡只有殼自己知道。
+    // ⚠️ 不用 `exec`：exec 會把殼換成啟動器，退出碼就再也拿不到了。改成跑完記 `$?`，
+    // 非零自動再試一次——這支函式已經被「按了只關掉」回報過兩次，不能再靠猜。
     val script = buildString {
-        appendLine("echo '殼已起來，等舊行程 $pid 消失' >> $logPath")
+        appendLine("echo \"殼起來了：cwd=\$PWD exe=\$(readlink -f /proc/self/exe 2>/dev/null)\" >> $logPath")
         appendLine("timeout 15 sh -c 'while kill -0 $pid; do sleep 0.25; done'")
         appendLine("sleep 0.6")
-        appendLine("echo '要 exec 了：$quotedLauncher' >> $logPath")
-        appendLine("exec '$quotedLauncher' >> $logPath 2>&1")
-        appendLine("echo 'exec 沒成功（上面就是原因）' >> $logPath")
+        appendLine("echo '第 1 次叫啟動器' >> $logPath")
+        appendLine("'$quotedLauncher' >> $logPath 2>&1")
+        appendLine("rc=\$?")
+        appendLine("echo \"第 1 次退出碼=\$rc\" >> $logPath")
+        appendLine("if [ \$rc -ne 0 ]; then")
+        appendLine("    sleep 0.8")
+        appendLine("    echo '第 2 次叫啟動器' >> $logPath")
+        appendLine("    '$quotedLauncher' >> $logPath 2>&1")
+        appendLine("    echo \"第 2 次退出碼=\$?\" >> $logPath")
+        appendLine("fi")
     }
     // setsid 讓殼脫離我們的會話與行程組（JVM 結束時不會被順帶收走）；
-    // 沒有 setsid 的系統退回普通 sh，兩條都試，哪條起來記哪條
+    // 沒有 setsid 的系統退回普通 sh。
+    // ⚠️ 這裡**絕對不能用 `forEach { … return@forEach }`**：`return@forEach` 是「進下一筆」
+    // 不是「跳出」，上一版兩條都派了出去，等於同時起兩個啟動器搶同一個 app
+    //（他回報「重啟依舊沒啟動」，日誌裡每一行都出現兩次就是這個證據）。
     val candidates = listOf(
         listOf("setsid", "sh", "-c", script),
         listOf("sh", "-c", script),
     )
     var spawned: String? = null
-    candidates.forEach { cmd ->
-        runCatching {
+    for (cmd in candidates) {
+        val started = runCatching {
+            // 殼自己的 stdout 丟掉：日誌由腳本裡每一行 `>> log` 寫，
+            // 兩邊都寫就會每行出現兩次（上一版正是這樣，誤導了我很久）。
             ProcessBuilder(cmd)
-                .redirectOutput(ProcessBuilder.Redirect.appendTo(java.io.File(logPath)))
-                .redirectErrorStream(true)
+                .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                .redirectError(ProcessBuilder.Redirect.DISCARD)
                 .start()
         }
-            .onSuccess { spawned = cmd.first(); return@forEach }
-            .onFailure { note("派 ${cmd.first()} 失敗：${it.message}") }
+        if (started.isSuccess) {
+            spawned = cmd.first()
+            break
+        }
+        note("派 ${cmd.first()} 失敗：${started.exceptionOrNull()?.message}")
     }
     note("已派出（spawned=$spawned，pid=$pid），接著結束本行程")
     onExit()

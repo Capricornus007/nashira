@@ -51,8 +51,7 @@ object DesktopSingleInstance {
     fun handleLaunch(args: Array<String>): Boolean {
         val urls = args.filter { it.startsWith("nashira://", ignoreCase = true) }
         if (tryForward(urls)) return false
-        startServer()
-        return true
+        return startServer(urls)
     }
 
     /**
@@ -94,15 +93,25 @@ object DesktopSingleInstance {
         true
     }.getOrDefault(false)
 
-    private fun startServer() {
+    /**
+     * 開 localhost 的喚醒／SSO 伺服器。
+     *
+     * @return true＝我們是主實例；false＝同一瞬間還有另一個實例先 bind 上了，
+     *   已把喚醒轉發過去，這個重複實例該退出。
+     *
+     * 為什麼要管 bind 失敗：兩條啟動命令**同一瞬間**跑起來時，雙方都在對方 bind
+     * 之前 connect，於是兩邊都失敗、都以為自己是主實例 → 桌面上並排兩顆窗口
+     *（用戶 2026-10-09 20:16 截圖點名「居然起倆」）。老實作是印一行「bind failed」
+     * 然後繼續跑，正是讓那顆多出來的窗口活下來的地方。
+     */
+    private fun startServer(urls: List<String>): Boolean {
         val server = runCatching {
             ServerSocket(PORT, 50, InetAddress.getLoopbackAddress())
         }.getOrElse {
-            // 極罕見：bind 失敗但 connect 也失敗（前實例正在關閉的窗口）。
-            // 繼續啟動，但收不到 scheme 連結——SSO 會卡在等回調直到逾時
-            // （沒有 localhost 伺服器可回退，那是 0.1.6 之前的事，已連模組缺失一起拿掉）。
             System.err.println("Nashira: single-instance server bind failed: $it")
-            return
+            // 搶不過對方：這回能 connect 上了，把喚醒交過去，我們自己退。
+            // 連這也失敗才是真的罕見（對方剛好在這幾毫秒裡死了），那就照舊繼續跑。
+            return !tryForward(urls)
         }
         thread(isDaemon = true, name = "nashira-single-instance") {
             while (!server.isClosed) {
@@ -112,6 +121,7 @@ object DesktopSingleInstance {
                 }
             }
         }
+        return true
     }
 
     private fun handleConnection(socket: Socket) {
