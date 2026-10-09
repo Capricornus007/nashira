@@ -78,9 +78,8 @@ class RoomTimeline(
 
     /** 把時間線移到搜尋結果所在的事件附近。 */
     suspend fun jumpTo(eventId: EventId) {
-        // 跳轉是「以目標事件重建視窗」，顯示視窗跟著收回預設：
-        // 不然之前往舊翻撐大的視窗會跟著新視窗一起 materialize 一大票，記憶體白漲。
-        windowSize.value = TimelineWindowSize
+        // 跳轉是「以目標事件重建視窗」，視窗位置跟著回到最新端錨點
+        newestTrim.value = 0
         timeline.init(
             roomId = roomId,
             startFrom = eventId,
@@ -102,16 +101,19 @@ class RoomTimeline(
         // 而下面 pageFlow 只取最後 `TimelineWindowSize` 條（那是 2026-09 治 OOM 加的）。
         // 兩件事湊起來就是「舊事件進了記憶體、卻永遠被裁在畫面外」——
         // 用戶 2026-10-09 實測：`shown` 死卡在 257、`atOldest` 恆真、載入圈一直閃。
-        // 每撈一次放大一段（上限 MaxWindowSize）。`timeline.state` 是 Flow 不是 StateFlow，
-        // 在這裡拿不到即時 elements 數量，所以不判斷「有沒有真的變多」：
-        // 真的撈到東西時這正是我們要的；撈不到時 `canLoadMore` 會轉 false，呼叫端就停了，
-        // 放大本身不會多花記憶體（視窗不會超過實際已載入的事件數）。
-        windowSize.value = (windowSize.value + TimelineWindowSize).coerceAtMost(MaxWindowSize)
+        // 擄到東西就讓視窗往舊端滑一段（擄不到時下面的 clamp 會自己收住，不會翻空）。
+        newestTrim.value += TimelinePageSize
         loadingBefore.value = false
     }
 
-    /** 目前顯示多少條事件（往舊翻會逐段放大，回到活邊緣就收回預設）。 */
-    private val windowSize = MutableStateFlow(TimelineWindowSize)
+    /**
+     * 視窗「離最新端多遠」。往舊翻一页就把這個數推大一段 ⇒ 舊事件從頂端進來、
+     * 最新事件從底端擠出去，**窗口大小恆定**（Element 的對向淘汰：
+     * `matrix-js-sdk/src/timeline-window.ts:190-193`，超過 `windowLimit` 就
+     * `unpaginate(excess, 反方向)`；nheko `EventStore.cpp:27` 是 1000 條 LRU）。
+     * 上一版「逐次放大到 2000」是魔法上限、不是設計，已淘汰。
+     */
+    private val newestTrim = MutableStateFlow(0)
 
     /**
      * 跳回活邊緣（最新一則）。深滾歷史後 UI 的「跳到最新」按鈕用——
@@ -119,7 +121,7 @@ class RoomTimeline(
      * （2026-09-14 深滾後回不到底部的實測），直接以最新事件重建視窗。
      */
     suspend fun jumpToLiveEdge() {
-        windowSize.value = TimelineWindowSize
+        newestTrim.value = 0
         val lastEventId = client.room.getById(roomId).firstOrNull()?.lastRelevantEventId ?: return
         jumpTo(lastEventId)
     }
@@ -162,7 +164,12 @@ class RoomTimeline(
                 // 只取最新的一段：elements 會隨著往前翻歷史無限增長，而每個元素都是
                 // 一條事件流。整份materialize 會把整個房間歷史留在堆積裡——治理房或
                 // 幾乎沒有訊息的房間（自動往前翻）實測會撐到 255MB/256MB 然後 OOM。
-                val windowed = state.elements.takeLast(windowSize.value)
+                // 固定大小的滑動視窗：以「離最新端多遠」定位，而不是 takeLast(300)。
+                // trim 不能超過「實際多載進來的量」，否則會切到空段（翻過頭）。
+                val total = state.elements.size
+                val trim = newestTrim.value.coerceAtMost((total - TimelineWindowSize).coerceAtLeast(0))
+                val end = (total - trim).coerceAtLeast(0)
+                val windowed = state.elements.subList((end - TimelineWindowSize).coerceAtLeast(0), end)
                 latestMembers.value = members
                 // 先把每條事件流取到當下值：反應要先掃一遍才知道哪則訊息掛了哪些反應
                 val events = windowed.map { eventFlow -> eventFlow.first() }
@@ -344,12 +351,8 @@ private val TimelineDecryptTimeout: Duration = 4.seconds
  */
 private const val TimelineWindowSize = 300
 
-/**
- * 往舊翻最多同時顯示多少條事件。上限的意義是**記憶體**：每條都要 materialize
- * （解密＋解析正文），2026-09 那次治理房 OOM 就是整份歷史被留在堆裡（255MB/256MB）。
- * 2000 ≈ 七頁，夠翻到好幾天以前，又不會變成「無上限」。
- */
-private const val MaxWindowSize = 2000
+/** 視窗每次往舊端滑多少（對向淘汰的步長）。比顯示窗口小，才不會一次跳半屏。 */
+private const val TimelinePageSize = 80
 
 /** 抓缺檔（sync gap）的上限。 */
 private val TimelineFetchTimeout: Duration = 30.seconds
