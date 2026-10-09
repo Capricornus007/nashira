@@ -2668,6 +2668,11 @@ private fun TimelinePane(
                         ComposerMenuHost(state = draft, strings = strings) {
                         BasicTextField(
                             state = draft,
+                            // 輸入框裡直接看到格式、而不是看到 `<u>`／`**` 標籤（用戶 2026-10-08 兩度點名，#106）。
+                            // 標記只是畫成透明、字串等長 ⇒ 游標與選取不必換算；草稿沒標記時給 null。
+                            outputTransformation = ComposerMarkupPreview.takeIf {
+                                draftHasComposerMarkup(draft.text.toString())
+                            },
                             modifier = Modifier.fillMaxWidth()
                                 .focusRequester(composerFocus)
                                 .heightIn(min = 44.dp)
