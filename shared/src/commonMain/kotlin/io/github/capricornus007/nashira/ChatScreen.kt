@@ -1252,15 +1252,33 @@ private fun ChannelPane(
     modifier: Modifier = Modifier,
 ) {
     var query by remember { mutableStateOf("") }
-    var searchFocused by remember { mutableStateOf(false) }
     /**
-     * 搜尋態＝大標題收起來、只留輸入列與分頁（用戶 2026-10-09 拿 Telegram 搜尋頁截圖
-     * 點名要改這頁：那張圖的最上面沒有「全部聊天室」那個大標題，輸入框直接頂到最上面，
-     * 下面才是「聊天室／頻道／…」那排頁籤）。
+     * 搜尋態＝大標題收起來、只留輸入列與分頁（用戶 2026-10-09 拿 Telegram 搜尋頁截圖點名）。
+     *
+     * ⚠️ 這個旗標**不能看焦點**。第一版寫成 `query.isNotEmpty() || 輸入框有焦點`，
+     * 結果他一點「聯絡人」分頁，輸入框就失焦 → 搜尋態自己關掉、整欄退回原形
+     *（用戶 2026-10-09 兩張截圖點名「我一點聯繫人，它就回退」）。
+     * 現在只有三個地方會動它：點放大鏡（開）、點 X（關）、從收起來那條按搜尋（開）。
      */
-    val searching = query.isNotEmpty() || searchFocused
+    var searchOpened by remember { mutableStateOf(false) }
+    val searching = query.isNotEmpty() || searchOpened
     var peopleTab by remember { mutableStateOf(false) }
+    var searchPendingFocus by remember { mutableStateOf(false) }
     val searchFocus = remember { FocusRequester() }
+    LaunchedEffect(searchPendingFocus) {
+        if (searchPendingFocus) {
+            runCatching { searchFocus.requestFocus() }
+            searchPendingFocus = false
+        }
+    }
+    /** 從「只剩頭貼」那條按搜尋圖標過來的請求：展開之後要開搜尋態並聚焦輸入框。 */
+    LaunchedEffect(focusSearch) {
+        if (focusSearch) {
+            searchOpened = true
+            searchPendingFocus = true
+            onFocusSearchHandled()
+        }
+    }
     // 過濾只看房間名：Matrix ID 對使用者沒有辨識意義，別讓 !abc:server 這種字串誤中
     val matched = remember(summaries, query) {
         if (query.isBlank()) summaries else summaries.filter { it.name.contains(query.trim(), ignoreCase = true) }
@@ -1316,13 +1334,20 @@ private fun ChannelPane(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         ) {
             Row(Modifier.fillMaxWidth().height(42.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.Search, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                // 放大鏡本身就是「進入搜尋」那顆鈕（Telegram 收起列表後頂部那顆就是它）
+                IconButton(
+                    onClick = {
+                        searchOpened = true
+                        searchPendingFocus = true
+                    },
+                    modifier = Modifier.size(26.dp),
+                ) {
+                    Icon(Icons.Filled.Search, contentDescription = strings.findOrStartConversation, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                }
                 BasicTextField(
                     value = query,
                     onValueChange = { query = it },
-                    modifier = Modifier.weight(1f).padding(start = 8.dp)
-                        .focusRequester(searchFocus)
-                        .onFocusChanged { state -> searchFocused = state.isFocused },
+                    modifier = Modifier.weight(1f).padding(start = 8.dp).focusRequester(searchFocus),
                     singleLine = true,
                     textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
                     cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
@@ -1331,14 +1356,13 @@ private fun ChannelPane(
                         inner()
                     },
                 )
-                // 搜尋態時右邊改成「關掉搜尋」（照 Telegram：那張圖右上角就是一顆 X）；
-                // 沒在搜尋時才是原本的「＋開新對話」。X 要同時清字與退掉焦點，
-                // 只清字會讓人以為按了沒反應（焦點還在輸入框，大標題回不來）。
+                // 搜尋態時右邊改成「關掉搜尋」（照 Telegram：那張圖右上角就是一顆 X）。
+                // X 要一次把字、態與焦點都清掉——只清字的話搜尋態還開著，看起來就是按了沒反應。
                 if (searching) {
                     IconButton(onClick = {
                         query = ""
+                        searchOpened = false
                         runCatching { searchFocus.freeFocus() }
-                        searchFocused = false
                     }, modifier = Modifier.size(30.dp)) {
                         Icon(Icons.Filled.Close, contentDescription = strings.clearSearch, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
                     }
@@ -1378,7 +1402,9 @@ private fun ChannelPane(
                 // 還沒落地時列表也是空的——只認 INITIAL_SYNC/STARTED 會閃過
                 // 「目前沒有可顯示的房間」再跳回骨架（真機 SSO 後實測）。
                 // 所以：清單空且同步循環還活著（未 STOPPED）一律畫骨架。
-                query.isBlank() && syncState != SyncState.STOPPED -> Column(Modifier.weight(1f)) {
+                // ⚠️ 但**搜尋態不算「還在同步」**：他可能只是點了輸入框就切到「聯絡人」
+                // 那頁而一個也沒有，這時候畫骨架等於骗他說內容還在長（其實沒有）。
+                query.isBlank() && !searching && syncState != SyncState.STOPPED -> Column(Modifier.weight(1f)) {
                     Text(
                         strings.syncingRooms,
                         style = MaterialTheme.typography.labelMedium,
@@ -1389,7 +1415,7 @@ private fun ChannelPane(
                 }
                 else -> Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                     Text(
-                        if (query.isNotBlank()) strings.noSearchResults else strings.noRooms,
+                        if (searching) strings.noSearchResults else strings.noRooms,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
