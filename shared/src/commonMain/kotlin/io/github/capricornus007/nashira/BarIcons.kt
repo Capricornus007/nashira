@@ -189,6 +189,29 @@ object BarIcons {
         }.build()
     }
 
+    /**
+     * 開著的鎖＝這房間**沒有**端到端加密。用戶 2026-10-09 明確要兩個狀態都畫出來
+     *（「有無可能我是要你弄个鎖上的跟沒鎖上的分別代表？」）。
+     * 先講清楚代價：Element／Telegram 只標加密的那一邊（不標＝沒加密），
+     * 兩個都標會讓清單多出一把灰鎖；這裡照他要的做，但把「沒鎖」畫得比較淡，
+     * 讓「有鎖」仍然是掃視時先看到的那個。
+     */
+    val LockOpen: ImageVector by lazy {
+        ImageVector.Builder(name = "LockOpen", defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f).apply {
+            path(fill = SolidColor(Color.Black)) {
+                // 鎖身
+                moveTo(4.5f, 10.5f); lineTo(19.5f, 10.5f); lineTo(19.5f, 21f); lineTo(4.5f, 21f); close()
+                // 弓：只從左側起、往右上開，右邊不閉合（閉合就是 LockOpen 變 Lock）
+                moveTo(7f, 10.5f); lineTo(4.6f, 10.5f); lineTo(4.6f, 7f)
+                curveTo(4.6f, 3.6f, 7.2f, 1.2f, 10.4f, 1.4f)
+                curveTo(13.2f, 1.6f, 15.2f, 3.8f, 15.2f, 6.6f)
+                lineTo(15.2f, 8f); lineTo(12.9f, 8f); lineTo(12.9f, 6.6f)
+                curveTo(12.9f, 4.9f, 11.7f, 3.7f, 10.2f, 3.7f)
+                curveTo(8.5f, 3.7f, 7f, 5f, 7f, 7f); close()
+            }
+        }.build()
+    }
+
     /** 附件面板／「檢視所有照片」：2x2 的格子，Element 與 Telegram 都是這個語彙。 */
     val Gallery: ImageVector by lazy {
         ImageVector.Builder(name = "Gallery", defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f).apply {

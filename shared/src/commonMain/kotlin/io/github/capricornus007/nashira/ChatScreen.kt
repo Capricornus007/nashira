@@ -1437,14 +1437,15 @@ private fun RoomListItem(
                         )
                         // 清單也要看得到（Element 兩邊都標）：標題列一次只有一間房，
                         // 要比較「哪些房是加密的」只能從清單掃
-                        if (room.encrypted) {
-                            Icon(
-                                Icons.Filled.Lock,
-                                contentDescription = strings.encryptedRoom,
-                                modifier = Modifier.padding(start = 5.dp).size(13.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                        Icon(
+                            imageVector = if (room.encrypted) Icons.Filled.Lock else BarIcons.LockOpen,
+                            contentDescription = if (room.encrypted) strings.encryptedRoom else strings.plainRoom,
+                            modifier = Modifier.padding(start = 5.dp).size(13.dp),
+                            // 「有鎖」要比「沒鎖」跳出來：同一個顏色，透明度分層
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                                alpha = if (room.encrypted) 1f else 0.35f,
+                            ),
+                        )
                     }
                     if (!room.isInvite) {
                         Spacer(Modifier.width(8.dp))
@@ -2279,15 +2280,17 @@ private fun TimelinePane(
                                     // 這房間有沒有端到端加密，原本只能從「點開訊息看得到／看不到」倒推
                                     //（用戶 2026-10-09：「應該順帶去弄個直接分出它是否加密的圖標」）。
                                     // 位置照 Element：房名右邊一把小鎖。
-                                    if (room.encrypted) {
-                                        HoverTooltip(text = strings.encryptedRoom) {
-                                            Icon(
-                                                Icons.Filled.Lock,
-                                                contentDescription = strings.encryptedRoom,
-                                                modifier = Modifier.padding(start = 6.dp).size(15.dp),
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            )
-                                        }
+                                    HoverTooltip(
+                                        text = if (room.encrypted) strings.encryptedRoom else strings.plainRoom,
+                                    ) {
+                                        Icon(
+                                            imageVector = if (room.encrypted) Icons.Filled.Lock else BarIcons.LockOpen,
+                                            contentDescription = if (room.encrypted) strings.encryptedRoom else strings.plainRoom,
+                                            modifier = Modifier.padding(start = 6.dp).size(15.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                                                alpha = if (room.encrypted) 1f else 0.35f,
+                                            ),
+                                        )
                                     }
                                 }
                                 alias?.takeIf { it.substringBefore(':') != room.name }?.let {

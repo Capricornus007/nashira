@@ -152,6 +152,7 @@ object KoStrings : Strings by EnStrings {
     override val viewAllPhotos = "모든 사진"
     override val mediaGalleryEmpty = "이 대화방에 사진이 아직 없습니다"
     override val encryptedRoom = "단대단 암호화 대화방"
+    override val plainRoom = "암호화되지 않음"
     override val actionHideImage = "이미지 숨기기"
     override val hiddenImage = "이미지 숨김(탭하여 표시)"
     override val downloadFailed = "다운로드 실패"

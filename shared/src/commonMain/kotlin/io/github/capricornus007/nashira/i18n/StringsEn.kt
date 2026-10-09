@@ -218,6 +218,7 @@ object EnStrings : Strings {
     override val viewAllPhotos = "View all photos"
     override val mediaGalleryEmpty = "No photos in this room yet"
     override val encryptedRoom = "End-to-end encrypted room"
+    override val plainRoom = "Not encrypted"
     override val actionHideImage = "Hide image"
     override val hiddenImage = "Image hidden (tap to show)"
     override val downloadFailed = "Download failed"

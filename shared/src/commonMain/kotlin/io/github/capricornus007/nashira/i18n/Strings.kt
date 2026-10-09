@@ -186,6 +186,8 @@ interface Strings {
     val mediaGalleryEmpty: String
     /** 標題列那把小鎖的懸停說明。 */
     val encryptedRoom: String
+    /** 沒加密的那把開鎖。寫「未加密」而不是「安全」：沒有加密談不上安全與否。 */
+    val plainRoom: String
     val actionHideImage: String
     val hiddenImage: String
     val downloadFailed: String

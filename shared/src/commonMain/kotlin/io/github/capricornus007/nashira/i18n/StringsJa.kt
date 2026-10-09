@@ -307,6 +307,7 @@ object JaStrings : Strings by EnStrings {
     override val viewAllPhotos = "すべての写真"
     override val mediaGalleryEmpty = "このルームにはまだ写真がありません"
     override val encryptedRoom = "端到端暗号化されたルーム"
+    override val plainRoom = "暗号化されていません"
     override val syncConnecting = "接続中…メッセージは自動的に反映されます"
     override val connectionFailed = "サーバーに接続できませんでした"
     override val connectionFailedHint =
