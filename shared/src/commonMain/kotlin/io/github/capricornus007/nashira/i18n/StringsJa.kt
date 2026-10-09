@@ -5,6 +5,7 @@ object JaStrings : Strings by EnStrings {
     override val back = "戻る"
     override val allRooms = "すべての部屋"
     override val rooms = "部屋"
+    override val people = "ユーザー"
     override val findOrStartConversation = "会話を検索または開始"
     override val syncingRooms = "部屋を同期中…"
     override val noRooms = "表示できる部屋はありません"

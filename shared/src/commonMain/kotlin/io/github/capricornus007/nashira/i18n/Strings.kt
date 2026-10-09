@@ -18,6 +18,7 @@ interface Strings {
     val back: String
     val allRooms: String
     val rooms: String
+    val people: String
     val findOrStartConversation: String
     val syncingRooms: String
     val noRooms: String

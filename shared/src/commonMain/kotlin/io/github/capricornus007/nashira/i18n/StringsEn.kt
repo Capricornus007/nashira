@@ -6,6 +6,7 @@ object EnStrings : Strings {
     override val back = "Back"
     override val allRooms = "All rooms"
     override val rooms = "Rooms"
+    override val people = "People"
     override val findOrStartConversation = "Find or start a conversation"
     override val syncingRooms = "Syncing rooms…"
     override val noRooms = "No rooms to show"

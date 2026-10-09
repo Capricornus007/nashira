@@ -5,6 +5,7 @@ object KoStrings : Strings by EnStrings {
     override val back = "뒤로"
     override val allRooms = "모든 대화방"
     override val rooms = "대화방"
+    override val people = "사람들"
     override val findOrStartConversation = "대화 찾기 또는 시작"
     override val syncingRooms = "대화방 동기화 중…"
     override val noRooms = "표시할 대화방이 없습니다"

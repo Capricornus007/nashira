@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -252,9 +253,17 @@ private const val SpaceRailMinWidthDp = 52
 private const val SpaceRailMaxWidthDp = 400
 private const val SpaceRailNamesFromDp = 120
 
-/** 聊天室列表欄：預設寬、最窄要還看得到房間名、最寬再讓 Timeline 留得下來。 */
+/**
+ * 聊天室列表欄：預設寬、最窄要還看得到房間名、最寬再讓 Timeline 留得下來。
+ *
+ * 收到 [RoomListCollapsedBelowDp] 以下就**不再硬擠文字**，改成只剩大頭貼的直欄
+ *（用戶 2026-10-09 拿 Telegram 截圖點名：「放最小聊天室列表寬度變成最上面只有大搜尋圖標，
+ * 然後下面只顯示聊天室大頭貼」）。之前最窄是 180，那個寬度下名字全被切成
+ *「#arch…」「G…」，等於讓他拖進一片沒用的省略號。
+ */
 private const val RoomListDefaultWidthDp = 286
-private const val RoomListMinWidthDp = 180
+private const val RoomListMinWidthDp = 64
+private const val RoomListCollapsedBelowDp = 110
 private const val RoomListMaxWidthDp = 560
 
 private val DiscordRailWidth = SpaceRailDefaultWidthDp.dp
@@ -293,6 +302,8 @@ fun ChatScreen(
     var selected by remember { mutableStateOf<RoomSummary?>(null) }
     var selectedSpace by remember { mutableStateOf<SpaceSummary?>(null) }
     var mobileRoomOpen by remember { mutableStateOf(false) }
+    /** 從「只剩頭貼」那條按了搜尋圖標：要展開並聚焦輸入框，跨兩層傳個請求過去。 */
+    var roomListSearchWanted by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
     var settingsInitialPage by remember { mutableStateOf(0) } // 0=root 1=帳戶
     val ACCOUNT_PAGE = 1
@@ -444,6 +455,7 @@ fun ChatScreen(
                     val listWantedDp =
                         if (uiState.roomListWidthDp > 0) uiState.roomListWidthDp else RoomListDefaultWidthDp
                     val listWidthDp = listWantedDp.coerceIn(RoomListMinWidthDp, listCapDp)
+                    val listCollapsed = listWidthDp < RoomListCollapsedBelowDp
                     Box(Modifier.width(railWidthDp.dp + listWidthDp.dp).fillMaxHeight()) {
                         Row(Modifier.fillMaxSize()) {
                             Box(Modifier.width(railWidthDp.dp).fillMaxHeight()) {
@@ -474,19 +486,39 @@ fun ChatScreen(
                                 ) { uiState.spaceRailWidthDp = it }
                             }
                             Box(Modifier.width(listWidthDp.dp).fillMaxHeight()) {
-                                ChannelPane(
-                                    roomRepository = roomRepository,
-                                    modifier = Modifier.fillMaxSize(),
-                                    summaries = summaries,
-                                    selected = selected,
-                                    unreadByRoom = unreadByRoom,
-                                    showPreview = showPreview,
-                                    onSelect = { selected = it },
-                                    channelTitle = channelTitle,
-                                    onOpenDirectory = { directoryOpen = true },
-                                    strings = strings,
-                                    syncState = syncState,
-                                )
+                                if (listCollapsed) {
+                                    // 收起來：只剩大頭貼那一條，頂部留一顆搜尋圖標
+                                    RoomListAvatarRail(
+                                        roomRepository = roomRepository,
+                                        summaries = summaries,
+                                        selected = selected,
+                                        unreadByRoom = unreadByRoom,
+                                        strings = strings,
+                                        onSelect = { selected = it },
+                                        onSearchClick = {
+                                            // 點搜尋＝先放回預設寬、再請列表那側把游標進輸入框
+                                            //（用戶 2026-10-09 指定的 Telegram 行為）
+                                            uiState.roomListWidthDp = RoomListDefaultWidthDp
+                                            roomListSearchWanted = true
+                                        },
+                                    )
+                                } else {
+                                    ChannelPane(
+                                        roomRepository = roomRepository,
+                                        modifier = Modifier.fillMaxSize(),
+                                        summaries = summaries,
+                                        selected = selected,
+                                        unreadByRoom = unreadByRoom,
+                                        showPreview = showPreview,
+                                        onSelect = { selected = it },
+                                        channelTitle = channelTitle,
+                                        onOpenDirectory = { directoryOpen = true },
+                                        strings = strings,
+                                        syncState = syncState,
+                                        focusSearch = roomListSearchWanted,
+                                        onFocusSearchHandled = { roomListSearchWanted = false },
+                                    )
+                                }
                                 PaneResizeHandle(
                                     modifier = Modifier.align(Alignment.CenterEnd),
                                     currentWidthDp = {
@@ -503,6 +535,9 @@ fun ChatScreen(
                             accountId = accountId,
                             onSettings = { settingsOpen = true },
                             onOpenAccount = { settingsInitialPage = ACCOUNT_PAGE; settingsOpen = true },
+                            // 列表收起來時整條 sidebar 只剩兩條直欄：那顆浮動帳號膠囊
+                            // 會蓋掉頭貼列，所以縮成只剩頭貼（Telegram 收欄時也是這樣）
+                            compact = listCollapsed,
                             modifier = Modifier.align(Alignment.BottomCenter),
                         )
                     }
@@ -1211,23 +1246,50 @@ private fun ChannelPane(
     onOpenDirectory: () -> Unit,
     strings: io.github.capricornus007.nashira.i18n.Strings,
     syncState: SyncState,
+    /** 從「只剩頭貼」那條點搜尋圖標過來的請求：為真時聚焦輸入框（呼叫端負責清旗標） */
+    focusSearch: Boolean = false,
+    onFocusSearchHandled: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    var query by remember { mutableStateOf("") }
+    var searchFocused by remember { mutableStateOf(false) }
+    /**
+     * 搜尋態＝大標題收起來、只留輸入列與分頁（用戶 2026-10-09 拿 Telegram 搜尋頁截圖
+     * 點名要改這頁：那張圖的最上面沒有「全部聊天室」那個大標題，輸入框直接頂到最上面，
+     * 下面才是「聊天室／頻道／…」那排頁籤）。
+     */
+    val searching = query.isNotEmpty() || searchFocused
+    var peopleTab by remember { mutableStateOf(false) }
+    val searchFocus = remember { FocusRequester() }
+    // 過濾只看房間名：Matrix ID 對使用者沒有辨識意義，別讓 !abc:server 這種字串誤中
+    val matched = remember(summaries, query) {
+        if (query.isBlank()) summaries else summaries.filter { it.name.contains(query.trim(), ignoreCase = true) }
+    }
+    val roomMatches = remember(matched) { matched.count { !it.isDirect } }
+    val peopleMatches = remember(matched) { matched.count { it.isDirect } }
+    LaunchedEffect(focusSearch) {
+        if (focusSearch) {
+            runCatching { searchFocus.requestFocus() }
+            onFocusSearchHandled()
+        }
+    }
     Column(modifier.fillMaxHeight().statusBarsPadding().background(MaterialTheme.colorScheme.surfaceContainerHigh)) {
         // Discord 的清單標題不掛同步指示：清單空著時的空狀態已經說明在同步，
         // 常駐的轉圈只會讓人以為要手動刷新
-        Row(
-            Modifier.fillMaxWidth().height(56.dp).padding(start = 16.dp, end = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                channelTitle,
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+        if (!searching) {
+            Row(
+                Modifier.fillMaxWidth().height(56.dp).padding(start = 16.dp, end = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    channelTitle,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
         // Telegram 式同步狀態條：連線出錯/逾時時在清單頂部亮一條細帶
         // （Trixnity 的 sync 自帶退避重試，恢復後自動消失）；正常同步不佔位。
@@ -1248,7 +1310,6 @@ private fun ChannelPane(
                 )
             }
         }
-        var query by remember { mutableStateOf("") }
         Surface(
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             shape = RoundedCornerShape(10.dp),
@@ -1259,7 +1320,9 @@ private fun ChannelPane(
                 BasicTextField(
                     value = query,
                     onValueChange = { query = it },
-                    modifier = Modifier.weight(1f).padding(start = 8.dp),
+                    modifier = Modifier.weight(1f).padding(start = 8.dp)
+                        .focusRequester(searchFocus)
+                        .onFocusChanged { state -> searchFocused = state.isFocused },
                     singleLine = true,
                     textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
                     cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
@@ -1268,19 +1331,45 @@ private fun ChannelPane(
                         inner()
                     },
                 )
-                if (query.isNotEmpty()) {
-                    IconButton(onClick = { query = "" }, modifier = Modifier.size(24.dp)) {
-                        Icon(Icons.Filled.Close, contentDescription = strings.clearSearch, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                // 搜尋態時右邊改成「關掉搜尋」（照 Telegram：那張圖右上角就是一顆 X）；
+                // 沒在搜尋時才是原本的「＋開新對話」。X 要同時清字與退掉焦點，
+                // 只清字會讓人以為按了沒反應（焦點還在輸入框，大標題回不來）。
+                if (searching) {
+                    IconButton(onClick = {
+                        query = ""
+                        runCatching { searchFocus.freeFocus() }
+                        searchFocused = false
+                    }, modifier = Modifier.size(30.dp)) {
+                        Icon(Icons.Filled.Close, contentDescription = strings.clearSearch, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
                     }
-                }
-                IconButton(onClick = onOpenDirectory, modifier = Modifier.size(30.dp)) {
-                    Icon(Icons.Filled.Add, contentDescription = strings.add, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                } else {
+                    IconButton(onClick = onOpenDirectory, modifier = Modifier.size(30.dp)) {
+                        Icon(Icons.Filled.Add, contentDescription = strings.add, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                    }
                 }
             }
         }
-        // 過濾只看房間名：Matrix ID 對使用者沒有辨識意義，別讓 !abc:server 這種字串誤中
-        val visible = remember(summaries, query) {
-            if (query.isBlank()) summaries else summaries.filter { it.name.contains(query.trim(), ignoreCase = true) }
+        if (searching) {
+            // 分頁只放**手上真有資料**的兩類：房間與私訊都是本機清單切出來的。
+            // 「訊息」那頁要全域搜尋（待辦 #19），沒有就不放——放一頁空的是假功能。
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                SearchTab(
+                    label = strings.rooms,
+                    count = roomMatches,
+                    selected = !peopleTab,
+                    onClick = { peopleTab = false },
+                )
+                SearchTab(
+                    label = strings.people,
+                    count = peopleMatches,
+                    selected = peopleTab,
+                    onClick = { peopleTab = true },
+                )
+            }
+        }
+        // 沒在搜尋時照舊混排（私訊與房間同一條清單）；搜尋態才按分頁切開
+        val visible = remember(matched, peopleTab, searching) {
+            if (searching) matched.filter { it.isDirect == peopleTab } else matched
         }
         if (visible.isEmpty()) {
             when {
@@ -1317,6 +1406,111 @@ private fun ChannelPane(
                         strings = strings,
                         onSelect = onSelect,
                     )
+                }
+            }
+        }
+    }
+}
+
+/** 搜尋態的分頁（聊天室／聯絡人）：標題帶計數，選中那條下面畫一條強調色橫槓。 */
+@Composable
+private fun RowScope.SearchTab(
+    label: String,
+    count: Int,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Column(
+        Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick).padding(vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelLarge,
+                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (count > 0) {
+                Text(
+                    count.toString(),
+                    Modifier.padding(start = 4.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Box(
+            Modifier.width(28.dp).height(2.dp)
+                .background(
+                    if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                    RoundedCornerShape(1.dp),
+                ),
+        )
+    }
+}
+
+/**
+ * 聊天室欄收到最窄：只剩大頭貼的直欄，頂部留一顆搜尋圖標（用戶 2026-10-09 點名，
+ * 樣式照 Telegram 把列表收起來那張截圖）。房間名不佔寬、改掛懸停提示，
+ * 滑過去仍看得到是誰；未讀徽章照舊釘在頭貼右下。
+ */
+@Composable
+private fun RoomListAvatarRail(
+    roomRepository: RoomRepository,
+    summaries: List<RoomSummary>,
+    selected: RoomSummary?,
+    unreadByRoom: Map<RoomId, UnreadState>,
+    strings: io.github.capricornus007.nashira.i18n.Strings,
+    onSelect: (RoomSummary) -> Unit,
+    onSearchClick: () -> Unit,
+) {
+    Column(
+        Modifier.fillMaxHeight().background(MaterialTheme.colorScheme.surfaceContainerHigh),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(Modifier.fillMaxWidth().height(52.dp), contentAlignment = Alignment.Center) {
+            IconButton(onClick = onSearchClick, modifier = Modifier.size(34.dp)) {
+                Icon(
+                    Icons.Filled.Search,
+                    contentDescription = strings.findOrStartConversation,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        }
+        LazyColumn(
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            contentPadding = PaddingValues(top = 2.dp, bottom = 108.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            items(summaries, key = { it.roomId.full }) { room ->
+                val unread = unreadByRoom[room.roomId] ?: UnreadState()
+                HoverTooltip(text = room.name) {
+                    Box(Modifier.padding(horizontal = 8.dp), contentAlignment = Alignment.Center) {
+                        Box(
+                            Modifier.size(44.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (room.roomId == selected?.roomId) MaterialTheme.colorScheme.surfaceContainerHighest
+                                    else Color.Transparent
+                                )
+                                .clickable { if (!room.isInvite) onSelect(room) },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            RoomAvatar(roomRepository, room, Modifier.size(40.dp).clip(CircleShape))
+                        }
+                        if (unread.count > 0 || unread.unread) {
+                            UnreadBadge(
+                                count = unread.count,
+                                muted = unread.muted,
+                                modifier = Modifier.align(Alignment.BottomEnd),
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -1382,6 +1576,8 @@ private fun AccountBar(
     accountId: String,
     onSettings: () -> Unit,
     onOpenAccount: () -> Unit,
+    /** 聊天室欄收成「只剩頭貼」時用：整條 sidebar 只有兩格寬，膠囊塞不下會蓋住頭貼列。 */
+    compact: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val ui = LocalUiState.current
@@ -1393,6 +1589,24 @@ private fun AccountBar(
     var profilePopup by remember { mutableStateOf(false) }
     var inputPanel by remember { mutableStateOf(false) }
     var outputPanel by remember { mutableStateOf(false) }
+    if (compact) {
+        // 收欄態：只留一顆頭貼（點它開個人資料），名字與三顆圖標都不硬擠
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            shape = CircleShape,
+            shadowElevation = 16.dp,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            modifier = modifier.padding(6.dp).navigationBarsPadding(),
+        ) {
+            Box(
+                Modifier.size(46.dp).clip(CircleShape).clickable { onOpenAccount() },
+                contentAlignment = Alignment.Center,
+            ) {
+                AvatarImage(client, avatarUrl, displayName, Modifier.size(34.dp).clip(CircleShape))
+            }
+        }
+        return
+    }
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
         shape = RoundedCornerShape(28.dp),
