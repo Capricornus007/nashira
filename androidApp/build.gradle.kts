@@ -11,7 +11,7 @@ android {
         applicationId = "io.github.capricornus007.nashira"
         minSdk = 26
         targetSdk = 36
-        versionCode = 78
+        versionCode = 79
         // 版號單一來源＝gradle.properties 的 nashiraVersion（不在此處另寫一份）
         versionName = providers.gradleProperty("nashiraVersion").get()
     }
