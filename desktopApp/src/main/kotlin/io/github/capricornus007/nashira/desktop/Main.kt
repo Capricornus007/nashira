@@ -616,22 +616,43 @@ private fun activateWindowAsync(target: java.awt.Window) {
  *（用戶 2026-10-09：「為什麼每次都得重開？你就不能設計個重啓按鈕在後臺圖標右鍵菜單嗎？」）。
  */
 private fun restartApplication(onExit: () -> Unit) {
-    val launcher = System.getProperty("jpackage.app-path")
-        ?: runCatching {
-            java.io.File(System.getProperty("java.home")).parentFile?.parentFile
-                ?.let { appImage -> java.io.File(appImage, "bin/nashira").absolutePath }
-        }.getOrNull()
-    if (launcher == null || !java.io.File(launcher).canExecute()) {
-        // 找不到啟動器就退成純結束，別讓「重新啟動」變成「什麼都沒发生」
+    // 這支函式**一定要留證據**：上一版「重新啟動」按下去只關掉、沒重新開起來，
+    // 而當時的程式在「找不到啟動器」那條分支上是靜默退出的（用戶 2026-10-09：
+    // 「你這個重啓根本沒起作用啊，直接退出了」）。現在每一步都寫 /tmp/nashira-restart.log。
+    fun note(line: String) = runCatching {
+        java.io.File("/tmp/nashira-restart.log")
+            .appendText("${'$'}{System.currentTimeMillis()} $line\n")
+    }
+    val fromJpackage = System.getProperty("jpackage.app-path")
+    val fromRuntimeHome = runCatching {
+        java.io.File(System.getProperty("java.home")).parentFile?.parentFile
+            ?.let { java.io.File(it, "bin/nashira").absolutePath }
+    }.getOrNull()
+    val launcher = listOfNotNull(fromJpackage, fromRuntimeHome)
+        .firstOrNull { java.io.File(it).canExecute() }
+    note("jpackage.app-path=$fromJpackage java.home=${System.getProperty("java.home")} 選中=$launcher")
+    if (launcher == null) {
+        note("找不到可執行的啟動器 → 只結束，不重啟")
         onExit()
         return
     }
     val pid = ProcessHandle.current().pid()
-    runCatching {
-        ProcessBuilder("sh", "-c", "while kill -0 $pid 2>/dev/null; do sleep 0.2; done; exec '$launcher'")
-            .redirectOutput(ProcessBuilder.Redirect.DISCARD)
-            .redirectErrorStream(true)
-            .start()
+    // 等舊行程消失有上限（60 × 0.25 秒＝15 秒）：`kill -0` 對**殭屍行程**一樣回成功，
+    // 万一父行程沒在收（從終端機直接拉起來的那種），無上限的迴圈會永遠等下去，
+    // 表現就是「按了重新啟動，結果只是關掉」。
+    val script = "n=0; while kill -0 $pid 2>/dev/null && [ $n -lt 60 ]; do sleep 0.25; n=$((n+1)); done; sleep 0.6; exec '$launcher'"
+    // setsid 讓殼脫離我們的會話與行程組（JVM 結束時不會被順帶收走）；
+    // 沒有 setsid 的系統退回普通 sh，兩條都試，哪條起來記哪條
+    val candidates = listOf(
+        listOf("setsid", "sh", "-c", script),
+        listOf("sh", "-c", script),
+    )
+    var spawned: String? = null
+    candidates.forEach { cmd ->
+        runCatching { ProcessBuilder(cmd).redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectErrorStream(true).start() }
+            .onSuccess { spawned = cmd.first(); return@forEach }
+            .onFailure { note("派 ${cmd.first()} 失敗：${it.message}") }
     }
+    note("已派出（=$spawned），接著結束本行程 pid=$pid")
     onExit()
 }
