@@ -654,6 +654,80 @@ fun ImageViewer(
 }
 
 /**
+ * 附件面板的一格縮圖。
+ *
+ * 為什麼不直接用時間線那套 `MessageImage`：它的縮圖尺寸是**寫死的 800x600**
+ * （`MessageImage.kt` 的 ThumbnailWidth/Height），格子只有 112dp（約 140 像素），
+ * 一屏 40 格就是好幾 MB——用戶 2026-10-09「加載圖好慢，能不能提速啊……」。
+ *
+ * 快取**另開一個鍵空間**（`"grid:" + mxc`），不去動時間線那把鍵：
+ * 時間線的圖是照 800x600 解的，混用同一個鍵會讓聊天室的圖變成格子那張小的（變糊）。
+ * 反过来先查時間線那份也不算錯（同一張圖，大的那份能畫小的格子），所以讀的時候
+ * 兩個鍵都試、寫的時候只寫 grid 那個。
+ *
+ * 兩個已知退路：加密媒體沒有明文 mxc 可問縮圖端點（交回 onFallback）；
+ * 伺服端沒開動態縮圖時這裡會失敗一次，也交回 onFallback，讓時間線那條
+ * 「改抓原檔／問原站」的完整邏輯去處理。
+ */
+@Composable
+private fun GalleryThumb(
+    client: MatrixClient,
+    identity: String,
+    body: MessageBody.Image,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+    onFallback: @Composable () -> Unit,
+) {
+    val mxc = (body.source as? MediaSource.Plain)?.mxcUrl
+    val gridKey = "grid:" + identity
+    var bitmap by remember(gridKey) {
+        mutableStateOf(MediaBitmapCache.get(gridKey) ?: MediaBitmapCache.get(identity))
+    }
+    var failed by remember(gridKey) { mutableStateOf(false) }
+    LaunchedEffect(client, gridKey, mxc) {
+        if (mxc == null) { failed = true; return@LaunchedEffect }
+        if (bitmap != null) return@LaunchedEffect
+        val decoded = runCatching {
+            val service = client.di.get<MediaService>()
+            val bytes = service.getThumbnail(
+                mxc,
+                GalleryThumbPx.toLong(),
+                GalleryThumbPx.toLong(),
+                maxSize = NoMediaLimit,
+            ).getOrNull()?.toByteArray(MediaReadScope)
+            // 0 位元組在實測裡真的出現過（家伺服器對某些遠端媒體回空 body），不能當成成功
+            bytes?.takeIf { it.isNotEmpty() }?.let { decodeImageBitmap(it, maxDimension = GalleryThumbPx * 2) }
+        }.getOrNull()
+        if (decoded != null) {
+            MediaBitmapCache.put(gridKey, decoded)
+            bitmap = decoded
+        } else {
+            failed = true
+        }
+    }
+    if (failed) {
+        onFallback()
+        return
+    }
+    val image = bitmap
+    Box(modifier.clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+        if (image != null) {
+            androidx.compose.foundation.Image(
+                bitmap = image,
+                contentDescription = body.caption.takeIf { it.isNotBlank() },
+                modifier = Modifier.fillMaxSize(),
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+            )
+        } else {
+            CircularProgressIndicator(Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
+        }
+    }
+}
+
+/** 格子縮圖的請求尺寸：112dp 的格子在 2 倍縮放下約 224 像素，取整到 256。 */
+private const val GalleryThumbPx = 256
+
+/**
  * 附件面板的「所有照片」：整個房間已索引的媒體格子（用戶 2026-10-09
  * 「這個群組只能點開看五個照片，我記得電報那邊是可以直接一次性整理查看媒體數的」）。
  *
@@ -728,19 +802,30 @@ fun MediaGallery(
                                     .background(Color.White.copy(alpha = 0.06f)),
                             ) {
                                 if (body != null) {
-                                    MessageImage(
+                                    GalleryThumb(
                                         client = client,
-                                        source = body.source,
-                                        width = body.width,
-                                        height = body.height,
-                                        isSticker = false,
-                                        caption = body.caption,
-                                        mimeType = body.mimeType,
-                                        durationMs = body.durationMs,
-                                        sizeBytes = body.sizeBytes,
-                                        insideAlbumCell = true,
+                                        identity = slot.identity,
+                                        body = body,
                                         modifier = Modifier.fillMaxSize(),
-                                        onOpen = { onOpen(position) },
+                                        onClick = { onOpen(position) },
+                                        // 抓不到小縮圖就交回時間線那條完整路（它會問原站、
+                                        // 會退避，只是多花一次流量），別讓格子永遠空著
+                                        onFallback = {
+                                            MessageImage(
+                                                client = client,
+                                                source = body.source,
+                                                width = body.width,
+                                                height = body.height,
+                                                isSticker = false,
+                                                caption = body.caption,
+                                                mimeType = body.mimeType,
+                                                durationMs = body.durationMs,
+                                                sizeBytes = body.sizeBytes,
+                                                insideAlbumCell = true,
+                                                modifier = Modifier.fillMaxSize(),
+                                                onOpen = { onOpen(position) },
+                                            )
+                                        },
                                     )
                                 } else {
                                     // 這格還在等金鑰：進到畫面才請上層去補，不自己發請求
