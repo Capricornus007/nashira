@@ -23,3 +23,11 @@ expect fun clearPersistentStore(databaseKey: String)
  * 讓下載結果跨 session 保留，第二次開啟直接命中。
  */
 expect fun mediaStoreDirectory(databaseKey: String): String
+
+/**
+ * 房間媒體索引（[RoomMediaIndexStore]）的目錄。
+ *
+ * 與媒體快取分開：快取裡是可以隨意重下載的圖檔，索引是「掃過哪些房間、掃到哪一筆」
+ * 這份工作結果，重掃一次要幾十個請求與好幾分鐘，不該跟著清快取一起不見。
+ */
+expect fun mediaIndexDirectory(databaseKey: String): String

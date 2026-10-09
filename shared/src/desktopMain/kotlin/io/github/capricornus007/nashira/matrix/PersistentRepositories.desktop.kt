@@ -35,7 +35,12 @@ actual fun clearPersistentStore(databaseKey: String) {
     listOf("", "-wal", "-shm", ".lck").forEach { suffix ->
         runCatching { File(base.parentFile, base.name + suffix).delete() }
     }
+    // 媒體索引是「這個帳號掃過的房間清單」，登出就要跟著走，否則換帳號會看到上一個帳號的圖
+    runCatching { File(mediaIndexDirectory(databaseKey)).deleteRecursively() }
 }
 
 actual fun mediaStoreDirectory(databaseKey: String): String =
     File(databaseFile(databaseKey).parentFile, "media-${safeKey(databaseKey)}").absolutePath
+
+actual fun mediaIndexDirectory(databaseKey: String): String =
+    File(databaseFile(databaseKey).parentFile, "media-index-${safeKey(databaseKey)}").absolutePath

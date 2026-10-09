@@ -25,6 +25,8 @@ actual fun clearPersistentStore(databaseKey: String) {
     listOf(name, "$name-wal", "$name-shm").forEach { file ->
         runCatching { context.getDatabasePath(file).delete() }
     }
+    // 媒體索引是「這個帳號掃過的房間清單」，登出就要跟著走
+    runCatching { java.io.File(mediaIndexDirectory(databaseKey)).deleteRecursively() }
 }
 
 actual fun mediaStoreDirectory(databaseKey: String): String {
@@ -34,4 +36,11 @@ actual fun mediaStoreDirectory(databaseKey: String): String {
     // 媒體，但建立 client 的路徑不能依賴可被系統隨時刪掉的目錄；noBackupFilesDir
     // 仍不會被「清除快取」刪除，也不會把大量媒體塞進裝置備份。
     return java.io.File(context.noBackupFilesDir, "media-${safeKey(databaseKey)}").absolutePath
+}
+
+actual fun mediaIndexDirectory(databaseKey: String): String {
+    val context = TokenStorage.context ?: error("TokenStorage.context 未注入")
+    // 與媒體快取同一個 noBackupFilesDir 底下，但分開一個目錄：
+    // 清快取不該把「掃過哪些房間」這份工作結果一起清掉（重掃要幾十個請求）
+    return java.io.File(context.noBackupFilesDir, "media-index-${safeKey(databaseKey)}").absolutePath
 }

@@ -159,6 +159,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
@@ -195,6 +197,12 @@ import io.github.capricornus007.nashira.matrix.SpaceSummary
 import io.github.capricornus007.nashira.matrix.SpacesSnapshot
 import io.github.capricornus007.nashira.matrix.TimelineMessage
 import io.github.capricornus007.nashira.matrix.MessageBody
+import io.github.capricornus007.nashira.matrix.MediaIndexEntry
+import io.github.capricornus007.nashira.matrix.RoomMediaIndexStore
+import io.github.capricornus007.nashira.matrix.mediaIndexDirectoryFor
+import io.github.capricornus007.nashira.matrix.crawlRoomMedia
+import io.github.capricornus007.nashira.matrix.MediaCrawlOutcome
+import io.github.capricornus007.nashira.matrix.resolveIndexedMedia
 import io.github.capricornus007.nashira.matrix.AudioPlayer
 import io.github.capricornus007.nashira.matrix.RecordedVoice
 import io.github.capricornus007.nashira.matrix.VoiceRecorder
@@ -2060,6 +2068,46 @@ private fun TimelinePane(
     // 全螢幕圖片檢視器與下載結果提示。相簿是「整組 + 停在哪一格」，
     // 單張就是只有這一筆的組，檢視器因此一律能連翻。
     var viewerTarget by remember(room.roomId) { mutableStateOf<MediaViewer?>(null) }
+    // 房間媒體索引：連翻要翻得完整間房，靠的是這份「掃過整個房間」的清單，
+    // 不是畫面目前載入的那一段（用戶 2026-10-09：「電報是直接可以切換聊天內所有圖片的」）。
+    // 開房時先讀本機已有的（秒出），背景再把還沒掃的歷史補上來。
+    val mediaIndexEntries = remember(room.roomId) { mutableStateListOf<MediaIndexEntry>() }
+    val mediaIndexStore = remember(roomRepository.client) {
+        RoomMediaIndexStore(mediaIndexDirectoryFor(roomRepository.client))
+    }
+    // 加密房的索引條目刻意不含金鑰（金鑰只留在 Room 庫，不複製第二份），
+    // 翻到那一格才回庫補。補過的都記著（含補不到的），免得每按一次方向鍵
+    // 就向庫重查同一個查不到的事件。
+    val resolvedIndexedMedia = remember(room.roomId) { mutableStateMapOf<String, MessageBody.Image?>() }
+    LaunchedEffect(room.roomId) {
+        val (meta, entries) = withContext(Dispatchers.Default) { mediaIndexStore.load(room.roomId) }
+        mediaIndexEntries.clear()
+        mediaIndexEntries.addAll(entries)
+        if (meta.scannedToOldest) return@LaunchedEffect
+        // 先讓首屏把該載的載完才開始掃：這條線會跟時間線搶同一條網路連線與同一顆硬碟
+        delay(2500)
+        // 寫 Compose 狀態要回到 UI context（桌面端在背景執行緒改狀態，畫面不會重畫）
+        val uiContext = coroutineContext.minusKey(kotlinx.coroutines.Job)
+        val outcome = try {
+            withContext(Dispatchers.Default) {
+                crawlRoomMedia(
+                    roomRepository.client,
+                    room.roomId,
+                    mediaIndexStore,
+                    onBatch = { batch -> withContext(uiContext) { mediaIndexEntries.addAll(batch) } },
+                )
+            }
+        } catch (_: kotlinx.coroutines.CancellationException) {
+            // 他關掉這一間房：中斷點已經在爬蟲裡落盤了，這裡直接把取消交回 Compose
+            throw kotlinx.coroutines.CancellationException()
+        } catch (e: Exception) {
+            MediaCrawlOutcome(0, false, 0, io.github.capricornus007.nashira.i18n.friendlyError(e))
+        }
+        outcome?.error?.let { mediaProbe("媒體索引掃描失敗：$it") }
+        if (outcome != null && outcome.added > 0) {
+            mediaProbe("媒體索引 ${room.roomId.full} 新增 ${outcome.added} 筆（掃到 ${outcome.scannedEvents} 條，到頭=${outcome.reachedOldest}）")
+        }
+    }
     // 刪除確認：Discord 式「不可復原」+ Element 式選填原因（redact reason）
     var deleteTarget by remember(room.roomId) { mutableStateOf<TimelineMessage?>(null) }
     var deleteReason by remember(room.roomId) { mutableStateOf("") }
@@ -3049,7 +3097,8 @@ private fun TimelinePane(
                             // 延遲好幾秒、連點就開好幾個外部視窗（用戶 2026-10-08 #151）。
                             // mediaStripFrom：連翻範圍照 Telegram 放大到整個聊天室的媒體序列，
                             // 不是只翻同一組相簿（用戶 2026-10-08：「電報是直接可以切換聊天內所有圖片的」）。
-                            viewerTarget = mediaStripFrom(loaded, media, at)
+                            // 資料源是「掃過整個房間的媒體索引」＋畫面這一段，所以不用先把聊天翻開。
+                            viewerTarget = mediaStripFrom(loaded, mediaIndexEntries.toList(), media, at)
                         },
                         onDownloadImage = { img ->
                             scope.launch {
@@ -3566,11 +3615,38 @@ private fun TimelinePane(
     }
 
 
+    // 連翻翻到「還沒補到金鑰」的格子：把它與前後各三格向本機庫補齊
+    //（加密房的索引副本刻意不含金鑰，金鑰只在 Room 庫裡）。
+    // 補到了就直接改 viewerTarget 裡那一格——不在每次重組時重建整份清單，
+    // 一萬格的清單經不起那樣折騰。
+    LaunchedEffect(viewerTarget?.index, viewerTarget?.slots?.size) {
+        val target = viewerTarget ?: return@LaunchedEffect
+        val from = (target.index - 3).coerceAtLeast(0)
+        val to = (target.index + 3).coerceAtMost(target.slots.lastIndex)
+        for (position in from..to) {
+            val slot = target.slots.getOrNull(position) ?: continue
+            if (slot.body != null || resolvedIndexedMedia.containsKey(slot.eventId)) continue
+            val body = resolveIndexedMedia(roomRepository.client, room.roomId, slot.eventId)
+            // 補不到也要記一筆，否則每翻一頁就向庫重查同一個查不到的事件
+            resolvedIndexedMedia[slot.eventId] = body
+            if (body != null) {
+                viewerTarget?.let { current ->
+                    val at = current.slots.indexOfFirst { it.eventId == slot.eventId }
+                    if (at >= 0) {
+                        viewerTarget = current.copy(
+                            slots = current.slots.toMutableList().also { it[at] = it[at].copy(body = body) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     // 全螢幕圖片檢視器：雙指縮放／雙擊縮放／下載；相簿还能整組連翻
     viewerTarget?.let { viewer ->
         ImageViewer(
             client = roomRepository.client,
-            items = viewer.items,
+            slots = viewer.slots,
             index = viewer.index,
             onSelectIndex = { viewerTarget = viewer.copy(index = it) },
             downloadFailedLabel = strings.downloadFailed,

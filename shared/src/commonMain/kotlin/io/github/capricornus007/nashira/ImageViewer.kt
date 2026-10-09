@@ -62,6 +62,7 @@ import de.connect2x.trixnity.client.media.MediaService
 import de.connect2x.trixnity.utils.toByteArray
 import io.github.capricornus007.nashira.matrix.MediaSource
 import io.github.capricornus007.nashira.matrix.MessageBody
+import kotlin.time.Clock
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -69,11 +70,35 @@ import kotlinx.coroutines.launch
 /**
  * 全螢幕檢視器的一組媒體＋目前位置。相簿傳整組，單張傳只有一筆的組，
  * 這樣檢視器只有一條路徑（都能連翻、都有計數），不必分兩種狀態。
+ *
+ * 連翻的範圍是**整個房間**（格子來自本機媒體索引＋目前載入的時間線），
+ * 所以清單裡可能出現「還沒補到金鑰」的格子，見 [MediaSlot.body]。
  */
 data class MediaViewer(
-    val items: List<MessageBody.Image>,
+    val slots: List<MediaSlot>,
     val index: Int,
 )
+
+/**
+ * 連翻清單裡的一格。[body] 為 null 是刻意支援的狀態：這一格還在等本機庫把
+ * `EncryptedFile`（含金鑰）補回來——索引那份副本**不存金鑰**，金鑰只留在
+ * Room 庫裡，免得同一把鑰匙躺兩個檔案。補到之前顯示佔位，不謊報「開好了」，
+ * 也不給按下載（沒金鑰根本存不出檔）。
+ */
+data class MediaSlot(
+    val eventId: String,
+    /** mxc（未加密）或 `EncryptedFile.url`：同一張圖在清單與時間線兩邊算同一個 */
+    val identity: String,
+    val timestamp: Long,
+    val caption: String,
+    val body: MessageBody.Image?,
+)
+
+/** 媒體身分鍵，與 `MediaIndexEntry.identity` 同一套算法（兩邊要能認出同一張圖）。 */
+private fun MediaSource.identity(): String = when (this) {
+    is MediaSource.Plain -> mxcUrl
+    is MediaSource.Encrypted -> file.url
+}
 
 /**
  * 照 Telegram 把連翻範圍放大到**整個聊天室的媒體序列**。
@@ -82,26 +107,62 @@ data class MediaViewer(
  * `_index`（`:685`）是那份切片裡的序號，`moveToNext`（`:5905-5913`）就是序號加減一。
  * 所以從相簿裡點開一張，左右鍵能一路翻到更早其他訊息裡的圖。
  *
- * [loaded] 是時間線目前載入的那一段（**新→舊**），這裡翻成舊→新再攤平，
- * 相簿那幾張依序進清單，「組內相鄰」天然成立。
- * 找不到起點（來源比對不上）就退回原本傳進來的那一組——寧可少翻，不要翻錯。
+ * [roomIndex] 是本機媒體索引（整個房間掃過的結果，含還沒補到金鑰的）；
+ * [loaded] 是時間線目前載入的那一段（**新→舊**），這裡翻成舊→新再攤平。
+ * 兩邊靠 mxc 認同一張圖：時間線那側手上有完整金鑰，會蓋掉索引裡那個空格。
+ * 找不到起點就退回原本傳進來的那一組——寧可少翻，不要翻錯。
  */
 internal fun mediaStripFrom(
     loaded: List<io.github.capricornus007.nashira.matrix.TimelineMessage>,
+    roomIndex: List<io.github.capricornus007.nashira.matrix.MediaIndexEntry>,
     media: List<MessageBody.Image>,
     at: Int,
 ): MediaViewer {
-    val strip = ArrayList<MessageBody.Image>(loaded.size)
+    val merged = LinkedHashMap<String, MediaSlot>()
+    roomIndex.forEach { entry ->
+        if (entry.msgtype != "m.image" && entry.msgtype != "m.video") return@forEach
+        merged[entry.identity] = MediaSlot(
+            eventId = entry.eventId,
+            identity = entry.identity,
+            timestamp = entry.timestamp,
+            caption = entry.caption,
+            body = entry.toMessageBodyOrNull(),
+        )
+    }
     loaded.asReversed().forEach { message ->
-        when (val body = message.body) {
-            is MessageBody.Image -> if (!body.isSticker) strip += body
-            is MessageBody.Album -> body.items.forEach { if (!it.isSticker) strip += it }
-            else -> Unit
+        val images = when (val body = message.body) {
+            is MessageBody.Image -> if (body.isSticker) emptyList() else listOf(body)
+            is MessageBody.Album -> body.items.filterNot { it.isSticker }
+            else -> emptyList()
+        }
+        val eventId = message.eventId?.full.orEmpty()
+        images.forEachIndexed { position, image ->
+            val identity = image.source.identity()
+            merged[identity] = MediaSlot(
+                // 索引拿不到事件 id 的舊訊息（多半是本地回顯）就拿身分鍵頂著，之後自然被蓋掉
+                eventId = eventId.ifEmpty { identity },
+                identity = identity,
+                // 相簿那幾張同一則訊息、同一個時間戳；排完序自然相鄰
+                timestamp = message.timestamp + position,
+                caption = image.caption,
+                body = image,
+            )
         }
     }
-    val anchor = media.getOrNull(at) ?: return MediaViewer(media, at.coerceIn(media.indices))
-    val found = strip.indexOfFirst { it.source == anchor.source }
-    return if (found >= 0) MediaViewer(strip, found) else MediaViewer(media, at)
+    val strip = merged.values.sortedBy { it.timestamp }
+    val anchor = media.getOrNull(at) ?: return MediaViewer(strip, strip.indices.lastOrNull() ?: 0)
+    val found = strip.indexOfFirst { it.identity == anchor.source.identity() }
+    if (found >= 0) return MediaViewer(strip, found)
+    // 起點不在清單上（剛送出、索引還沒掃到它）：就地補一格，別讓檢視器變成空的
+    val slot = MediaSlot(
+        eventId = anchor.source.identity(),
+        identity = anchor.source.identity(),
+        timestamp = Clock.System.now().toEpochMilliseconds(),
+        caption = anchor.caption,
+        body = anchor,
+    )
+    val withAnchor = (strip + slot).sortedBy { it.timestamp }
+    return MediaViewer(withAnchor, withAnchor.indexOf(slot).coerceAtLeast(0))
 }
 
 /**
@@ -109,46 +170,52 @@ internal fun mediaStripFrom(
  * 雙指縮放＋平移、雙擊在 1x／2.5x 間切換、點背景關閉、右上角下載。
  * 原圖走 getMedia（時間線用的是縮圖），下載也用同一份位元組。
  *
- * [items] 大于一筆時就是相簿：左右兩側給連翻鈕、方向鍵也能翻，
- * 從時間線點的那一格開始（[index]），翻完整組才結束——照 Telegram／Element 的燈光箱。
+ * [slots] 大於一筆時就是連翻清單（整個房間的媒體）：左右兩側給連翻鈕、
+ * 方向鍵也能翻，從時間線點的那一格開始（[index]）——照 Telegram／Element 的燈光箱。
+ * 其中某些格子的本體還沒補到金鑰（[MediaSlot.body] 是 null），那時只轉圈佔位，
+ * 不顯示下載鈕（沒金鑰存不出檔）。
  */
 @Composable
 fun ImageViewer(
     client: MatrixClient,
-    items: List<MessageBody.Image>,
+    slots: List<MediaSlot>,
     index: Int,
     onSelectIndex: (Int) -> Unit,
     /** 「抓不到檔」時的提示文案（用呼叫端的 strings，不在這裡硬寫字串）。 */
     downloadFailedLabel: String,
     onDismiss: () -> Unit,
 ) {
-    val current = items[index.coerceIn(items.indices)]
-    val source = current.source
-    val caption = current.caption
-    val mimeType = current.mimeType
-    val fileName = current.caption.ifBlank { "nashira-media" }
+    val slot = slots[index.coerceIn(slots.indices)]
+    // null ＝這一格的金鑰還在從本機庫補回來（索引那副本不存金鑰）
+    val current = slot.body
+    val source = current?.source
+    val caption = current?.caption ?: slot.caption
+    val mimeType = current?.mimeType
+    val fileName = caption.ifBlank { "nashira-media" }
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false),
     ) {
-        val key = source.cacheKeyShared()
+        // 金鑰補到位時 identity 不變（同一張圖同一個 mxc），所以這個鍵不會在補好的那一刻
+        // 改變，畫面不會整塊重建、不會跳回轉圈
+        val key = source?.cacheKeyShared() ?: ("full:" + slot.identity)
         val isVideo = mimeType?.startsWith("video/") == true
         // 時間線那側早就把這張圖（圖片是縮圖、影片是首格）解好放在快取裡了，
         // 鍵就是 mxc／加密檔的 url。開檢視器時先拿它墊上，才不會變成空白轉圈：
         // 0.1.76 拿掉「開啟時預抓整檔」之後，影片開啟有約 5 秒什麼都沒有
         //（用戶 2026-10-08「依舊沒秒開」）——而那 5 秒要的畫面其實早就在手上了。
-        val timelineKey = when (source) {
-            is MediaSource.Plain -> source.mxcUrl
-            is MediaSource.Encrypted -> source.file.url
-        }
+        val timelineKey = slot.identity
         var bitmap by remember(key) {
             mutableStateOf<ImageBitmap?>(MediaBitmapCache.get(key) ?: MediaBitmapCache.get(timelineKey))
         }
         var failed by remember(key) { mutableStateOf(false) }
         // 下載用原檔位元組（影片存 webm 原樣、圖片存原解析度），不重編碼
         var fileBytes by remember(key) { mutableStateOf<ByteArray?>(null) }
-        LaunchedEffect(client, key) {
+        LaunchedEffect(client, key, source) {
             if (bitmap != null) return@LaunchedEffect
+            // 這一格連金鑰都還沒有：等 resolveIndexedMedia 補到 source，
+            // 按鍵參數會重新觸發這個 Effect，這裡先空著等
+            if (source == null) return@LaunchedEffect
             // 影片**不預抓整份檔**：實測那條 9.69MiB 的檔案會跟內嵌播放的串流搶同一條管子，
             // 結果兩邊都慢到像壞掉（用戶 2026-10-08「加載死慢」）。
             // 第一格由播放器自己解出來，「下載」鈕按下去時才抓（見下面那個按鈕）。
@@ -208,8 +275,8 @@ fun ImageViewer(
         // 每一次換格都要重新要焦點：從影片切回圖片時，子樹整個換掉（內嵌播放器那層消失了），
         // 原本持焦的節點跟著銷毀，焦點就掉到沒有物件——用戶 2026-10-08 實測
         // 「從視頻切換到圖片就切換不回去了」就是這個。只請求一次（Unit）撐不過換格。
-        LaunchedEffect(index, items.size) {
-            if (items.size > 1) runCatching { pagerFocus.requestFocus() }
+        LaunchedEffect(index, slots.size) {
+            if (slots.size > 1) runCatching { pagerFocus.requestFocus() }
         }
         val transformState = rememberTransformableState { zoomChange, panChange, _ ->
             scale = (scale * zoomChange).coerceIn(1f, 6f)
@@ -236,11 +303,11 @@ fun ImageViewer(
                             true
                         } else false
                         else -> {
-                            if (items.size <= 1) return@onPreviewKeyEvent false
-                            val at = index.coerceIn(items.indices)
+                            if (slots.size <= 1) return@onPreviewKeyEvent false
+                            val at = index.coerceIn(slots.indices)
                             when (event.key) {
                                 Key.DirectionLeft -> if (at > 0) onSelectIndex(at - 1)
-                                Key.DirectionRight -> if (at < items.lastIndex) onSelectIndex(at + 1)
+                                Key.DirectionRight -> if (at < slots.lastIndex) onSelectIndex(at + 1)
                                 else -> return@onPreviewKeyEvent false
                             }
                             true
@@ -280,7 +347,8 @@ fun ImageViewer(
                 // 不再另開外部視窗——用戶 2026-10-08「就不能弄的跟 tg discord 那種嗎」。
                 // 有公網網址就直接串流（點開立刻播）；整檔還在下載、或加密房拿不到網址，
                 // 才退回用手上這份位元組落地播放。
-                isVideo -> EmbeddedVideoPlayer(
+                // source == null 是「這一格還在等金鑰」，走最後面那個轉圈佔位。
+                isVideo && source != null -> EmbeddedVideoPlayer(
                     client = client,
                     source = source,
                     bytes = playable,
@@ -328,10 +396,14 @@ fun ImageViewer(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         IconButton(
+                            // 這一格還在等金鑰時按不动：沒金鑰根本存不出檔，
+                            // 讓它按了才報「抓不到」等於把内部狀態問題丟給使用者
+                            enabled = source != null,
                             onClick = {
                                 scope.launch {
+                                    val media = source ?: return@launch
                                     // 影片走這條時通常還沒有位元組（不再預抓），現點現抓
-                                    val bytes = fileBytes ?: fetchMediaBytesForPlayback(client, source)
+                                    val bytes = fileBytes ?: fetchMediaBytesForPlayback(client, media)
                                     if (bytes == null || bytes.isEmpty()) {
                                         snackbar.showSnackbar(downloadFailedLabel)
                                         return@launch
@@ -364,8 +436,8 @@ fun ImageViewer(
                 //（到頭就停用，不是繞回——繞回讓人以為整組在循環，找不到「結束」）。
                 // 不接方向鍵：桌面端 Dialog 沒拿到焦點時鍵盤事件根本進不來，
                 // 擺一個「可能不會動」的按鍵比擺一個看得見按得動的鈕更糟。
-                if (items.size > 1) {
-                    val safeIndex = index.coerceIn(items.indices)
+                if (slots.size > 1) {
+                    val safeIndex = index.coerceIn(slots.indices)
                     IconButton(
                         enabled = safeIndex > 0,
                         onClick = { onSelectIndex(safeIndex - 1) },
@@ -382,7 +454,7 @@ fun ImageViewer(
                         )
                     }
                     IconButton(
-                        enabled = safeIndex < items.lastIndex,
+                        enabled = safeIndex < slots.lastIndex,
                         onClick = { onSelectIndex(safeIndex + 1) },
                         modifier = Modifier
                             .align(Alignment.CenterEnd)
@@ -404,7 +476,7 @@ fun ImageViewer(
                         .padding(top = 36.dp, start = 12.dp),
                     ) {
                         Text(
-                            text = "${safeIndex + 1} / ${items.size}",
+                            text = "${safeIndex + 1} / ${slots.size}",
                             color = Color.White,
                             style = MaterialTheme.typography.labelLarge,
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
