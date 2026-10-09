@@ -1839,7 +1839,13 @@ private fun TimelinePane(
     var autoLoads by remember(room.roomId) { mutableStateOf(0) }
     LaunchedEffect(room.roomId, listState) {
         snapshotFlow {
-            val shown = messages?.size ?: 0
+            // ⚠️ 這裡一定要**直接讀 State**（page／ignoredUsers），不能讀上面那個
+            // `val messages = remember(page, ignoredUsers) { … }`：它是普通變數，
+            // 而本協程的鍵是 (room.roomId, listState)、永遠不會重跑 ⇒ 閉包裡的 messages
+            // 凍在第一次的值（空清單）。實測日誌就是 `shown=0 lastVisible=58`，
+            // 於是 atOldest 永遠不成立、往前翻永久卡死（用戶 2026-10-09：
+            // 「昨天的前天的能看但是再之前的又不能看了」）。
+            val shown = page?.messages?.count { it.sender !in ignoredUsers } ?: 0
             val canLoad = page?.canLoadMore == true
             val loading = page?.loadingBefore == true
             val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
