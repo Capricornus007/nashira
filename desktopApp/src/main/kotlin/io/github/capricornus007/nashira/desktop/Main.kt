@@ -697,14 +697,28 @@ private fun restartApplication(onExit: () -> Unit) {
     )
     var spawned: String? = null
     for (cmd in candidates) {
-        val started = runCatching {
-            // 殼自己的 stdout 丟掉：日誌由腳本裡每一行 `>> log` 寫，
-            // 兩邊都寫就會每行出現兩次（上一版正是這樣，誤導了我很久）。
-            ProcessBuilder(cmd)
-                .redirectOutput(ProcessBuilder.Redirect.DISCARD)
-                .redirectError(ProcessBuilder.Redirect.DISCARD)
-                .start()
-        }
+        val builder = ProcessBuilder(cmd)
+        // 殼自己的 stdout 丟掉：日誌由腳本裡每一行 `>> log` 寫，
+        // 兩邊都寫就會每行出現兩次（上一版正是這樣，誤導了我很久）。
+        builder.redirectOutput(ProcessBuilder.Redirect.DISCARD)
+        builder.redirectError(ProcessBuilder.Redirect.DISCARD)
+        /**
+         * ⚠️ 這才是「按重新啟動就只是關掉」的真正病因，A/B 實測過：
+         * jpackage 的啟動器會往自己拉起的行程環境裡塞 `_JPACKAGE_LAUNCHER=0`
+         *（還有 `LD_LIBRARY_PATH=:/opt/nashira/lib/app`）。我們派的殼**繼承**了它們，
+         * 殼再叫啟動器時，啟動器看見自己那個標記就以為已經在啟動流程裡，
+         * **跳過讀 lib/app/nashira.cfg** → 拼出來的 java 參數是空的 →
+         * 退化成裸 `java` 印使用說明、退出碼 1（`_JAVA_LAUNCHER_DEBUG=1` 的軌跡
+         * 直接顯示 `Java args:` 為空、命令列只剩 argv[0]）。
+         *   帶標記：env _JPACKAGE_LAUNCHER=0 /opt/nashira/bin/nashira → 使用說明、行程 0
+         *   清掉它：env -u _JPACKAGE_LAUNCHER /opt/nashira/bin/nashira → 正常起來
+         * 拿掉之後才等同「使用者從桌面點的那種全新啟動」。
+         */
+        // 寫成 getEnvironment() 而不是 `environment`：後者會被 Kotlin 解析到
+        // ProcessBuilder 那個**私有欄位**，編譯直接報「it is private」。
+        builder.getEnvironment().remove("_JPACKAGE_LAUNCHER")
+        builder.getEnvironment().remove("LD_LIBRARY_PATH")
+        val started = runCatching { builder.start() }
         if (started.isSuccess) {
             spawned = cmd.first()
             break
