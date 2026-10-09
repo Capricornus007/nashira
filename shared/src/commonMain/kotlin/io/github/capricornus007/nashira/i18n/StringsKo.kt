@@ -147,6 +147,8 @@ object KoStrings : Strings by EnStrings {
     override val forwardUnsupported = "이 메시지 유형은 아직 전달할 수 없습니다"
     override val viewSourceFailed = "이벤트를 불러오지 못했습니다"
     override val actionDownload = "다운로드"
+    override val actionShowInChat = "채팅에서 표시"
+    override val actionSaveAs = "다른 이름으로 저장…"
     override val actionHideImage = "이미지 숨기기"
     override val hiddenImage = "이미지 숨김(탭하여 표시)"
     override val downloadFailed = "다운로드 실패"

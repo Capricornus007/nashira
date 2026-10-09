@@ -34,7 +34,7 @@ fun PasswordVisibilityToggle(
 }
 
 /** Material Symbols `visibility`（睜眼）。 */
-private val EyeIcon: ImageVector by lazy {
+internal val EyeIcon: ImageVector by lazy {
     materialIcon("Visibility") {
         // 眼形外框 + 中央瞳孔
         "M12,6.5c3.79,0 7.17,2.13 8.82,5.5 -1.65,3.37 -5.03,5.5 -8.82,5.5S4.83,15.37 3.18,12C4.83,8.63 8.21,6.5 12,6.5" +

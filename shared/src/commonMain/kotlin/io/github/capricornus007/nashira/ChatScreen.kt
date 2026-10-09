@@ -3647,7 +3647,45 @@ private fun TimelinePane(
             slots = viewer.slots,
             index = viewer.index,
             onSelectIndex = { viewerTarget = viewer.copy(index = it) },
-            downloadFailedLabel = strings.downloadFailed,
+            strings = strings,
+            actions = MediaViewerActions(
+                // 「在聊天中顯示」＝關全螢幕＋跳時間線到那一則並標出來，走點引用同一條路
+                //（含「跳過去還回得來」那個 returnToEvent）
+                showInChat = { id ->
+                    viewerTarget = null
+                    if (EventId.isValid(id)) {
+                        scope.launch {
+                            val target = EventId(id)
+                            val where = messages?.getOrNull(listState.firstVisibleItemIndex)?.eventId
+                            if (where != null && where != target) returnToEvent = where
+                            timeline.jumpTo(target)
+                            highlightedEventId = id
+                            pendingJumpEventId = id
+                        }
+                    }
+                },
+                // 「轉傳」要的是那則訊息的內容。已經在畫面上的直接用它；
+                // 舊的（只在本機索引裡）用检视器那格的內容合成一份——轉寄只用 body（實查
+                // RoomRepository.forwardMessage），發送者欄位這裡沒有意義可言
+                forward = { id ->
+                    val slot = viewer.slots.firstOrNull { it.eventId == id }
+                    val loaded = messages?.firstOrNull { it.eventId?.full == id }
+                    val body = slot?.body
+                    forwardTarget = when {
+                        loaded != null -> loaded
+                        body != null -> TimelineMessage(
+                            eventId = if (EventId.isValid(id)) EventId(id) else null,
+                            roomId = room.roomId,
+                            sender = roomRepository.client.userId,
+                            senderName = slot.sender,
+                            senderAvatarUrl = null,
+                            body = body,
+                            timestamp = slot.timestamp,
+                        )
+                        else -> null
+                    }
+                },
+            ),
             onDismiss = { viewerTarget = null },
         )
     }

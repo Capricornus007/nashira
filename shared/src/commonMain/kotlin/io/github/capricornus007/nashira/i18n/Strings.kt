@@ -176,6 +176,10 @@ interface Strings {
     val forwardUnsupported: String
     val viewSourceFailed: String
     val actionDownload: String
+    /** 檢視器三點選單：關掉全螢幕並把時間線跳到那一則訊息（Element 的 Show in chat）。 */
+    val actionShowInChat: String
+    /** 與「下載」分開的兩個動作照 Element：下載＝直接進下載夾，另存為＝選位置。 */
+    val actionSaveAs: String
     val actionHideImage: String
     val hiddenImage: String
     val downloadFailed: String

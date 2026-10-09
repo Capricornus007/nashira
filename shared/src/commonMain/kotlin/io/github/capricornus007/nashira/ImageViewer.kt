@@ -16,6 +16,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import io.github.capricornus007.nashira.i18n.Strings
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material3.CircularProgressIndicator
@@ -91,8 +95,27 @@ data class MediaSlot(
     val identity: String,
     val timestamp: Long,
     val caption: String,
+    /** 左下角第二行要顯示的發送者（顯示名，取不到才退回 ID 的 localpart） */
+    val sender: String,
     val body: MessageBody.Image?,
 )
+
+/**
+ * 檢視器做不了、必須交回上層的兩件事：
+ * 「在聊天中顯示」要關全螢幕並跳時間線，「轉傳」要開房間選單——兩樣都只有聊天頁有。
+ */
+class MediaViewerActions(
+    val showInChat: (String) -> Unit,
+    val forward: (String) -> Unit,
+)
+
+/** 剛送出、索引還沒掃到的那一格：用它反查時間線裡那則訊息，才拿得到發送者顯示名。 */
+private fun io.github.capricornus007.nashira.matrix.MessageBody.mentionsMedia(media: MessageBody.Image): Boolean =
+    when (this) {
+        is MessageBody.Image -> this == media
+        is MessageBody.Album -> media in items
+        else -> false
+    }
 
 /** 媒體身分鍵，與 `MediaIndexEntry.identity` 同一套算法（兩邊要能認出同一張圖）。 */
 private fun MediaSource.identity(): String = when (this) {
@@ -126,6 +149,8 @@ internal fun mediaStripFrom(
             identity = entry.identity,
             timestamp = entry.timestamp,
             caption = entry.caption,
+            // 索引只存 Matrix ID；顯示名要等這一則進到時間線才補得起來
+            sender = entry.sender.removePrefix("@").substringBefore(":"),
             body = entry.toMessageBodyOrNull(),
         )
     }
@@ -145,6 +170,7 @@ internal fun mediaStripFrom(
                 // 相簿那幾張同一則訊息、同一個時間戳；排完序自然相鄰
                 timestamp = message.timestamp + position,
                 caption = image.caption,
+                sender = message.senderName,
                 body = image,
             )
         }
@@ -159,6 +185,7 @@ internal fun mediaStripFrom(
         identity = anchor.source.identity(),
         timestamp = Clock.System.now().toEpochMilliseconds(),
         caption = anchor.caption,
+        sender = loaded.firstOrNull { it.body.mentionsMedia(anchor) }?.senderName.orEmpty(),
         body = anchor,
     )
     val withAnchor = (strip + slot).sortedBy { it.timestamp }
@@ -181,8 +208,10 @@ fun ImageViewer(
     slots: List<MediaSlot>,
     index: Int,
     onSelectIndex: (Int) -> Unit,
-    /** 「抓不到檔」時的提示文案（用呼叫端的 strings，不在這裡硬寫字串）。 */
-    downloadFailedLabel: String,
+    /** 選單文字與提示都用呼叫端的語系，不在這裡硬寫字串。 */
+    strings: Strings,
+    /** 「在聊天中顯示」與「轉傳」要動時間線，檢視器自己碰不到，只能交回上層。 */
+    actions: MediaViewerActions,
     onDismiss: () -> Unit,
 ) {
     val slot = slots[index.coerceIn(slots.indices)]
@@ -284,7 +313,29 @@ fun ImageViewer(
         }
         val snackbar = remember { SnackbarHostState() }
         val saver = rememberImageSaver()
+        val downloader = rememberMediaDownloader()
         val scope = rememberCoroutineScope()
+        // 右下那顆調色盤＝換檢視器底色（Element 同一顆）。底色一換，所有圖示與文字的
+        // 顏色都要跟著翻，否則白字壓白底等於看不見。
+        var lightBackdrop by remember { mutableStateOf(false) }
+        val chromeTint = if (lightBackdrop) Color.Black else Color.White
+        val chromePill = if (lightBackdrop) Color.White.copy(alpha = 0.72f) else Color.Black.copy(alpha = 0.55f)
+        // 旋轉是純顯示（不改檔案本身），換圖就要回到正，別讓上一張的 90 度跟過來
+        var rotation by remember(key) { mutableFloatStateOf(0f) }
+        var menuOpen by remember { mutableStateOf(false) }
+        // 存檔檔名：caption 通常就是原始檔名；沒有才自己起名（下載與另存為共用這一份）
+        val saveExt = when {
+            mimeType?.contains("webp") == true -> "webp"
+            mimeType?.contains("jpeg") == true || mimeType?.contains("jpg") == true -> "jpg"
+            mimeType?.contains("webm") == true -> "webm"
+            else -> "png"
+        }
+        val saveName = if (caption.isBlank()) "nashira-media.$saveExt" else caption
+        // 三顆要位元組的動作（下載／另存／複製）共用這條：已經在手上就用手上的，
+        // 否則現點現抓——影片從不預抓（會跟串流搶管子，用戶 2026-10-08「加載死慢」）
+        val grabBytes: suspend () -> ByteArray? = {
+            fileBytes ?: source?.let { fetchMediaBytesForPlayback(client, it) }
+        }
 
         Box(
             Modifier
@@ -314,7 +365,7 @@ fun ImageViewer(
                         }
                     }
                 }
-                .background(Color.Black.copy(alpha = 0.92f))
+                .background(if (lightBackdrop) Color.White.copy(alpha = 0.94f) else Color.Black.copy(alpha = 0.92f))
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onTap = { onDismiss() },
@@ -368,88 +419,178 @@ fun ImageViewer(
                             scaleY = scale,
                             translationX = offset.x,
                             translationY = offset.y,
+                            rotationZ = rotation,
                         )
                         .transformable(transformState),
                 )
                 failed -> Text(
                     caption.ifBlank { "🖼" },
-                    color = Color.White,
+                    color = chromeTint,
                     style = MaterialTheme.typography.bodyLarge,
                     modifier = Modifier.align(Alignment.Center),
                 )
                 else -> CircularProgressIndicator(
                     Modifier.align(Alignment.Center).padding(24.dp),
-                    color = Color.White,
+                    color = chromeTint,
                     strokeWidth = 3.dp,
                 )
             }
 
             // 外圍控件不常顯：滑鼠動一下才出現、靜置 2.5 秒淡出（用戶 2026-10-08：「並不應該常顯」）。
+            val safeIndex = index.coerceIn(slots.indices)
             if (chromeShown) {
-                // 頂欄：關閉＋下載。半透明底確保任何圖片上都看得清。
+                Box(Modifier.fillMaxSize().graphicsLayer { alpha = chromeAlpha }) {
+                // 頂欄只留關閉。下載／旋轉／選單照 Element 挪到右下（用戶 2026-10-09 的 #34/#35），
+                // 計數挪到左下並補上「誰在什麼時候發的」。
                 Surface(
-                    color = Color.Black.copy(alpha = 0.55f),
+                    color = chromePill,
                     shape = RoundedCornerShape(22.dp),
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(top = 36.dp, end = 12.dp),
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(
-                            // 這一格還在等金鑰時按不动：沒金鑰根本存不出檔，
-                            // 讓它按了才報「抓不到」等於把内部狀態問題丟給使用者
-                            enabled = source != null,
-                            onClick = {
-                                scope.launch {
-                                    val media = source ?: return@launch
-                                    // 影片走這條時通常還沒有位元組（不再預抓），現點現抓
-                                    val bytes = fileBytes ?: fetchMediaBytesForPlayback(client, media)
-                                    if (bytes == null || bytes.isEmpty()) {
-                                        snackbar.showSnackbar(downloadFailedLabel)
-                                        return@launch
-                                    }
-                                    val ext = when {
-                                        mimeType?.contains("webp") == true -> "webp"
-                                        mimeType?.contains("jpeg") == true || mimeType?.contains("jpg") == true -> "jpg"
-                                        mimeType?.contains("webm") == true -> "webm"
-                                        else -> "png"
-                                    }
-                                    val name = fileName.ifBlank { "nashira-media.$ext" }
-                                    val type = mimeType ?: "image/png"
-                                    saver(bytes, name, type)
-                                        .onSuccess { where -> snackbar.showSnackbar(where) }
-                                }
-                            },
-                        ) {
-                            Icon(
-                                BarIcons.Download,
-                                contentDescription = null,
-                                tint = Color.White,
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Filled.Close, contentDescription = null, tint = chromeTint)
+                    }
+                }
+                // 左下：第幾張／共幾張＋這一格的發送者與時間
+                //（Element 是「第 6158 張照片，共 6159 張」＋「發送者 · 昨天 下午11:15」兩行）
+                Surface(
+                    color = chromePill,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(start = 12.dp, bottom = 14.dp),
+                ) {
+                    Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+                        Text(
+                            text = "${safeIndex + 1} / ${slots.size}",
+                            color = chromeTint,
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                        if (slot.sender.isNotEmpty()) {
+                            Text(
+                                text = slot.sender + " · " +
+                                    formatRelative(slot.timestamp, Clock.System.now().toEpochMilliseconds(), strings) +
+                                    " " + formatClock(slot.timestamp),
+                                color = chromeTint.copy(alpha = 0.72f),
+                                style = MaterialTheme.typography.labelMedium,
                             )
-                        }
-                        IconButton(onClick = onDismiss) {
-                            Icon(Icons.Filled.Close, contentDescription = null, tint = Color.White)
                         }
                     }
                 }
-                // 相簿連翻：左右兩側的箭頭鈕＋左上角計數，照 Element 的燈光箱
-                //（到頭就停用，不是繞回——繞回讓人以為整組在循環，找不到「結束」）。
-                // 不接方向鍵：桌面端 Dialog 沒拿到焦點時鍵盤事件根本進不來，
-                // 擺一個「可能不會動」的按鍵比擺一個看得見按得動的鈕更糟。
+                // 右下動作列：換底色、下載、旋轉、三點選單——位置與順序照 #35 那張圖
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 12.dp, bottom = 8.dp),
+                ) {
+                    IconButton(onClick = { lightBackdrop = !lightBackdrop }) {
+                        Icon(BarIcons.Appearance, contentDescription = null, tint = chromeTint)
+                    }
+                    IconButton(
+                        // 這一格還在等金鑰時按不动：沒金鑰根本存不出檔，
+                        // 讓它按了才報「抓不到」等於把内部狀態問題丟給使用者
+                        enabled = source != null,
+                        onClick = {
+                            scope.launch {
+                                val bytes = grabBytes()
+                                if (bytes == null || bytes.isEmpty()) {
+                                    snackbar.showSnackbar(strings.downloadFailed)
+                                    return@launch
+                                }
+                                downloader(bytes, saveName, mimeType ?: "image/png")
+                                    .onSuccess { where -> snackbar.showSnackbar(where) }
+                            }
+                        },
+                    ) {
+                        Icon(BarIcons.Download, contentDescription = null, tint = chromeTint)
+                    }
+                    IconButton(
+                        // 影片不給轉：轉的應該是畫面，不是播放器（內嵌播放器的控制列另有自己的方向）
+                        enabled = !isVideo,
+                        onClick = { rotation = (rotation + 90f) % 360f },
+                    ) {
+                        Icon(BarIcons.Rotate, contentDescription = null, tint = chromeTint)
+                    }
+                    Box {
+                        IconButton(onClick = { menuOpen = !menuOpen }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = null, tint = chromeTint)
+                        }
+                        // 「檢視所有照片」這輪不進選單：那是附件面板（#108 剩那半），
+                        // 做出來之前擺一顆按了沒反應的項目比缺顆更糟
+                        DropdownMenu(
+                            expanded = menuOpen,
+                            onDismissRequest = { menuOpen = false },
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            shadowElevation = 8.dp,
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text(strings.actionShowInChat) },
+                                leadingIcon = { Icon(EyeIcon, contentDescription = null) },
+                                onClick = {
+                                    menuOpen = false
+                                    actions.showInChat(slot.eventId)
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(strings.copy) },
+                                leadingIcon = { Icon(BarIcons.ContentCopy, contentDescription = null) },
+                                enabled = source != null,
+                                onClick = {
+                                    menuOpen = false
+                                    scope.launch {
+                                        val bytes = grabBytes()
+                                        val ok = bytes != null && bytes.isNotEmpty() &&
+                                            copyImageToClipboard(bytes, mimeType ?: "image/png")
+                                        snackbar.showSnackbar(if (ok) strings.copiedToClipboard else strings.downloadFailed)
+                                    }
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(strings.actionForward) },
+                                leadingIcon = { Icon(BarIcons.Reply, contentDescription = null) },
+                                enabled = source != null,
+                                onClick = {
+                                    menuOpen = false
+                                    actions.forward(slot.eventId)
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(strings.actionSaveAs) },
+                                leadingIcon = { Icon(BarIcons.Download, contentDescription = null) },
+                                enabled = source != null,
+                                onClick = {
+                                    menuOpen = false
+                                    scope.launch {
+                                        val bytes = grabBytes()
+                                        if (bytes == null || bytes.isEmpty()) {
+                                            snackbar.showSnackbar(strings.downloadFailed)
+                                            return@launch
+                                        }
+                                        saver(bytes, saveName, mimeType ?: "image/png")
+                                            .onSuccess { where -> snackbar.showSnackbar(where) }
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
+                // 連翻箭頭：左右兩側（到頭就停用，不是繞回——繞回讓人以為整組在循環，找不到「結束」）
                 if (slots.size > 1) {
-                    val safeIndex = index.coerceIn(slots.indices)
                     IconButton(
                         enabled = safeIndex > 0,
                         onClick = { onSelectIndex(safeIndex - 1) },
                         modifier = Modifier
                             .align(Alignment.CenterStart)
                             .padding(start = 8.dp)
-                            .background(Color.Black.copy(alpha = 0.45f), CircleShape),
+                            .background(chromePill, CircleShape),
                     ) {
                         Icon(
                             Icons.Filled.KeyboardArrowLeft,
                             contentDescription = null,
-                            tint = Color.White,
+                            tint = chromeTint,
                             modifier = Modifier.size(34.dp),
                         )
                     }
@@ -459,32 +600,21 @@ fun ImageViewer(
                         modifier = Modifier
                             .align(Alignment.CenterEnd)
                             .padding(end = 8.dp)
-                            .background(Color.Black.copy(alpha = 0.45f), CircleShape),
+                            .background(chromePill, CircleShape),
                     ) {
                         Icon(
                             Icons.Filled.KeyboardArrowRight,
                             contentDescription = null,
-                            tint = Color.White,
+                            tint = chromeTint,
                             modifier = Modifier.size(34.dp),
                         )
                     }
-                    Surface(
-                        color = Color.Black.copy(alpha = 0.55f),
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.align(Alignment.TopStart)
-                        .graphicsLayer { alpha = chromeAlpha }
-                        .padding(top = 36.dp, start = 12.dp),
-                    ) {
-                        Text(
-                            text = "${safeIndex + 1} / ${slots.size}",
-                            color = Color.White,
-                            style = MaterialTheme.typography.labelLarge,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        )
-                    }
+                }
                 }
             }
-            SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = 32.dp))
+
+            // 提示往上挪：左下的計數與右下的動作列都住在底部，疊在它們上面就等於沒顯示
+            SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = 76.dp))
         }
     }
 }

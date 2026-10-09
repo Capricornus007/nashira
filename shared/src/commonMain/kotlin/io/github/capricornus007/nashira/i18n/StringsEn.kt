@@ -213,6 +213,8 @@ object EnStrings : Strings {
     override val forwardUnsupported = "Forwarding this message type isn't supported yet"
     override val viewSourceFailed = "Failed to load the event"
     override val actionDownload = "Download"
+    override val actionShowInChat = "Show in chat"
+    override val actionSaveAs = "Save as…"
     override val actionHideImage = "Hide image"
     override val hiddenImage = "Image hidden (tap to show)"
     override val downloadFailed = "Download failed"

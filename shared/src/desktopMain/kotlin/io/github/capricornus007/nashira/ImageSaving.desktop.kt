@@ -26,6 +26,30 @@ actual fun rememberImageSaver(): suspend (bytes: ByteArray, fileName: String, mi
         }
     }
 
+/** 桌面「下載」：不問路徑，直接寫進 `~/Downloads`，同名就加序號，回傳實際路徑。 */
+@Composable
+actual fun rememberMediaDownloader(): suspend (bytes: ByteArray, fileName: String, mimeType: String) -> Result<String> =
+    remember {
+        downloader@{ bytes, fileName, _ ->
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val dir = File(System.getProperty("user.home") ?: ".", "Downloads").apply { mkdirs() }
+                    val wanted = fileName.ifBlank { "nashira-image.png" }
+                    val base = wanted.substringBeforeLast('.', wanted)
+                    val ext = wanted.substringAfterLast('.', "png")
+                    var target = File(dir, wanted)
+                    var index = 2
+                    while (target.exists()) {
+                        target = File(dir, "$base ($index).$ext")
+                        index++
+                    }
+                    target.writeBytes(bytes)
+                    target.absolutePath
+                }
+            }
+        }
+    }
+
 private fun chooseSaveTarget(fileName: String): File? {
     var selected: File? = null
     val show = {

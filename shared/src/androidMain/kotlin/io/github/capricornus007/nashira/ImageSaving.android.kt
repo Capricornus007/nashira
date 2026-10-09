@@ -9,6 +9,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
+ * 手機端「下載」與「另存為」同一條路：Android 沒有問路徑這回事（分區儲存下只能走
+ * MediaStore），所以直接沿用上面那個寫進 Pictures/Nashira 的實作。
+ */
+@Composable
+actual fun rememberMediaDownloader(): suspend (bytes: ByteArray, fileName: String, mimeType: String) -> Result<String> =
+    rememberImageSaver()
+
+/**
  * 寫進 MediaStore 的 Pictures/Nashira：下載即入相簿，不用申請儲存權限
  * （分區儲存下走 MediaStore API 就是正道）。
  */

@@ -160,6 +160,36 @@ object BarIcons {
     }
 
     /**
+     * 旋轉（全螢幕檢視器右下那顆）。core 集裡最接近的是 `Refresh`，但那個語意是
+     * 「重新整理」，擺在圖片上會讓人以為按了要重抓——照 Element 的 ↺ 手繪。
+     *
+     * 這版本的 `path` DSL 不收 `stroke`（編譯器把它當成 `fill: Brush?`），
+     * 所以環是用「外弧過去＋內弧回填」的填色畫法做的，不是描邊。
+     */
+    val Rotate: ImageVector by lazy {
+        ImageVector.Builder(name = "Rotate", defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f).apply {
+            path(fill = SolidColor(Color.Black)) {
+                // 外緣：北 → 東 → 南 → 西（缺左上四分之一，那一端放箭頭）
+                moveTo(12f, 3f)
+                curveTo(16.97f, 3f, 21f, 7.03f, 21f, 12f)
+                curveTo(21f, 16.97f, 16.97f, 21f, 12f, 21f)
+                curveTo(7.03f, 21f, 3f, 16.97f, 3f, 12f)
+                // 內緣回填
+                lineTo(5.5f, 12f)
+                curveTo(5.5f, 15.59f, 8.41f, 18.5f, 12f, 18.5f)
+                curveTo(15.59f, 18.5f, 18.5f, 15.59f, 18.5f, 12f)
+                curveTo(18.5f, 8.41f, 15.59f, 5.5f, 12f, 5.5f)
+                close()
+                // 箭頭：在北端往左指，讀起來才是「逆時針轉」
+                moveTo(7.5f, 4.25f)
+                lineTo(12f, 1.5f)
+                lineTo(12f, 7f)
+                close()
+            }
+        }.build()
+    }
+
+    /**
      * 置頂／置底。用戶 2026-10-07 看了第一版直接問「你這圖標確定正常嗎」——
      * 那版用 `KeyboardArrowUp/Down`，在選單裡就是兩顆孤零零的 `^` `v`，
      * 讀不出「釘到頂部」的意思。改成自畫的**「靠邊一條槓＋一支箭頭插過去」**，
