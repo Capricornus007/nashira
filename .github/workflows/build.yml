@@ -11,11 +11,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Set up JDK 21
-        uses: actions/setup-java@v5
+      - name: Set up JDK 25
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "25"
           # 同上：匿名查版號目錄會被共用網段的配額拖垮（release #124 的教訓）
           token: ${{ secrets.GITHUB_TOKEN }}
 

@@ -21,18 +21,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Set up JDK 21
+      - name: Set up JDK 25
         # JetBrains Runtime，不是 temurin：只有 JBR 會在 XIM 回調之內上報光標矩形
         # （sun.awt.X11.XInputMethod$ClientComponentCaretPositionTracker；OpenJDK 那個類
         # 根本不存在，實測 ClassNotFoundException）→ 少了它 fcitx5 候選窗永遠釘在視窗左下角。
         #
+        # 21 → 25（規則 15 吃最新）：抬到 25 之前先在本機把 JBR 25.0.4.1 驗過兩件事——
+        # (a) `jimage list lib/modules` 找得到 ClientComponentCaretPositionTracker（OpenJDK 25/27 都找不到）、
+        # (b) jmods 目錄有 72 個模組（jlink 才生得出執行期）。兩件都成立才敢換。
+        # 上限停在 25 不是沒抬：JetBrainsRuntime 只發 LTS 軌（最新 release tag
+        # jbr-release-25.0.4.1b635.70，沒有 26/27），所以 jetbrains 這個 distribution 最高就是 25。
+        #
         # 這一條就足夠改變安裝包裡捆的執行期：打包用的 runtime 由「跑 gradle 的那個 JDK 的
         # jmods」jlink 出來（desktopApp 的 nativeDistributions.modules(...) 只決定模組清單），
         # 所以不需要另外下載 JBR、也不需要碰 jpackage 的 runtimeImage。
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           distribution: jetbrains
-          java-version: "21"
+          java-version: "25"
           # ⚠️ 一定要給 token：沒有它，setup-java 是用**匿名**請求去查 JetBrains 的版號目錄，
           # 匿名配額 60 次/小時、而且是整個 runner 網段共用（實測 release #124 就是這樣紅的：
           # `API rate limit exceeded for 20.64.182.20`，12 秒就掛，跟程式碼無關）。

@@ -44,7 +44,7 @@ kotlin {
     }
     jvm("desktop") {
         compilerOptions {
-            jvmTarget.set(JvmTarget.JVM_21)
+            jvmTarget.set(JvmTarget.JVM_25)
         }
         compilations.all {
             dependencies {
