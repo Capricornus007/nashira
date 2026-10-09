@@ -659,30 +659,37 @@ private fun restartApplication(onExit: () -> Unit) {
     // 殼裡每一跳都留字：我們這邊只能證明「派出去了」，派出去之後死在哪裡只有殼自己知道。
     // ⚠️ 不用 `exec`：exec 會把殼換成啟動器，退出碼就再也拿不到了。
     //
-    // 0.1.113 的日誌給出兩條事實：只派了一個殼（spawned=setsid）、啟動器**退出碼 1**
-    // 並吐 `java` 使用說明——也就是它沒進入 app 模式（找不到 nashira.cfg 才會這樣）。
-    // 同一條命令我從自己的殼裡跑卻正常起來，所以毒在「從 JVM 繼承下來的狀態」。
-    // 還剩兩個沒對照過的變數，這一版一次測完：
-    //   ① stdin：我們這個 JVM 的 fd 0 可能是**關閉**的（i3 起的程序很常見），
-    //      fd 0 空著會讓第一個開檔的程式拿到 0 號 fd，啟動器讀 cfg 就可能拿到錯的東西。
-    //      → 第 1 次改成 `</dev/null`。
-    //   ② 讓啟動器自己交代：`_JAVA_LAUNCHER_DEBUG=1` 會把它怎麼找 JRE、怎麼算 app 目錄、
-    //      讀到哪些 java-options、主類別解析成什麼**全部印出來**。
-    //      與其繼續猜變數，不如拿這份軌跡（第 2 次帶這個旗標）。
+    // ☠️ 這才是「按重新啟動就只是關掉」的真正病因（查了四輪，A/B 實測證明）：
+    // jpackage 的啟動器會往自己拉起的行程環境塞 `_JPACKAGE_LAUNCHER=0`
+    //（還有 `LD_LIBRARY_PATH=:/opt/nashira/lib/app`）。我們派的殼**繼承**了它們，
+    // 殼再叫啟動器時，啟動器看見自己那個標記就以為已在啟動流程內，
+    // **跳過讀 lib/app/nashira.cfg** → 拼出來的 java 參數是空的 → 退化成裸 `java`
+    // 印使用說明、退出碼 1。`_JAVA_LAUNCHER_DEBUG=1` 的軌跡是直接證據：
+    // 失敗那次 `Java args:` 為空、命令列只剩 argv[0]；正常那次有 109 條 classpath 加主類別。
+    //   帶標記：env _JPACKAGE_LAUNCHER=0 /opt/nashira/bin/nashira → 使用說明、行程 0
+    //   清掉它：env -u _JPACKAGE_LAUNCHER /opt/nashira/bin/nashira → 正常起來
+    // 所以叫啟動器前要用 `env -u` 把這兩個變數拿掉（stdin 也釘成 /dev/null），
+    // 讓它等同「使用者從桌面點的那種全新啟動」。
+    // 註：曾在這裡寫 `builder.environment.remove(…)`／`getEnvironment()`——前者被 Kotlin
+    // 解析到 ProcessBuilder 的私有欄位（編譯報 it is private），後者根本解析不到。
+    // 清環境這件事放在殼裡做本來就夠，不要跟 API 纏鬥。
     val script = buildString {
         appendLine("echo \"殼起來了：cwd=\$PWD\" >> $logPath")
         appendLine("env | sort > /tmp/nashira-restart-env.txt 2>/dev/null")
         appendLine("ls -l /proc/self/fd > /tmp/nashira-restart-fds.txt 2>&1 || true")
         appendLine("timeout 15 sh -c 'while kill -0 $pid; do sleep 0.25; done'")
         appendLine("sleep 0.6")
-        appendLine("echo '第 1 次：stdin=/dev/null' >> $logPath")
-        appendLine("'$quotedLauncher' </dev/null >> $logPath 2>&1")
+        appendLine("echo '第 1 次：清掉啟動器標記後叫啟動器' >> $logPath")
+        appendLine("env -u _JPACKAGE_LAUNCHER -u LD_LIBRARY_PATH '$quotedLauncher' </dev/null >> $logPath 2>&1")
         appendLine("rc=\$?")
         appendLine("echo \"第 1 次退出碼=\$rc\" >> $logPath")
         appendLine("if [ \$rc -ne 0 ]; then")
         appendLine("    sleep 0.8")
         appendLine("    echo '第 2 次：_JAVA_LAUNCHER_DEBUG=1 要它自己交代' >> $logPath")
-        appendLine("    _JAVA_LAUNCHER_DEBUG=1 '$quotedLauncher' </dev/null >> $logPath 2>&1")
+        appendLine(
+            "    env -u _JPACKAGE_LAUNCHER -u LD_LIBRARY_PATH " +
+                "_JAVA_LAUNCHER_DEBUG=1 '$quotedLauncher' </dev/null >> $logPath 2>&1",
+        )
         appendLine("    echo \"第 2 次退出碼=\$?\" >> $logPath")
         appendLine("fi")
     }
@@ -697,28 +704,14 @@ private fun restartApplication(onExit: () -> Unit) {
     )
     var spawned: String? = null
     for (cmd in candidates) {
-        val builder = ProcessBuilder(cmd)
-        // 殼自己的 stdout 丟掉：日誌由腳本裡每一行 `>> log` 寫，
-        // 兩邊都寫就會每行出現兩次（上一版正是這樣，誤導了我很久）。
-        builder.redirectOutput(ProcessBuilder.Redirect.DISCARD)
-        builder.redirectError(ProcessBuilder.Redirect.DISCARD)
-        /**
-         * ⚠️ 這才是「按重新啟動就只是關掉」的真正病因，A/B 實測過：
-         * jpackage 的啟動器會往自己拉起的行程環境裡塞 `_JPACKAGE_LAUNCHER=0`
-         *（還有 `LD_LIBRARY_PATH=:/opt/nashira/lib/app`）。我們派的殼**繼承**了它們，
-         * 殼再叫啟動器時，啟動器看見自己那個標記就以為已經在啟動流程裡，
-         * **跳過讀 lib/app/nashira.cfg** → 拼出來的 java 參數是空的 →
-         * 退化成裸 `java` 印使用說明、退出碼 1（`_JAVA_LAUNCHER_DEBUG=1` 的軌跡
-         * 直接顯示 `Java args:` 為空、命令列只剩 argv[0]）。
-         *   帶標記：env _JPACKAGE_LAUNCHER=0 /opt/nashira/bin/nashira → 使用說明、行程 0
-         *   清掉它：env -u _JPACKAGE_LAUNCHER /opt/nashira/bin/nashira → 正常起來
-         * 拿掉之後才等同「使用者從桌面點的那種全新啟動」。
-         */
-        // 寫成 getEnvironment() 而不是 `environment`：後者會被 Kotlin 解析到
-        // ProcessBuilder 那個**私有欄位**，編譯直接報「it is private」。
-        builder.getEnvironment().remove("_JPACKAGE_LAUNCHER")
-        builder.getEnvironment().remove("LD_LIBRARY_PATH")
-        val started = runCatching { builder.start() }
+        val started = runCatching {
+            // 殼自己的 stdout 丟掉：日誌由腳本裡每一行 `>> log` 寫，
+            // 兩邊都寫就會每行出現兩次（上一版正是這樣，誤導了我很久）。
+            ProcessBuilder(cmd)
+                .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                .redirectError(ProcessBuilder.Redirect.DISCARD)
+                .start()
+        }
         if (started.isSuccess) {
             spawned = cmd.first()
             break
