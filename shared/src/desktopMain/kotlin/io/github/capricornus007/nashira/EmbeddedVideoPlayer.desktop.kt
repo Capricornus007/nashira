@@ -236,7 +236,12 @@ actual fun EmbeddedVideoPlayer(
         val sourcePath = input ?: return@LaunchedEffect
         val meta = info ?: return@LaunchedEffect
         if (!playing) return@LaunchedEffect
-        val startMs = resumeMs
+        // 暫停再按繼續時 `resumeMs` 並不會被設（它只給「換檔／拖動」用），
+        // 于是每次恢復都從 0 重新起解碼器、再靠音訊時鐘把畫面硬追回來
+        //（用戶 2026-10-09：「暫停恢復並不會實時，看着像每次取消暫停都是從頭開始硬跳過去的」）。
+        // 讀 positionMs（上一格顯示的位置）才算續播；自然播完那一趟它已被歸零，
+        // 所以「播完按空格重放」照樣從頭。
+        val startMs = resumeMs.takeIf { it > 0L } ?: positionMs
         val ended = withContext(Dispatchers.IO) {
             if (inline) {
                 // 快速滾動時會一口氣經過很多條影片：先等一小拍，被滾走的會被取消、

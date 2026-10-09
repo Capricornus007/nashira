@@ -56,8 +56,11 @@ internal fun looksLikeRealCaption(body: String): Boolean {
     if (lastDot > 0 && lastDot >= s.length - 5) {
         if (s.substring(lastDot + 1).lowercase() in MediaFileExtensions) return false
     }
-    // 纯檔名（沒有空白也沒有句子的樣子）多半也是佔位，例如 `pasted_image_1728394`
-    if (s.length <= 24 && !s.contains(' ') && !s.contains('\n')) return false
+    // 「沒有空白就當檔名」這條**只能用在 ASCII 上**：中文／日文／韓文的句子本來就不含空白，
+    // 用戶 2026-10-09 實測——相簿說明「机器人交警！好有趣的样子」13 字無空白，
+    // 被我這條規則當成 `pasted_image_1728394` 那類佔位詞丟掉，於是「木有配字」，
+    // 單張圖片的說明文字也一起消失（同一個判定）。
+    if (s.length <= 24 && !s.contains(' ') && !s.contains('\n') && s.all { it.code < 0x2E80 }) return false
     return true
 }
 

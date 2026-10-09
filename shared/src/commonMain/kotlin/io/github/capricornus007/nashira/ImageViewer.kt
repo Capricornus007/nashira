@@ -40,6 +40,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -198,6 +201,10 @@ fun ImageViewer(
                 chromeVisible = false
             }
         }
+        // 「啪一聲消失」很死板（用戶 2026-10-09：「消失的好乾燥…有點死板」）：
+        // 用透明度漸變，淡出期間仍留在畫面上，所以不影響點擊命中。
+        val chromeAlpha by animateFloatAsState(if (chromeVisible) 1f else 0f, tween(220), label = "chrome")
+        val chromeShown = chromeAlpha > 0.01f
         // 每一次換格都要重新要焦點：從影片切回圖片時，子樹整個換掉（內嵌播放器那層消失了），
         // 原本持焦的節點跟著銷毀，焦點就掉到沒有物件——用戶 2026-10-08 實測
         // 「從視頻切換到圖片就切換不回去了」就是這個。只請求一次（Unit）撐不過換格。
@@ -309,8 +316,8 @@ fun ImageViewer(
                 )
             }
 
-            // 外圍控件不常顯：滑鼠動一下才出現、靜置 2.5 秒收掉（用戶 2026-10-08：「並不應該常顯」）。
-            if (chromeVisible) {
+            // 外圍控件不常顯：滑鼠動一下才出現、靜置 2.5 秒淡出（用戶 2026-10-08：「並不應該常顯」）。
+            if (chromeShown) {
                 // 頂欄：關閉＋下載。半透明底確保任何圖片上都看得清。
                 Surface(
                     color = Color.Black.copy(alpha = 0.55f),
@@ -392,7 +399,9 @@ fun ImageViewer(
                     Surface(
                         color = Color.Black.copy(alpha = 0.55f),
                         shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.align(Alignment.TopStart).padding(top = 36.dp, start = 12.dp),
+                        modifier = Modifier.align(Alignment.TopStart)
+                        .graphicsLayer { alpha = chromeAlpha }
+                        .padding(top = 36.dp, start = 12.dp),
                     ) {
                         Text(
                             text = "${safeIndex + 1} / ${items.size}",
