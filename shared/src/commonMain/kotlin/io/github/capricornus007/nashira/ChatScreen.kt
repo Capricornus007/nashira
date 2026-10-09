@@ -247,13 +247,15 @@ import androidx.compose.ui.geometry.Size
  */
 private const val SpaceRailDefaultWidthDp = 64
 private const val SpaceRailMinWidthDp = 52
-private const val SpaceRailMaxWidthDp = 220
+// 220 是釘太低：用戶 2026-10-09 拖到寬了看名字，「原生安卓Linux掌机…」還是被切成省略號。
+// 空間名可以很長，絕對上限放到 400，窗口比例那側另說。
+private const val SpaceRailMaxWidthDp = 400
 private const val SpaceRailNamesFromDp = 120
 
 /** 聊天室列表欄：預設寬、最窄要還看得到房間名、最寬再讓 Timeline 留得下來。 */
 private const val RoomListDefaultWidthDp = 286
 private const val RoomListMinWidthDp = 180
-private const val RoomListMaxWidthDp = 480
+private const val RoomListMaxWidthDp = 560
 
 private val DiscordRailWidth = SpaceRailDefaultWidthDp.dp
 
@@ -427,17 +429,17 @@ fun ChatScreen(
                     // 貼圖面板的懸浮寬／停靠寬踩過兩次（#38/#40），這裡不再重蹈。
                     val railWantedDp =
                         if (uiState.spaceRailWidthDp > 0) uiState.spaceRailWidthDp else SpaceRailDefaultWidthDp
-                    // Space 欄的上限也照窗口算：不然窄一點的窗口裡，光這一欄就能吃掉四分之一以上
+                    // Space 欄的上限也照窗口算：不然窄一點的窗口裡，光這一欄就能吃掉三成以上
                     val railCapDp = minOf(
                         SpaceRailMaxWidthDp,
-                        (shellMaxWidth.value * 0.25f).toInt().coerceAtLeast(SpaceRailMinWidthDp),
+                        (shellMaxWidth.value * 0.30f).toInt().coerceAtLeast(SpaceRailMinWidthDp),
                     )
                     val railWidthDp = railWantedDp.coerceIn(SpaceRailMinWidthDp, railCapDp)
                     // 列表欄的上限要「看得過去」，不是只寫「不超過窗口寬」（那等於沒擋）：
-                    // 照 Telegram 給個佔窗口 45% 的上限，時間線永遠留得下來。
+                    // 兩欄的比例上限相加是七成，時間線最窄也還留得下三成。
                     val listCapDp = minOf(
                         RoomListMaxWidthDp,
-                        (shellMaxWidth.value * 0.45f).toInt().coerceAtLeast(RoomListMinWidthDp),
+                        (shellMaxWidth.value * 0.40f).toInt().coerceAtLeast(RoomListMinWidthDp),
                     )
                     val listWantedDp =
                         if (uiState.roomListWidthDp > 0) uiState.roomListWidthDp else RoomListDefaultWidthDp
