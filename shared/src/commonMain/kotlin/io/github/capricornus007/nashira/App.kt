@@ -218,6 +218,16 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
      */
     var stickerPanelHeightDp by mutableIntStateOf(stored["stickerPanelHeight"]?.toIntOrNull() ?: 0)
 
+    /**
+     * 桌面 Space 欄（最左那條頭貼直欄）的寬（dp）。0 = 沒拖過，由介面給預設。
+     * 跟聊天室欄**各存一欄**：同一個值兩邊共用時，一邊拖到上限會把另一邊永遠頂死
+     *（貼圖面板的懸浮寬／停靠寬就這樣踩過，用戶 2026-09-30 #38/#40）。
+     */
+    var spaceRailWidthDp by mutableIntStateOf(stored["spaceRailWidth"]?.toIntOrNull() ?: 0)
+
+    /** 桌面聊天室列表欄的寬（dp）。0 = 沒拖過，由介面給預設。理由同 [spaceRailWidthDp]。 */
+    var roomListWidthDp by mutableIntStateOf(stored["roomListWidth"]?.toIntOrNull() ?: 0)
+
     init {
         AudioSelection.input = audioInput
         AudioSelection.output = audioOutput
@@ -253,6 +263,8 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
             "stickerPanelWidth" to stickerPanelWidthDp.toString(),
             "stickerPanelDockWidth" to stickerPanelDockWidthDp.toString(),
             "stickerPanelHeight" to stickerPanelHeightDp.toString(),
+            "spaceRailWidth" to spaceRailWidthDp.toString(),
+            "roomListWidth" to roomListWidthDp.toString(),
             "pureBlack" to pureBlack.toString(),
         ) + mapOf(
             "audioInput" to (audioInput ?: ""),

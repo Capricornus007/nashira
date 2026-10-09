@@ -181,6 +181,7 @@ import de.connect2x.trixnity.client.room
 import io.github.capricornus007.nashira.i18n.stringsFor
 import io.github.capricornus007.nashira.theme.audioDeviceSettingsSupported
 import io.github.capricornus007.nashira.theme.horizontalResizeIcon
+import io.github.capricornus007.nashira.theme.paneResizeSupported
 import io.github.capricornus007.nashira.theme.verticalResizeIcon
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.ui.input.pointer.pointerHoverIcon
@@ -240,8 +241,21 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 
-private val DiscordRailWidth = 64.dp
-private val DiscordChannelWidth = 286.dp
+/**
+ * Space 欄（最左那條）：預設就是「只剩頭貼」的窄欄，拖到 [SpaceRailNamesFromDp] 以上
+ * 才在頭貼旁放上空間名（用戶 2026-10-09 的規格：「最窄退化成只剩頭貼那一條」）。
+ */
+private const val SpaceRailDefaultWidthDp = 64
+private const val SpaceRailMinWidthDp = 52
+private const val SpaceRailMaxWidthDp = 220
+private const val SpaceRailNamesFromDp = 120
+
+/** 聊天室列表欄：預設寬、最窄要還看得到房間名、最寬再讓 Timeline 留得下來。 */
+private const val RoomListDefaultWidthDp = 286
+private const val RoomListMinWidthDp = 180
+private const val RoomListMaxWidthDp = 480
+
+private val DiscordRailWidth = SpaceRailDefaultWidthDp.dp
 
 /**
  * 手機版訊息頁推進／退出的補間。用 spring 而不是 tween：手指放開時要接著當下的甩動速度收尾，
@@ -408,35 +422,78 @@ fun ChatScreen(
                 Row(Modifier.fillMaxSize()) {
                     // 清單欄寬度跟著窗口縮：TG 半屏時清單變窄、時間線仍然能讀
                     // （用戶 2026-09-30 那張半屏截圖：我們的时间線被擠到一行四個字）
-                    Box(Modifier.width(DiscordRailWidth + DiscordChannelWidth).fillMaxHeight()) {
+                    // Space 欄與列表欄**各存一欄**（用戶 2026-10-09 點名的 #16）：
+                    // 兩欄共用一個值的話，一邊拖到上限會把另一邊永遠頂死——
+                    // 貼圖面板的懸浮寬／停靠寬踩過兩次（#38/#40），這裡不再重蹈。
+                    val railWantedDp =
+                        if (uiState.spaceRailWidthDp > 0) uiState.spaceRailWidthDp else SpaceRailDefaultWidthDp
+                    // Space 欄的上限也照窗口算：不然窄一點的窗口裡，光這一欄就能吃掉四分之一以上
+                    val railCapDp = minOf(
+                        SpaceRailMaxWidthDp,
+                        (shellMaxWidth.value * 0.25f).toInt().coerceAtLeast(SpaceRailMinWidthDp),
+                    )
+                    val railWidthDp = railWantedDp.coerceIn(SpaceRailMinWidthDp, railCapDp)
+                    // 列表欄的上限要「看得過去」，不是只寫「不超過窗口寬」（那等於沒擋）：
+                    // 照 Telegram 給個佔窗口 45% 的上限，時間線永遠留得下來。
+                    val listCapDp = minOf(
+                        RoomListMaxWidthDp,
+                        (shellMaxWidth.value * 0.45f).toInt().coerceAtLeast(RoomListMinWidthDp),
+                    )
+                    val listWantedDp =
+                        if (uiState.roomListWidthDp > 0) uiState.roomListWidthDp else RoomListDefaultWidthDp
+                    val listWidthDp = listWantedDp.coerceIn(RoomListMinWidthDp, listCapDp)
+                    Box(Modifier.width(railWidthDp.dp + listWidthDp.dp).fillMaxHeight()) {
                         Row(Modifier.fillMaxSize()) {
-                            ServerRail(
-                                client = session.client,
-                                spaces = snapshot.spaces,
-                                spaceRooms = spaceRooms,
-                                selectedSpace = selectedSpace,
-                                iconMode = spaceIconMode,
-                                unreadBySpace = unreadBySpace,
-                                homeUnread = homeUnread,
-                                onSelectSpace = { selectedSpace = it; selected = null },
-                                strings = strings,
-                                spacePermalink = { space -> roomRepository.permalink(space.roomId) },
-                                onLeaveSpace = { space -> roomRepository.leave(space.roomId) },
-                                onInviteToSpace = { space, userId -> roomRepository.invite(space.roomId, userId) },
-                            )
-                            ChannelPane(
-                                roomRepository = roomRepository,
-                                modifier = Modifier.width(DiscordChannelWidth),
-                                summaries = summaries,
-                                selected = selected,
-                                unreadByRoom = unreadByRoom,
-                                showPreview = showPreview,
-                                onSelect = { selected = it },
-                                channelTitle = channelTitle,
-                                onOpenDirectory = { directoryOpen = true },
-                                strings = strings,
-                                syncState = syncState,
-                            )
+                            Box(Modifier.width(railWidthDp.dp).fillMaxHeight()) {
+                                ServerRail(
+                                    client = session.client,
+                                    spaces = snapshot.spaces,
+                                    spaceRooms = spaceRooms,
+                                    selectedSpace = selectedSpace,
+                                    iconMode = spaceIconMode,
+                                    unreadBySpace = unreadBySpace,
+                                    homeUnread = homeUnread,
+                                    onSelectSpace = { selectedSpace = it; selected = null },
+                                    strings = strings,
+                                    spacePermalink = { space -> roomRepository.permalink(space.roomId) },
+                                    onLeaveSpace = { space -> roomRepository.leave(space.roomId) },
+                                    onInviteToSpace = { space, userId -> roomRepository.invite(space.roomId, userId) },
+                                    railWidth = railWidthDp.dp,
+                                    showNames = railWidthDp >= SpaceRailNamesFromDp,
+                                )
+                                PaneResizeHandle(
+                                    modifier = Modifier.align(Alignment.CenterEnd),
+                                    currentWidthDp = {
+                                        uiState.spaceRailWidthDp.takeIf { width -> width > 0 } ?: SpaceRailDefaultWidthDp
+                                    },
+                                    minDp = SpaceRailMinWidthDp,
+                                    maxDp = railCapDp,
+                                ) { uiState.spaceRailWidthDp = it }
+                            }
+                            Box(Modifier.width(listWidthDp.dp).fillMaxHeight()) {
+                                ChannelPane(
+                                    roomRepository = roomRepository,
+                                    modifier = Modifier.fillMaxSize(),
+                                    summaries = summaries,
+                                    selected = selected,
+                                    unreadByRoom = unreadByRoom,
+                                    showPreview = showPreview,
+                                    onSelect = { selected = it },
+                                    channelTitle = channelTitle,
+                                    onOpenDirectory = { directoryOpen = true },
+                                    strings = strings,
+                                    syncState = syncState,
+                                )
+                                PaneResizeHandle(
+                                    modifier = Modifier.align(Alignment.CenterEnd),
+                                    currentWidthDp = {
+                                        (uiState.roomListWidthDp.takeIf { width -> width > 0 } ?: RoomListDefaultWidthDp)
+                                            .coerceIn(RoomListMinWidthDp, listCapDp)
+                                    },
+                                    minDp = RoomListMinWidthDp,
+                                    maxDp = listCapDp,
+                                ) { uiState.roomListWidthDp = it }
+                            }
                         }
                         AccountBar(
                             client = session.client,
@@ -804,12 +861,14 @@ private fun ServerRail(
     onLeaveSpace: suspend (SpaceSummary) -> Unit,
     onInviteToSpace: suspend (SpaceSummary, String) -> Unit,
     modifier: Modifier = Modifier,
+    railWidth: Dp = DiscordRailWidth,
+    showNames: Boolean = false,
 ) {
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
     Column(
         // Space 欄底色用比清單深一階的表面色（Arcaea 深藍紫系），不用硬編碼色
-        modifier = modifier.width(DiscordRailWidth).fillMaxHeight()
+        modifier = modifier.width(railWidth).fillMaxHeight()
             .background(MaterialTheme.colorScheme.surfaceContainerLowest),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -820,7 +879,12 @@ private fun ServerRail(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item {
-                RailSlot(selected = selectedSpace == null, unread = homeUnread, onClick = { onSelectSpace(null) }) { shape ->
+                RailSlot(
+                    selected = selectedSpace == null,
+                    unread = homeUnread,
+                    onClick = { onSelectSpace(null) },
+                    label = if (showNames) strings.allRooms else null,
+                ) { shape ->
                     val homeSelected = selectedSpace == null
                     // 選中不鋪整塊實心金：那顆方塊是整個畫面最大的一片發光面積，
                     // 用戶 2026-09-29 直接說「作為顏色本身就有點突兀」。
@@ -856,6 +920,7 @@ private fun ServerRail(
                         unread = unread,
                         onClick = { onSelectSpace(space) },
                         onContextMenu = { position -> menuAnchor = position; menuOpen = true },
+                        label = if (showNames) space.name else null,
                     ) { shape ->
                         SpaceIcon(
                             client = client,
@@ -898,13 +963,65 @@ private val RailIconSize = 44.dp
 private val RailIdleCorner = 22.dp
 private val RailSelectedCorner = 14.dp
 
-/** 左緣指示器 + 圖示 + 右下未讀徽章的組合槽位。 */
+/**
+ * 欄位邊界的拖拽條：掛在某一欄的右緣（`modifier` 由呼叫端在 Box 作用域裡用
+ * `Modifier.align(...)` 組好傳進來，`align` 是 BoxScope 的成员，這層拿不到）。
+ *
+ * 範本就是貼圖面板停靠態那條邊（同一套 hoverable＋2dp 高亮＋左右雙箭頭游標），
+ * 差別只在此處往右拖是**加寬**這一欄，而停靠面板往右拖是加寬它自己那側的空白。
+ *
+ * 當前寬度一律走 `currentWidthDp()` 現读，不接 Int 參數：`pointerInput(Unit)` 的
+ * lambda 只在組合時建一次，抓到的是當時那個 Int 快照，拖第二下就會從舊值重算、
+ * 整條欄位跳回去。
+ */
+@Composable
+private fun PaneResizeHandle(
+    modifier: Modifier,
+    currentWidthDp: () -> Int,
+    minDp: Int,
+    maxDp: Int,
+    onWidthDp: (Int) -> Unit,
+) {
+    if (!paneResizeSupported) return
+    val edge = remember { MutableInteractionSource() }
+    val edgeHovered by edge.collectIsHoveredAsState()
+    // pointerInput 的 lambda 不是 @Composable，LocalDensity 要先在外面取
+    val edgeDensity = LocalDensity.current
+    Box(
+        modifier
+            .fillMaxHeight()
+            .width(10.dp)
+            .hoverable(edge)
+            .pointerHoverIcon(horizontalResizeIcon)
+            .pointerInput(Unit) {
+                detectDragGestures { change, dragAmount ->
+                    change.consume()
+                    val deltaDp = with(edgeDensity) { dragAmount.x.toDp().value.toInt() }
+                    onWidthDp((currentWidthDp() + deltaDp).coerceIn(minDp, maxDp))
+                }
+            },
+    ) {
+        Box(
+            Modifier
+                .align(Alignment.CenterEnd)
+                .fillMaxHeight()
+                .width(2.dp)
+                .background(
+                    if (edgeHovered) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+                    else Color.Transparent
+                ),
+        )
+    }
+}
+
+/** 左緣指示器 + 圖示 + 右下未讀徽章的組合槽位；`label` 非空時（Space 欄拖寬）名字排在頭貼旁。 */
 @Composable
 private fun RailSlot(
     selected: Boolean,
     unread: UnreadState,
     onClick: () -> Unit,
     onContextMenu: ((Offset) -> Unit)? = null,
+    label: String? = null,
     content: @Composable (shape: RoundedCornerShape) -> Unit,
 ) {
     val corner by animateDpAsState(
@@ -933,23 +1050,44 @@ private fun RailSlot(
             )
         }
         val shape = RoundedCornerShape(corner)
-        Box(contentAlignment = Alignment.Center) {
-            // clip 必須在 clickable 之前：否則點擊漣漪畫在未裁切的方形 Box 上，
-            // 圓形圖示按下去會冒出一個方塊（用戶回報「動畫是方的」）。
-            Box(
-                Modifier.size(RailIconSize).clip(shape).let { base ->
-                    if (onContextMenu == null) base.clickable(onClick = onClick)
-                    else base.contextMenuGestures(onClick = onClick, onContextMenu = onContextMenu)
-                },
-                contentAlignment = Alignment.Center,
-            ) {
-                content(shape)
+        // 窄欄（只有頭貼）時這層 Row 就包著圖示本身、被上面的 Box 置中，畫面跟以前一樣；
+        // 拖寬之後才在旁边放上空間名——「拖到最窄退化成只剩頭貼那一條」的另一半。
+        Row(
+            if (label != null) Modifier.fillMaxWidth() else Modifier,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (label != null) Spacer(Modifier.width(14.dp))
+            Box(contentAlignment = Alignment.Center) {
+                // clip 必須在 clickable 之前：否則點擊漣漪畫在未裁切的方形 Box 上，
+                // 圓形圖示按下去會冒出一個方塊（用戶回報「動畫是方的」）。
+                Box(
+                    Modifier.size(RailIconSize).clip(shape).let { base ->
+                        if (onContextMenu == null) base.clickable(onClick = onClick)
+                        else base.contextMenuGestures(onClick = onClick, onContextMenu = onContextMenu)
+                    },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    content(shape)
+                }
+                if (unread.count > 0 || unread.unread) {
+                    UnreadBadge(
+                        count = unread.count,
+                        muted = unread.muted,
+                        modifier = Modifier.align(Alignment.BottomEnd).offset(x = 6.dp, y = 4.dp),
+                    )
+                }
             }
-            if (unread.count > 0 || unread.unread) {
-                UnreadBadge(
-                    count = unread.count,
-                    muted = unread.muted,
-                    modifier = Modifier.align(Alignment.BottomEnd).offset(x = 6.dp, y = 4.dp),
+            if (label != null) {
+                Text(
+                    label,
+                    Modifier.weight(1f).padding(start = 10.dp, end = 10.dp)
+                        // 名字那區也要點得動：拖寬之後人們是照著字點的，不是瞄那顆圓
+                        .clickable(onClick = onClick),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (selected) MaterialTheme.colorScheme.onSurface
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }

@@ -42,3 +42,10 @@ expect val platformDeviceDisplayName: String
  * 枚舉 mixer；Android 由系統路由，顯示這組只會誤導。
  */
 expect val audioDeviceSettingsSupported: Boolean
+
+/**
+ * 欄位邊界能不能用滑鼠拖寬（Space 欄、聊天室欄）。手機沒有滑鼠，拖曳條在
+ * 那邊是「拖不動又占位置」的裝飾，所以 Android 關掉（用戶 2026-10-09 的
+ * 規格本來就寫「桌面限定」）。
+ */
+expect val paneResizeSupported: Boolean
