@@ -617,30 +617,54 @@ private fun activateWindowAsync(target: java.awt.Window) {
  */
 private fun restartApplication(onExit: () -> Unit) {
     // 這支函式**一定要留證據**：上一版「重新啟動」按下去只關掉、沒重新開起來，
-    // 而當時的程式在「找不到啟動器」那條分支上是靜默退出的（用戶 2026-10-09：
-    // 「你這個重啓根本沒起作用啊，直接退出了」）。現在每一步都寫 /tmp/nashira-restart.log。
+    // 而且事後完全看不出來卡在哪一環（用戶 2026-10-09：「你這個重啓根本沒起作用
+    // 啊，直接退出了」）。現在每一步、连新行程自己的標準輸出都寫进
+    // /tmp/nashira-restart.log——找不到病因就永遠修不好。
+    val logPath = "/tmp/nashira-restart.log"
     fun note(line: String) = runCatching {
-        java.io.File("/tmp/nashira-restart.log")
-            .appendText("${'$'}{System.currentTimeMillis()} $line\n")
+        java.io.File(logPath).appendText("${System.currentTimeMillis()} $line\n")
     }
     val fromJpackage = System.getProperty("jpackage.app-path")
     val fromRuntimeHome = runCatching {
         java.io.File(System.getProperty("java.home")).parentFile?.parentFile
             ?.let { java.io.File(it, "bin/nashira").absolutePath }
     }.getOrNull()
-    val launcher = listOfNotNull(fromJpackage, fromRuntimeHome)
+    // PATH 裡那顆便利連結（nashira-git 裝的是 /usr/bin/nashira → /opt/nashira/bin/nashira）
+    // 當最後一道：前三條任何一條被 jpackage 佈局變動或包管理器改路徑打掉，還有它。
+    val fromPath = runCatching {
+        System.getenv("PATH")
+            .split(java.io.File.pathSeparator)
+            .map { java.io.File(it, "nashira") }
+            .firstOrNull { it.canExecute() }
+            ?.absolutePath
+    }.getOrNull()
+    val launcher = listOfNotNull(fromJpackage, fromRuntimeHome, fromPath)
         .firstOrNull { java.io.File(it).canExecute() }
-    note("jpackage.app-path=$fromJpackage java.home=${System.getProperty("java.home")} 選中=$launcher")
+    note(
+        "重啟請求：jpackage.app-path=$fromJpackage java.home=${System.getProperty("java.home")} " +
+            "PATH 命中=$fromPath 選中=$launcher",
+    )
     if (launcher == null) {
-        note("找不到可執行的啟動器 → 只結束，不重啟")
+        note("三條來源全落空 → 只結束，不重啟")
         onExit()
         return
     }
     val pid = ProcessHandle.current().pid()
-    // 等舊行程消失有上限（60 × 0.25 秒＝15 秒）：`kill -0` 對**殭屍行程**一樣回成功，
-    // 万一父行程沒在收（從終端機直接拉起來的那種），無上限的迴圈會永遠等下去，
-    // 表現就是「按了重新啟動，結果只是關掉」。
-    val script = "n=0; while kill -0 $pid 2>/dev/null && [ $n -lt 60 ]; do sleep 0.25; n=$((n+1)); done; sleep 0.6; exec '$launcher'"
+    // 路徑進單引號殼之前先轉義，路徑裡有 `'` 也不會把命令拆開
+    val quotedLauncher = launcher.replace("'", "'\\''")
+    // 等舊行程消失要有上限（15 秒）：`kill -0` 對**殭屍行程**一樣回成功，
+    // 万一沒人收屍（從終端機直接拉起來的那種），無上限的迴圈會永遠等下去，
+    // 表現就是「按了重新啟動，結果只是關掉」。用 timeout 包，別用 shell 計數器——
+    // 上一版寫 `$n` 被 Kotlin 當成自己的插值，編譯直接掛（我還把壞提交推上去了）。
+    // 殼裡每一跳都留字：我們这边只能證明「派出去了」，派出去之後死在哪裡只有殼自己知道。
+    val script = buildString {
+        appendLine("echo '殼已起來，等舊行程 $pid 消失' >> $logPath")
+        appendLine("timeout 15 sh -c 'while kill -0 $pid; do sleep 0.25; done'")
+        appendLine("sleep 0.6")
+        appendLine("echo '要 exec 了：$quotedLauncher' >> $logPath")
+        appendLine("exec '$quotedLauncher' >> $logPath 2>&1")
+        appendLine("echo 'exec 沒成功（上面就是原因）' >> $logPath")
+    }
     // setsid 讓殼脫離我們的會話與行程組（JVM 結束時不會被順帶收走）；
     // 沒有 setsid 的系統退回普通 sh，兩條都試，哪條起來記哪條
     val candidates = listOf(
@@ -649,10 +673,15 @@ private fun restartApplication(onExit: () -> Unit) {
     )
     var spawned: String? = null
     candidates.forEach { cmd ->
-        runCatching { ProcessBuilder(cmd).redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectErrorStream(true).start() }
+        runCatching {
+            ProcessBuilder(cmd)
+                .redirectOutput(ProcessBuilder.Redirect.appendTo(java.io.File(logPath)))
+                .redirectErrorStream(true)
+                .start()
+        }
             .onSuccess { spawned = cmd.first(); return@forEach }
             .onFailure { note("派 ${cmd.first()} 失敗：${it.message}") }
     }
-    note("已派出（=$spawned），接著結束本行程 pid=$pid")
+    note("已派出（spawned=$spawned，pid=$pid），接著結束本行程")
     onExit()
 }
