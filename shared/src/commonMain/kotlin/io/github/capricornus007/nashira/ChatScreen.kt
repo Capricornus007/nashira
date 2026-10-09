@@ -464,7 +464,8 @@ fun ChatScreen(
                                 PaneResizeHandle(
                                     modifier = Modifier.align(Alignment.CenterEnd),
                                     currentWidthDp = {
-                                        uiState.spaceRailWidthDp.takeIf { width -> width > 0 } ?: SpaceRailDefaultWidthDp
+                                        (uiState.spaceRailWidthDp.takeIf { width -> width > 0 } ?: SpaceRailDefaultWidthDp)
+                                            .coerceIn(SpaceRailMinWidthDp, railCapDp)
                                     },
                                     minDp = SpaceRailMinWidthDp,
                                     maxDp = railCapDp,
