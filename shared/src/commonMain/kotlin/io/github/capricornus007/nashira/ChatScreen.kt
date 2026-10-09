@@ -2674,6 +2674,9 @@ private fun TimelinePane(
                         ComposerMenuHost(state = draft, strings = strings) {
                         BasicTextField(
                             state = draft,
+                            // 輸入框裡直接看到格式而不是 `<u>`／`**` 標籤（#106）。
+                            // 標記是真的從顯示層刪掉，位置由框架換算 ⇒ 選取框不會跟字錯開。
+                            outputTransformation = ComposerMarkupPreview,
                             modifier = Modifier.fillMaxWidth()
                                 .focusRequester(composerFocus)
                                 .heightIn(min = 44.dp)
