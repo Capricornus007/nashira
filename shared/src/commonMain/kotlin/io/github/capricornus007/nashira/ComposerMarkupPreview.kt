@@ -62,13 +62,81 @@ private class MarkupRun(
 
 private class MarkupMarker(val open: String, val close: String, val style: SpanStyle)
 
-/** `**` 必須排在 `*` 前面：先配長的，否則 `**粗**` 會被拆成兩個空斜體。 */
+/**
+ * `***` 一定要排在 `**` 前面，`**` 排在 `*` 前面：一律**先配最長的**。
+ *
+ * 少了 `***` 這一條，「先底線、再粗體、再斜體」叠出來的 `***字***` 會被拆成
+ * 「粗體包住 `*字`」＋「斜體包住 `字`」，刪標記時兩層端點互相錯開，
+ * 結果粗體不見、還多吐一個星號在尾巴上（用戶 2026-10-09：「粗體丟了，
+ * 再粗體的話就露原形 * 了」）。
+ */
 private val ComposerMarkers = listOf(
+    MarkupMarker("***", "***", SpanStyle(fontWeight = FontWeight.Bold, fontStyle = FontStyle.Italic)),
     MarkupMarker("**", "**", SpanStyle(fontWeight = FontWeight.Bold)),
     MarkupMarker("<u>", "</u>", SpanStyle(textDecoration = TextDecoration.Underline)),
     MarkupMarker("~~", "~~", SpanStyle(textDecoration = TextDecoration.LineThrough)),
     MarkupMarker("*", "*", SpanStyle(fontStyle = FontStyle.Italic)),
 )
+
+/**
+ * 找出「整段草稿只剩空殼標記」時那些標記的區間；不是整段空殼就回空清單（不動它）。
+ *
+ * 這是為了清**殘留**：選一段字按底線→`<u>字</u>`，把字刪光，草稿裡就只剩
+ * `<u></u>`；`***abc***` 刪掉 `abc` 就剩 `******`。Telegram 的格式是掛在文字
+ * 區間上的，區間縮成零點、格式自己就沒了；我們的標記是實心字元，不會跟著消失，
+ * 於是輸入框裡留一排星號（用戶 2026-10-09：「刪了測試字符之後還有殘留」）。
+ *
+ * 為什麼只管「整段都是空殼」這一種：更激進的規則（看見 `<u></u>` 就拿掉，不管
+ * 前後有沒有別的字）會把**手打** markdown 打死——手打 `**粗**` 是先敲四個星號
+ * 再回去補字的樣子，中途就會被自己刪掉。整段空殼才是「把測試字刪光」那個動作
+ * 的獨有形狀，誤傷面最小。
+ */
+internal fun markupResidueRanges(text: String): List<IntRange> {
+    if (text.isEmpty()) return emptyList()
+    val dead = BooleanArray(text.length)   // true ＝這個字是空殼標記的一部分
+    var changed = true
+    while (changed) {
+        changed = false
+        for (marker in ComposerMarkers) {
+            // 單字元標記（`*`、`~`）一律不参与：手打 `**粗**` 的中間態就是兩顆 `*`，
+            // 把它當成「空的斜體對」刪掉，等於不讓人用鍵盤打粗體。要收的殘留
+            // 至少是 `****`／`<u></u>` 這種兩格以上的殼，單字元那層留給使用者自己處理。
+            if (marker.open.length < 2 && !marker.open.startsWith("<")) continue
+            var i = 0
+            while (i + marker.open.length + marker.close.length <= text.length) {
+                if (text.startsWith(marker.open, i)) {
+                    // 內層可以不是零寬——只要裡面全是要拿掉的標記，外層也算空殼
+                    //（`<u>****</u>` 就是靠這條連 `<u>` 一起收掉）
+                    var j = i + marker.open.length
+                    while (j < text.length && dead[j]) j++
+                    if (text.startsWith(marker.close, j)) {
+                        val end = j + marker.close.length
+                        var grew = false
+                        for (k in i until end) if (!dead[k]) { dead[k] = true; grew = true }
+                        if (grew) {
+                            changed = true
+                            i = end
+                            continue
+                        }
+                    }
+                }
+                i++
+            }
+        }
+    }
+    // 還有活著的字 ＝ 他還在寫別的東西，別亂動
+    if (dead.any { !it }) return emptyList()
+    return mergeRanges(
+        ArrayList<IntRange>().apply {
+            var start = -1
+            for (k in dead.indices) {
+                if (dead[k] && start < 0) start = k
+                if (!dead[k] && start >= 0) { add(IntRange(start, k - 1)); start = -1 }
+            }
+            if (start >= 0) add(IntRange(start, dead.size - 1))
+        },
+    )
+}
 
 /**
  * 找出所有成對標記。規則與 `MarkdownToHtml.isWrappable()` 一致：

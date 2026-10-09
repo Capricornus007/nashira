@@ -70,8 +70,9 @@ fun TextContextMenuBuilderScope.appendComposerFormatItems(
 /** 套用到草稿上。無選取時游標停在標記中間，接著打字就自带格式（Element 同款行為）。 */
 fun applyComposerFormat(state: TextFieldState, format: ComposerFormat) {
     when (format) {
-        ComposerFormat.Bold -> state.wrapWith("**", "**")
-        ComposerFormat.Italics -> state.wrapWith("*", "*")
+        // 粗體與斜體共用同一個 `*`，不能各套各的 wrapWith（見 toggleEmphasis）
+        ComposerFormat.Bold -> state.toggleEmphasis(bold = true)
+        ComposerFormat.Italics -> state.toggleEmphasis(bold = false)
         ComposerFormat.Strikethrough -> state.wrapWith("~~", "~~")
         // 底線沒有 Markdown 寫法，插的是原生 `<u>`／`</u>`（與 Element WYSIWYG 同一產出）；
         // 送出時 `markdownToHtml` 原樣放行，`body` 那側會把標籤去掉（見 stripMarkupForBody）。
@@ -79,6 +80,52 @@ fun applyComposerFormat(state: TextFieldState, format: ComposerFormat) {
         ComposerFormat.CodeBlock -> state.wrapWith("```\n", "\n```")
         ComposerFormat.Quote -> state.toggleQuote()
         ComposerFormat.Link -> state.wrapLink()
+    }
+}
+
+/**
+ * 粗體／斜體的開關。
+ *
+ * 為什麼不能沿用 `wrapWith`：兩個格式共用 `*` 這個字元，`wrapWith` 只看選取外面
+ * 一格，於是「底線→粗體→斜體」的第三步會把 `**` 的右半顆當成自己的斜體標記，
+ * 判定「已經是斜體了」而**把粗體拆掉**（用戶 2026-10-09：「在我先底線再粗體
+ * 再斜體的時候粗體丟了，再粗體的話就露原形 * 了」）。
+ *
+ * 正解是把兩側的 `*` 連續長度當成「目前有哪些格式」來讀，開關請求的那一項，
+ * 再照新的組合寫回：1＝斜體、2＝粗體、3＝粗體＋斜體、0＝都沒有。
+ * 這樣 `**字**` 按斜體得到 `***字***`（粗體留著），再按一次斜體退回 `**字**`，
+ * 而 `***字***` 按粗體會得到 `*字*`——跟 Telegram 的行為一致。
+ */
+private fun TextFieldState.toggleEmphasis(bold: Boolean) {
+    val start = selection.min
+    val end = selection.max
+    val full = text.toString()
+    var runStart = start
+    while (runStart > 0 && full[runStart - 1] == '*') runStart--
+    var runEnd = end
+    while (runEnd < full.length && full[runEnd] == '*') runEnd++
+    val run = start - runStart
+    val marker = if (bold) "**" else "*"
+    // 兩側不對稱、或多到 4 顆以上（那是他自己打的星號，不是我們疊出來的格式）：
+    // 老實包一層，不拆任何東西
+    if (run != runEnd - end || run > 3) {
+        wrapWith(marker, marker)
+        return
+    }
+    var hasBold = run == 2 || run == 3
+    var hasItalic = run == 1 || run == 3
+    if (bold) hasBold = !hasBold else hasItalic = !hasItalic
+    val stars = when {
+        hasBold && hasItalic -> 3
+        hasBold -> 2
+        hasItalic -> 1
+        else -> 0
+    }
+    val inner = full.substring(start, end)
+    edit {
+        replace(runStart, runEnd, "*".repeat(stars) + inner + "*".repeat(stars))
+        val from = runStart + stars
+        selection = TextRange(from, from + inner.length)
     }
 }
 

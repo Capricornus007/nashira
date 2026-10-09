@@ -248,7 +248,7 @@ import androidx.compose.ui.geometry.Size
  */
 private const val SpaceRailDefaultWidthDp = 64
 private const val SpaceRailMinWidthDp = 52
-// 220 是釘太低：用戶 2026-10-09 拖到寬了看名字，「原生安卓Linux掌机…」還是被切成省略號。
+// 220 是釘太低：用戶 2026-10-09 拖到寬了看名字，「原生安卓Linux掌機…」還是被切成省略號。
 // 空間名可以很長，絕對上限放到 400，窗口比例那側另說。
 private const val SpaceRailMaxWidthDp = 400
 private const val SpaceRailNamesFromDp = 120
@@ -434,7 +434,7 @@ fun ChatScreen(
             } else {
                 Row(Modifier.fillMaxSize()) {
                     // 清單欄寬度跟著窗口縮：TG 半屏時清單變窄、時間線仍然能讀
-                    // （用戶 2026-09-30 那張半屏截圖：我們的时间線被擠到一行四個字）
+                    // （用戶 2026-09-30 那張半屏截圖：我們的時间線被擠到一行四個字）
                     // Space 欄與列表欄**各存一欄**（用戶 2026-10-09 點名的 #16）：
                     // 兩欄共用一個值的話，一邊拖到上限會把另一邊永遠頂死——
                     // 貼圖面板的懸浮寬／停靠寬踩過兩次（#38/#40），這裡不再重蹈。
@@ -538,7 +538,10 @@ fun ChatScreen(
                             // 列表收起來時整條 sidebar 只剩兩條直欄：那顆浮動帳號膠囊
                             // 會蓋掉頭貼列，所以縮成只剩頭貼（Telegram 收欄時也是這樣）
                             compact = listCollapsed,
-                            modifier = Modifier.align(Alignment.BottomCenter),
+                            // 收欄時置中會剛好壓在兩條直欄的縫上，Telegram 是貼在
+                            // **左下角**（用戶 2026-10-09 #69/#70）。展開態的膠囊本來就
+                            // fillMaxWidth，置中與靠左沒有差別。
+                            modifier = Modifier.align(Alignment.BottomStart),
                         )
                     }
                     Box(Modifier.weight(1f).fillMaxHeight()) {
@@ -617,7 +620,7 @@ fun ChatScreen(
         }
         // 設定頁蓋在主畫面**上面**，不是跟主畫面互換：主畫面全程保持已組合，
         // 進出兩次動畫才不會被「重新組合三欄＋60 則訊息」吃掉（用戶 2026-10-07
-        // 連續兩輪點名「從設定返回的動畫消失了」，位移量改過兩次都沒用就是这个原因）。
+        // 連續兩輪點名「從設定返回的動畫消失了」，位移量改過兩次都沒用就是這个原因）。
         AnimatedVisibility(
             visible = settingsOpen,
             modifier = Modifier.fillMaxSize(),
@@ -1003,12 +1006,12 @@ private val RailSelectedCorner = 14.dp
 
 /**
  * 欄位邊界的拖拽條：掛在某一欄的右緣（`modifier` 由呼叫端在 Box 作用域裡用
- * `Modifier.align(...)` 組好傳進來，`align` 是 BoxScope 的成员，這層拿不到）。
+ * `Modifier.align(...)` 組好傳進來，`align` 是 BoxScope 的成員，這層拿不到）。
  *
  * 範本就是貼圖面板停靠態那條邊（同一套 hoverable＋2dp 高亮＋左右雙箭頭游標），
  * 差別只在此處往右拖是**加寬**這一欄，而停靠面板往右拖是加寬它自己那側的空白。
  *
- * 當前寬度一律走 `currentWidthDp()` 現读，不接 Int 參數：`pointerInput(Unit)` 的
+ * 當前寬度一律走 `currentWidthDp()` 現讀，不接 Int 參數：`pointerInput(Unit)` 的
  * lambda 只在組合時建一次，抓到的是當時那個 Int 快照，拖第二下就會從舊值重算、
  * 整條欄位跳回去。
  */
@@ -1089,7 +1092,7 @@ private fun RailSlot(
         }
         val shape = RoundedCornerShape(corner)
         // 窄欄（只有頭貼）時這層 Row 就包著圖示本身、被上面的 Box 置中，畫面跟以前一樣；
-        // 拖寬之後才在旁边放上空間名——「拖到最窄退化成只剩頭貼那一條」的另一半。
+        // 拖寬之後才在旁邊放上空間名——「拖到最窄退化成只剩頭貼那一條」的另一半。
         Row(
             if (label != null) Modifier.fillMaxWidth() else Modifier,
             verticalAlignment = Alignment.CenterVertically,
@@ -2086,7 +2089,7 @@ private fun TimelinePane(
     val ignoredUsers by remember(roomRepository) { roomRepository.ignoredUsers() }
         .collectAsState(initial = emptySet())
     // 過濾後的清單穩定下來才不會每次重組都重掃一遍可視窗（滑鼠 hover、insets
-    // 變化都會觸發重組）。page 每次事件變動都是 copy 出来的新物件（見
+    // 變化都會觸發重組）。page 每次事件變動都是 copy 出來的新物件（見
     // RoomTimeline 的 pageFlow 註解），拿它當 remember 鑰匙不會卡在舊列表。
     val messages = remember(page, ignoredUsers) { page?.messages?.filter { it.sender !in ignoredUsers } }
     // 回覆引用指向的那則**不在本機視窗**時（橋接過來的舊訊息），原本只能畫「原始訊息」
@@ -2142,6 +2145,24 @@ private fun TimelinePane(
     // 使用者一改動草稿就把上一次的錯誤訊息收掉
     LaunchedEffect(draft) {
         snapshotFlow { draft.text.toString() }.collect { sendError = null }
+    }
+    // 「刪光字之後標記還在」的清道夫：草稿整段只剩空殼標記（`******`、`<u></u>`）
+    // 就把那幾對拿掉。Telegram 的格式掛在區間上、區間空了格式就沒了，我們的是實心
+    // 字元不會自己消失（用戶 2026-10-09：「刪了測試字符之後還他媽有殘留」）。
+    // 一定要加「上一版還有真內容」這個條件：空選取按粗體插的是 `****`（游標停在
+    // 正中間，接著打字就自帶粗體），那是**正要開始打**、不是殘留，當場刪掉等於是
+    // 把這條路堵死。
+    LaunchedEffect(draft) {
+        var hadContent = false
+        snapshotFlow { draft.text.toString() }.distinctUntilChanged().collect { text ->
+            val residue = markupResidueRanges(text)
+            if (residue.isNotEmpty() && hadContent) {
+                draft.edit {
+                    for (range in residue.reversed()) replace(range.first, range.last + 1, "")
+                }
+            }
+            hadContent = text.isNotEmpty() && residue.isEmpty()
+        }
     }
     // 輸入通知（typing）：草稿非空時發 true（伺服器 20s 逾時，每 8s 續約一次），
     // 清空／送出／離開房間時發 false。離開房間的取消路徑靠 try/finally。
@@ -2218,7 +2239,7 @@ private fun TimelinePane(
     // 「使用者本來就貼著底部」才跟隨——深讀歷史時被拽走是反 UX（Telegram
     // 也只在貼底時跟隨）；回底部交給「跳到最新」按鈕。
     // 「跳到最新」鈕的條件跟上面那個「新訊息要不要跟著捲」是兩回事，門檻要分開：
-    // 跟著捲可以寬（差幾條还算貼底），鈕必須**偏離底部一點點就出現**——
+    // 跟著捲可以寬（差幾條還算貼底），鈕必須**偏離底部一點點就出現**——
     // 用戶 2026-10-07 #120 對照 64Gram desktop：往上翻卻看不到回頭鈕。
     // reverseLayout 下 index 0 就是最新那條，所以 index>0 或在那條內部已經捲過頭，都算離開底部。
     val awayFromLive by remember {
@@ -3139,7 +3160,7 @@ private fun TimelinePane(
                         // 退回視窗原點，於是跑到畫面左下角。BTF2 走新的文字輸入會話，
                         // 會回報 composition/cursor 位置。
                         // ComposerMenuHost：桌面端把這個欄位的右鍵選單整個接手（Telegram 樣式：
-                        // 左標籤、右快捷鍵、分隔線、「文字格式」子選單）。换掉的不是「画法」
+                        // 左標籤、右快捷鍵、分隔線、「文字格式」子選單）。換掉的不是「畫法」
                         // 而是「誰來開選單」，所以內建那層不會再疊一層在上面（2026-09-25 點名過）。
                         ComposerMenuHost(state = draft, strings = strings) {
                         BasicTextField(
@@ -3152,7 +3173,7 @@ private fun TimelinePane(
                                 .heightIn(min = 44.dp)
                                 .onFocusChanged { composerFocused = it.isFocused }
                                 // 手機端：把格式化六項掛進系統的文字選取工具列（ActionMode）。
-                                // 桌面端这条是空的，格式化項在 ComposerMenuHost 那份選單裡。
+                                // 桌面端這條是空的，格式化項在 ComposerMenuHost 那份選單裡。
                                 .appendComposerFormatMenu(
                                     strings = strings,
                                     // 草稿空的時候整組不出現：插標記只會留一對空符號在框裡
@@ -3313,7 +3334,7 @@ private fun TimelinePane(
                                         tint = if (micBlockedByMute) MaterialTheme.colorScheme.error
                                             else MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
-                                    // 靜音中就把這顆麥克風也画上斜線：不用先按下去才知道不能錄
+                                    // 靜音中就把這顆麥克風也畫上斜線：不用先按下去才知道不能錄
                                     if (micBlockedByMute) MuteSlash(24.dp)
                                 }
                             }
@@ -4094,7 +4115,7 @@ private fun TimelinePane(
         )
     }
 
-    // 全螢幕圖片檢視器：雙指縮放／雙擊縮放／下載；相簿还能整組連翻
+    // 全螢幕圖片檢視器：雙指縮放／雙擊縮放／下載；相簿還能整組連翻
     viewerTarget?.let { viewer ->
         ImageViewer(
             client = roomRepository.client,
@@ -4119,7 +4140,7 @@ private fun TimelinePane(
                     }
                 },
                 // 「轉傳」要的是那則訊息的內容。已經在畫面上的直接用它；
-                // 舊的（只在本機索引裡）用检视器那格的內容合成一份——轉寄只用 body（實查
+                // 舊的（只在本機索引裡）用檢視器那格的內容合成一份——轉寄只用 body（實查
                 // RoomRepository.forwardMessage），發送者欄位這裡沒有意義可言
                 // 「檢視所有照片」：關掉全螢幕改開格子清單（清單與連翻同一份，位置對得上）
                 viewAll = {
@@ -4810,19 +4831,25 @@ private fun htmlToAnnotatedString(
             wroteAny = true
             val url = linkUrl
             if (url != null) {
-                // 連結段：可點擊 + 連結色底線（點擊走系統瀏覽器，與 URL 預覽卡一致）
+                // 連結段：可點擊 + 連結色底線（點擊走系統瀏覽器，與 URL 預覽卡一致）。
+                // 樣式**兩邊都寫**：一份交給 TextLinkStyles（框架懸停／按壓時會換成
+                // 它自己的色），一份用 withStyle 真的蓋在文字上。只靠前者的話，
+                // 框架沒套上就是「白字、點不動」——橋接進來的作者名稱與網址全部
+                // 長這樣（用戶 2026-10-09 對照電報 #73 連問「爲什麼作者名稱跟鏈接
+                // 本身都不鏈接了」）。後者保證「看起來就是連結」，與前者同色不衝突。
+                val linkStyle = currentStyle.copy(
+                    color = linkColor,
+                    textDecoration = TextDecoration.combine(
+                        listOfNotNull(currentStyle.textDecoration, TextDecoration.Underline),
+                    ),
+                )
                 withLink(
                     LinkAnnotation.Url(
                         url = url,
-                        styles = TextLinkStyles(
-                            style = currentStyle.copy(
-                                color = linkColor,
-                                textDecoration = TextDecoration.combine(listOf(TextDecoration.Underline)),
-                            ),
-                        ),
+                        styles = TextLinkStyles(style = linkStyle),
                         linkInteractionListener = { openLink(url) },
                     ),
-                ) { emitPangu(decoded) }
+                ) { withStyle(linkStyle) { emitPangu(decoded) } }
             } else {
                 withStyle(currentStyle) { emitPangu(decoded) }
             }
@@ -5109,7 +5136,7 @@ private fun MessageBodyContent(
  * 程式碼塊：圓角底色區塊＋等寬字＋橫向捲動＋右上角複製鈕。
  *
  * 這是 Element／FluffyChat 的長相。之前用 SpanStyle 底色假裝區塊（一行行灰底
- * 糊在氣泡文字裡，用戶截圖點名），但 AnnotatedString 给不了容器、內距與捲動，
+ * 糊在氣泡文字裡，用戶截圖點名），但 AnnotatedString 給不了容器、內距與捲動，
  * 所以 [htmlToRichText] 先把 `<pre>` 切成獨立段交給這裡。
  * 複製鈕蓋在區塊右上角、文字在它下面橫向捲——跟 Element 一樣是覆蓋式，
  * 不另外佔一列高度（單行程式碼也能有個不突兀的位置）。
@@ -5182,7 +5209,7 @@ private fun EmoticonInline(
         val bytes = fetchMediaBytes(client, MediaSource.Plain(key)) ?: return@LaunchedEffect
         val decoded = withContext(Dispatchers.Default) {
             // 便宜的先試：Skia 解得動的（PNG／靜態 WebP／GIF／動態 WebP）不要動不動起一條 ffmpeg。
-            // Telegram 過來的自訂表情有兩種长相：webp 動畫與 **video/webm**（實測這個伺服器的
+            // Telegram 過來的自訂表情有兩種長相：webp 動畫與 **video/webm**（實測這個伺服器的
             // 25 則 custom emoji 全是 512×512 的 webm），後者 Skia 一格也解不出來（用戶 2026-10-08
             // #77「動態貼紙依舊沒實現」同源的那條線）。
             val animated = decodeAnimatedFrames(bytes, maxDimension = EmoticonSizePx)
@@ -5237,7 +5264,7 @@ private fun MessageBody.previewText(strings: io.github.capricornus007.nashira.i1
     when (this) {
         is MessageBody.Text -> text.oneLinePreview()
         is MessageBody.Image -> if (isSticker) strings.stickerMessage else strings.imageMessage
-        // 相簿的預覽优先給整組那則說明文字；沒有說明就是「圖片」（Telegram 也是這樣）
+        // 相簿的預覽優先給整組那則說明文字；沒有說明就是「圖片」（Telegram 也是這樣）
         is MessageBody.Album -> caption.takeIf { it.isNotBlank() }?.oneLinePreview() ?: strings.imageMessage
         is MessageBody.Voice -> strings.voiceMessage
         is MessageBody.Attachment -> name

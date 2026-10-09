@@ -102,7 +102,7 @@ private fun containsMarkdownMarkup(text: String): Boolean =
 /**
  * 給 `body`（純文字回退欄）用：把**我們自己插的**底線標籤去掉。
  *
- * 為什麼只清這一对、`**粗體**` 那些照留：Markdown 符號在純文字裡本來就读得懂，
+ * 為什麼只清這一對、`**粗體**` 那些照留：Markdown 符號在純文字裡本來就讀得懂，
  * 而 `<u>` 留著的話，不認 HTML 的客戶端就會看到一堆標籤字（用戶 2026-10-08
  * 明確要求「不能有這種風險」）。Element 的 WYSIWYG 模式同一套做法
  * （`createMessageContent.ts` 走 `richToPlain`，body 是去標籤後的純文字）。
@@ -140,6 +140,22 @@ private fun inlineMarkdownToHtml(raw: String): String {
                 if (content == null || content.isEmpty()) { out.append('`'); i++ } else {
                     out.append("<code>").append(htmlEscape(content)).append("</code>")
                     i = end + 1
+                }
+            }
+            // 三顆星＝粗體＋斜體：輸入框「先底線、再粗體、再斜體」疊出來的就是這個形狀。
+            // 不先吃掉這一條，下面 `**` 會把 `***字***` 拆成「粗體包住 `*字`」＋一個剩餘
+            // 星號，發出去跟框裡看到的不一樣（用戶 2026-10-09：「粗體丟了…露原形 *」）。
+            // 預覽那側（ComposerMarkupPreview）用同一個順序，兩邊必須一起改。
+            c == '*' && raw.startsWith("***", i) -> {
+                val end = raw.indexOf("***", i + 3)
+                val content = if (end < 0) null else raw.substring(i + 3, end)
+                if (content == null || !content.isWrappable()) {
+                    out.append('*'); i++      // 只吐一顆，剩下的交給 `**`／`*` 那兩條照字面處理
+                } else {
+                    out.append("<strong><em>")
+                        .append(emphasized(content))
+                        .append("</em></strong>")
+                    i = end + 3
                 }
             }
             c == '*' && raw.startsWith("**", i) -> {
