@@ -12,7 +12,7 @@ internal actual fun systemImeHeightPx(): Int {
     if (Build.VERSION.SDK_INT < 30) return 0
     val insets = LocalView.current.rootWindowInsets ?: return 0
     // 會直接丟 IllegalArgumentException("Unable to query the maximum insets for IME")
-    // 的 ROM 確實存在（realme UI 實測：鍵盤沒彈出來過就查不到），所以整段包起來。
+    // 的 ROM 確實存在（crDroid 12.11 機型 RMX3366 實測：鍵盤沒彈出來過就查不到），所以整段包起來。
     return runCatching {
         val ime = insets.getInsetsIgnoringVisibility(WindowInsets.Type.ime()).bottom
         val nav = insets.getInsetsIgnoringVisibility(WindowInsets.Type.navigationBars()).bottom
