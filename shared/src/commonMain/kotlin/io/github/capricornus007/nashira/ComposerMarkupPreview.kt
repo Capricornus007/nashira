@@ -90,9 +90,38 @@ private val ComposerMarkers = listOf(
  * 前後有沒有別的字）會把**手打** markdown 打死——手打 `**粗**` 是先敲四個星號
  * 再回去補字的樣子，中途就會被自己刪掉。整段空殼才是「把測試字刪光」那個動作
  * 的獨有形狀，誤傷面最小。
+ *
+ * **例外：孤兒的 `</u>` 一律拿掉，不管前後有沒有字**（用戶 2026-10-12 截圖
+ * `1111</u></u>` 與 `</u></u>`：「刪了測試字符之後還他媽有殘留」）。右標籤少一半
+ * 不可能靠著打字變合法，留著就是垃圾；`<u>`（左標籤）與星號那類不能這樣處理——
+ * 前者可能是他剛打了開頭，後者 `2**3` 這種寫法本來就會出現在訊息裡。
  */
-internal fun markupResidueRanges(text: String): List<IntRange> {
+internal fun markupResidueRanges(text: String, withShells: Boolean = true): List<IntRange> {
     if (text.isEmpty()) return emptyList()
+    return mergeRanges(
+        (if (withShells) shellResidueRanges(text) else emptyList()) + orphanClosingTagRanges(text),
+    )
+}
+
+/** 孤兒的 `</u>`：前面沒有配對的 `<u>`，這種東西永遠不可能因為「接著打字」變合法。 */
+private fun orphanClosingTagRanges(text: String): List<IntRange> {
+    if (!text.contains(CloseUnderline)) return emptyList()
+    // 活著的配對（findMarkupRuns 認的那幾個 `</u>`）不算孤兒
+    val live = findMarkupRuns(text).map { it.closeStart to it.closeEnd }
+    val out = ArrayList<IntRange>()
+    var i = text.indexOf(CloseUnderline)
+    while (i >= 0) {
+        val end = i + CloseUnderline.length
+        if (live.none { (start, stop) -> start == i && stop == end }) out += IntRange(i, end - 1)
+        i = text.indexOf(CloseUnderline, end)
+    }
+    return out
+}
+
+private const val CloseUnderline = "</u>"
+
+/** 「整段只剩空殼標記」的那些殼；不是整段空殼就回空清單（見 [markupResidueRanges] 的說明）。 */
+private fun shellResidueRanges(text: String): List<IntRange> {
     val dead = BooleanArray(text.length)   // true ＝這個字是空殼標記的一部分
     var changed = true
     while (changed) {

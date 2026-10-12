@@ -162,6 +162,12 @@ sealed interface MessageBody {
         /** 影片的時長與檔大小（m.video 的 `info`）：決定時間線要不要**行內連播**用。 */
         val durationMs: Long? = null,
         val sizeBytes: Long? = null,
+        /**
+         * 說明的 HTML（`org.matrix.custom.html`）。橋站（t2bot、matrix-hookshot）把整段
+         * 帶連結的說明塞在 m.image 的 `formatted_body` 裡，只取 [caption] 就會把作者名稱
+         * 與網址降成白字純文字（用戶 2026-10-12 拿 Telegram 截圖點名）。
+         */
+        val captionHtml: String? = null,
     ) : MessageBody
 
     /**
@@ -1267,19 +1273,25 @@ internal fun de.connect2x.trixnity.core.model.events.EventContent.messageBodyOrN
             // P4-4：帶 formatted_body（HTML）——UI 層用它渲染粗體/斜體/連結/代碼塊
             MessageBody.Text(body, this.formattedBody?.takeIf { format == "org.matrix.custom.html" && it.isNotBlank() })
         is RoomMessageEventContent.FileBased.Image ->
-            imageBody(body, url, file, info as? ImageInfo, isSticker = false)
-        is RoomMessageEventContent.FileBased.Video -> videoBody(body, url, file, info as? VideoInfo)
+            imageBody(body, htmlCaption(this.format, this.formattedBody), url, file, info as? ImageInfo, isSticker = false)
+        is RoomMessageEventContent.FileBased.Video ->
+            videoBody(body, htmlCaption(this.format, this.formattedBody), url, file, info as? VideoInfo)
         is RoomMessageEventContent.FileBased.Audio -> voiceBody(url, file, info)
         is RoomMessageEventContent.FileBased -> MessageBody.Attachment(fileName ?: body)
-        is StickerEventContent -> imageBody(body, url, file, info, isSticker = true)
+        is StickerEventContent -> imageBody(body, null, url, file, info, isSticker = true)
         // Trixnity 5.8.1 沒有 m.sticker 的內容型別，別人送的貼圖以 UnknownEventContent 帶原始 JSON 進來
         is UnknownEventContent -> if (eventType == "m.sticker") stickerBody(raw) else null
         else -> null
     }
 
+/** 只有宣告為 Matrix HTML 的 formatted_body 才算數（橋站偶爾送別的 format 或空字串）。 */
+private fun htmlCaption(format: String?, formattedBody: String?): String? =
+    formattedBody?.takeIf { format == "org.matrix.custom.html" && it.isNotBlank() }
+
 /** 圖片訊息優先用縮圖，省掉整張原圖的流量；加密房的縮圖同樣是 EncryptedFile。 */
 private fun imageBody(
     caption: String,
+    captionHtml: String?,
     url: String?,
     file: EncryptedFile?,
     info: ImageInfo?,
@@ -1295,7 +1307,7 @@ private fun imageBody(
     // MessageImage 靠這個欄位決定要不要走「抽影片第一幀」，
     // 對一張 JPEG 縮圖抽幀只會失敗（用戶 2026-10-07 #73「視頻依舊」）。
     val mime = if (poster != null) null else info?.mimeType
-    return MessageBody.Image(caption, source, info?.width, info?.height, isSticker, mime)
+    return MessageBody.Image(caption, source, info?.width, info?.height, isSticker, mime, captionHtml = captionHtml)
 }
 
 /**
@@ -1306,6 +1318,7 @@ private fun imageBody(
  */
 private fun videoBody(
     caption: String,
+    captionHtml: String?,
     url: String?,
     file: EncryptedFile?,
     info: VideoInfo?,
@@ -1327,6 +1340,7 @@ private fun videoBody(
         mimeType = if (poster != null) null else info?.mimeType,
         durationMs = info?.duration,
         sizeBytes = info?.size,
+        captionHtml = captionHtml,
     )
 }
 

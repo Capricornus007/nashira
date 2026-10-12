@@ -68,6 +68,7 @@ import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.Image
 import androidx.compose.ui.layout.ContentScale
@@ -160,6 +161,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -1502,30 +1504,60 @@ private fun RoomListAvatarRail(
     onSelect: (RoomSummary) -> Unit,
     onSearchClick: () -> Unit,
 ) {
-    Column(
-        Modifier.fillMaxHeight().background(MaterialTheme.colorScheme.surfaceContainerHigh),
-        horizontalAlignment = Alignment.CenterHorizontally,
+    // 懸停說明畫在 LazyColumn **外面**。畫在格子裡有兩個必死的後果：
+    // 一、寬度被 44dp 的格子夾死，房間名稱折成「#a / lin / ux」那種亂碼
+    //    （用戶 2026-10-12 截圖：「這個名稱預覽完全不應該這個樣子吧？」）；
+    // 二、可捲動容器會把自己範圍內的繪製裁掉，往右溢出那一段根本畫不出來。
+    // 座標用 positionInRoot 換算：欄在視窗裡的位置、項目在欄裡的垂直位置。
+    var tipText by remember { mutableStateOf<String?>(null) }
+    var tipCenterY by remember { mutableFloatStateOf(0f) }
+    var railTopY by remember { mutableFloatStateOf(0f) }
+    var railRightX by remember { mutableFloatStateOf(0f) }
+    Box(
+        Modifier
+            .fillMaxHeight()
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .onGloballyPositioned { coords ->
+                railTopY = coords.positionInRoot().y
+                railRightX = coords.size.width.toFloat()
+            },
     ) {
-        Box(Modifier.fillMaxWidth().height(52.dp), contentAlignment = Alignment.Center) {
-            IconButton(onClick = onSearchClick, modifier = Modifier.size(34.dp)) {
-                Icon(
-                    Icons.Filled.Search,
-                    contentDescription = strings.findOrStartConversation,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(22.dp),
-                )
+        Column(Modifier.fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(Modifier.fillMaxWidth().height(52.dp), contentAlignment = Alignment.Center) {
+                IconButton(onClick = onSearchClick, modifier = Modifier.size(34.dp)) {
+                    Icon(
+                        Icons.Filled.Search,
+                        contentDescription = strings.findOrStartConversation,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
             }
-        }
-        LazyColumn(
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            contentPadding = PaddingValues(top = 2.dp, bottom = 108.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            items(summaries, key = { it.roomId.full }) { room ->
-                val unread = unreadByRoom[room.roomId] ?: UnreadState()
-                HoverTooltip(text = room.name) {
-                    Box(Modifier.padding(horizontal = 8.dp), contentAlignment = Alignment.Center) {
+            LazyColumn(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                contentPadding = PaddingValues(top = 2.dp, bottom = 108.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                items(summaries, key = { it.roomId.full }) { room ->
+                    val unread = unreadByRoom[room.roomId] ?: UnreadState()
+                    val hoverSource = remember(room.roomId) { MutableInteractionSource() }
+                    val hovered by hoverSource.collectIsHoveredAsState()
+                    LaunchedEffect(hovered, room.roomId) {
+                        if (!hovered && tipText == room.name) tipText = null
+                    }
+                    Box(
+                        Modifier
+                            .hoverable(hoverSource)
+                            .onGloballyPositioned { coords ->
+                                if (hovered) {
+                                    tipText = room.name
+                                    tipCenterY = coords.positionInRoot().y + coords.size.height / 2f
+                                }
+                            }
+                            .padding(horizontal = 8.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
                         Box(
                             Modifier.size(44.dp)
                                 .clip(CircleShape)
@@ -1548,6 +1580,34 @@ private fun RoomListAvatarRail(
                     }
                 }
             }
+        }
+        tipText?.takeIf { it.isNotBlank() }?.let { name ->
+            Text(
+                text = name,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.inverseOnSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .zIndex(6f)
+                    .align(Alignment.TopStart)
+                    // 貼在頭貼**右邊**、與該列垂直置中（Telegram／Discord 收欄時都是這樣）。
+                    // 原本那顆提示是畫在格子下方，歪歪地蓋住下一列頭貼（用戶 2026-10-12：
+                    // 「你完全可以看得出來這他媽明顯靠右吧？」）。
+                    .offset {
+                        IntOffset(
+                            (railRightX + 6.dp.toPx()).roundToInt(),
+                            (tipCenterY - railTopY).roundToInt(),
+                        )
+                    }
+                    // 自己的高度往上收一半，正好對齊該列中線；寬度不跟 44dp 的格子計較
+                    .graphicsLayer { translationY = -size.height / 2f }
+                    .widthUnbounded()
+                    // 不跟 44dp 的格子計較，但也要有個上限：長到蓋住整個聊天區就本末倒置
+                    .widthIn(max = 280.dp)
+                    .background(MaterialTheme.colorScheme.inverseSurface, RoundedCornerShape(8.dp))
+                    .padding(horizontal = 9.dp, vertical = 5.dp),
+            )
         }
     }
 }
@@ -2156,9 +2216,12 @@ private fun TimelinePane(
         var hadContent = false
         snapshotFlow { draft.text.toString() }.distinctUntilChanged().collect { text ->
             val residue = markupResidueRanges(text)
-            if (residue.isNotEmpty() && hadContent) {
+            // 孤兒 `</u>` 不吃「上一版還有真內容」這個條件：它不可能是「正要開始打」
+            // 的中間態，留著永遠是垃圾（用戶 2026-10-12 截圖 `1111</u></u>`）。
+            val doomed = if (hadContent) residue else markupResidueRanges(text, withShells = false)
+            if (doomed.isNotEmpty()) {
                 draft.edit {
-                    for (range in residue.reversed()) replace(range.first, range.last + 1, "")
+                    for (range in doomed.reversed()) replace(range.first, range.last + 1, "")
                 }
             }
             hadContent = text.isNotEmpty() && residue.isEmpty()
@@ -4786,7 +4849,7 @@ private fun htmlToAnnotatedString(
         // 之後就忘了自己還在粗體裡（Matrix 橋接進來的訊息大量是巢狀標籤，
         // Element/Riot 發的 formatted_body 都這樣）。
         val styleStack = ArrayDeque<SpanStyle>()
-        val styleTags = setOf("b", "strong", "i", "em", "u", "del", "s", "code", "span", "h1", "h2", "h3", "h4", "h5", "h6")
+        val styleTags = setOf("b", "strong", "i", "em", "u", "del", "s", "code", "span", "font", "h1", "h2", "h3", "h4", "h5", "h6")
         // 區塊級標籤的狀態。Matrix 的 formatted_body（以及各橋接器）常出現這三種：
         // · <blockquote>——引用，用「│ 」前綴一條條標出來
         // · <ul>/<ol>/<li>——清單，巢疊時多縮两格，有序清單自己編號
@@ -4797,6 +4860,9 @@ private fun htmlToAnnotatedString(
         var mxReplyDepth = 0
         var wroteAny = false
         val mxColorRegex = """data-mx-color\s*=\s*["']#?([0-9a-fA-F]{3,8})["']""".toRegex()
+        // `<font color="#…">`。不寫前導邊界是有意的：`data-mx-color=` 的尾巴也长得一樣，
+        // 兩者要的都是同一個十六進位色，多寫.lookbehind 只是給自己找麻煩。
+        val fontColorRegex = """color\s*=\s*["']#?([0-9a-fA-F]{3,8})["']""".toRegex()
 
         // pangu 化必須在「逐段 append」時做，不能事後整串替換：
         // AnnotatedString 的 span（連結、粗體、自訂表情）記的是字元位置，
@@ -4928,6 +4994,16 @@ private fun htmlToAnnotatedString(
                 tagName == "span" -> {
                     styleStack.addLast(currentStyle)
                     mxColorRegex.find(attrs)?.groupValues?.get(1)?.let { hex ->
+                        parseHtmlColor(hex)?.let { currentStyle = currentStyle.copy(color = it) }
+                    }
+                }
+                // <font color="#…">：Telegram 橋（t2bot）的Hashtag、提及、引用顏色
+                // 全走這個老標籤，實據是 DB 裡 `<font color='#3771bb'>#クルスタ</font>`。
+                // 不認的話它落進「其他標籤一律略過」，顏色就整個不見（用戶 2026-10-12
+                // 拿 Telegram 截圖對照點名）。Element Web 的放行清單同樣含 font。
+                tagName == "font" -> {
+                    styleStack.addLast(currentStyle)
+                    fontColorRegex.find(attrs)?.groupValues?.get(1)?.let { hex ->
                         parseHtmlColor(hex)?.let { currentStyle = currentStyle.copy(color = it) }
                     }
                 }
@@ -5078,6 +5154,23 @@ private fun MessageBodyContent(
                 is MediaSource.Encrypted -> s.file.url
             }
             val hidden = mxc != null && mxc in ui.hiddenMedia
+            // 說明的 HTML 走與文字訊息**同一條**渲染路徑。少了這一段，橋站（t2bot／
+            // matrix-hookshot）那類「m.image 但附帶 formatted_body」的訊息會把作者名稱
+            // 與網址降成白字純文字——連結不變色也點不動（用戶 2026-10-12 拿 Telegram 截圖
+            // 點名：「作者名稱跟鏈接本身都不鏈接了」）。實據：那則訊息的 formatted_body 是
+            // `<a href='…'>モリソー＠skeb募集中</a>:<br/>…<a href='…'>https://…</a>`。
+            val captionHtml = body.captionHtml
+            val captionStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface)
+            val captionLinkColor = MaterialTheme.colorScheme.primary
+            val captionCodeBg = MaterialTheme.colorScheme.surfaceContainer
+            val captionText = remember(captionHtml, captionStyle, captionLinkColor, captionCodeBg) {
+                captionHtml?.let { html ->
+                    val segments = htmlToRichText(html, captionStyle, captionLinkColor, captionCodeBg).segments
+                    // 說明裡出現碼塊（極少見）就退回純文字那條路，不偷偷吃掉內容
+                    if (segments.isEmpty() || segments.any { it !is RichSegment.Text }) null
+                    else buildAnnotatedString { segments.forEach { append((it as RichSegment.Text).annotated) } }
+                }
+            }
             MessageImage(
                 client = client,
                 source = body.source,
@@ -5085,6 +5178,7 @@ private fun MessageBodyContent(
                 height = body.height,
                 isSticker = body.isSticker,
                 caption = body.caption,
+                captionText = captionText,
                 modifier = modifier,
                 mimeType = body.mimeType,
                 durationMs = body.durationMs,

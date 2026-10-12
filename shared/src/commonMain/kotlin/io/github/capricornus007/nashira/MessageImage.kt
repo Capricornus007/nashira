@@ -32,6 +32,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
@@ -72,6 +73,11 @@ fun MessageImage(
     height: Int?,
     isSticker: Boolean,
     caption: String,
+    /**
+     * 說明的**已渲染**版本（橋站 m.image 的 `formatted_body`：作者名稱與網址都是 `<a>`）。
+     * 給了就用它，沒給才退回 [caption] 純文字——純文字那條路會把連結畫成白字、點不動。
+     */
+    captionText: AnnotatedString? = null,
     modifier: Modifier = Modifier,
     mimeType: String? = null,
     /** 點圖開全螢幕檢視器；null（例如被隱藏的佔位）就不吃點擊。 */
@@ -241,7 +247,7 @@ fun MessageImage(
             // 「我覺得貼紙下面帶表情是多餘的，你看看隔壁電報」）。
             if (!insideAlbumCell && !isSticker && looksLikeRealCaption(caption)) {
                 Text(
-                    text = pangu(caption.trim()),
+                    text = captionText ?: AnnotatedString(pangu(caption.trim())),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.padding(top = 4.dp),
