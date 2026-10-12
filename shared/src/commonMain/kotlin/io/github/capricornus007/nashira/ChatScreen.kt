@@ -8,6 +8,7 @@ import androidx.compose.foundation.gestures.AnchoredDraggableState
 import androidx.compose.foundation.gestures.DraggableAnchors
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.anchoredDraggable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.animateTo
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -64,11 +65,19 @@ import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
+import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.Image
 import androidx.compose.ui.layout.ContentScale
@@ -161,7 +170,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -1507,20 +1515,13 @@ private fun RoomListAvatarRail(
     // 懸停說明畫在 LazyColumn **外面**。畫在格子裡有兩個必死的後果：
     // 一、寬度被 44dp 的格子夾死，房間名稱折成「#a / lin / ux」那種亂碼
     //    （用戶 2026-10-12 截圖：「這個名稱預覽完全不應該這個樣子吧？」）；
-    // 二、可捲動容器會把自己範圍內的繪製裁掉，往右溢出那一段根本畫不出來。
-    // 座標用 positionInRoot 換算：欄在視窗裡的位置、項目在欄裡的垂直位置。
-    var tipText by remember { mutableStateOf<String?>(null) }
-    var tipCenterY by remember { mutableFloatStateOf(0f) }
-    var railTopY by remember { mutableFloatStateOf(0f) }
-    var railRightX by remember { mutableFloatStateOf(0f) }
+    // 二、就算搬到欄的層級，還是會被側欄右緣截掉（同一輪 #10 的「？？？？」）。
+    // 所以用 Popup（獨立窗口）＋自己量的視窗座標。
+    var tipAnchor by remember { mutableStateOf<Pair<String, Rect>?>(null) }
+    // remember 的 lambda 不是 @Composable，`.current` 要在外面讀好再帶進去
+    val railDensity = LocalDensity.current
     Box(
-        Modifier
-            .fillMaxHeight()
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .onGloballyPositioned { coords ->
-                railTopY = coords.positionInRoot().y
-                railRightX = coords.size.width.toFloat()
-            },
+        Modifier.fillMaxHeight().background(MaterialTheme.colorScheme.surfaceContainerHigh),
     ) {
         Column(Modifier.fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
             Box(Modifier.fillMaxWidth().height(52.dp), contentAlignment = Alignment.Center) {
@@ -1544,16 +1545,13 @@ private fun RoomListAvatarRail(
                     val hoverSource = remember(room.roomId) { MutableInteractionSource() }
                     val hovered by hoverSource.collectIsHoveredAsState()
                     LaunchedEffect(hovered, room.roomId) {
-                        if (!hovered && tipText == room.name) tipText = null
+                        if (!hovered && tipAnchor?.first == room.name) tipAnchor = null
                     }
                     Box(
                         Modifier
                             .hoverable(hoverSource)
                             .onGloballyPositioned { coords ->
-                                if (hovered) {
-                                    tipText = room.name
-                                    tipCenterY = coords.positionInRoot().y + coords.size.height / 2f
-                                }
+                                if (hovered) tipAnchor = room.name to coords.boundsInWindow()
                             }
                             .padding(horizontal = 8.dp),
                         contentAlignment = Alignment.Center,
@@ -1581,35 +1579,56 @@ private fun RoomListAvatarRail(
                 }
             }
         }
-        tipText?.takeIf { it.isNotBlank() }?.let { name ->
-            Text(
-                text = name,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.inverseOnSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .zIndex(6f)
-                    .align(Alignment.TopStart)
-                    // 貼在頭貼**右邊**、與該列垂直置中（Telegram／Discord 收欄時都是這樣）。
-                    // 原本那顆提示是畫在格子下方，歪歪地蓋住下一列頭貼（用戶 2026-10-12：
-                    // 「你完全可以看得出來這他媽明顯靠右吧？」）。
-                    .offset {
-                        IntOffset(
-                            (railRightX + 6.dp.toPx()).roundToInt(),
-                            (tipCenterY - railTopY).roundToInt(),
-                        )
-                    }
-                    // 自己的高度往上收一半，正好對齊該列中線；寬度不跟 44dp 的格子計較
-                    .graphicsLayer { translationY = -size.height / 2f }
-                    .widthUnbounded()
-                    // 不跟 44dp 的格子計較，但也要有個上限：長到蓋住整個聊天區就本末倒置
-                    .widthIn(max = 280.dp)
-                    .background(MaterialTheme.colorScheme.inverseSurface, RoundedCornerShape(8.dp))
-                    .padding(horizontal = 9.dp, vertical = 5.dp),
-            )
+        tipAnchor?.let { (name, rect) ->
+            // 用 Popup（獨立窗口）而不是畫在欄裡：畫在欄裡會被外層裁掉——
+            // 第一版畫在 44dp 的格子裡折成亂碼，第二版搬到欄的 Box 裡仍然被側欄右緣
+            // 截成「#ar」（用戶 2026-10-12 #10「？？？？」）。獨立窗口不受任何祖先裁切。
+            Popup(
+                popupPositionProvider = remember(rect) {
+                    RailTooltipPositionProvider(rect, with(railDensity) { 6.dp.toPx() })
+                },
+                onDismissRequest = {},
+                properties = PopupProperties(
+                    focusable = false,
+                    dismissOnClickOutside = false,
+                    usePlatformDefaultWidth = false,
+                ),
+            ) {
+                Text(
+                    text = name,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.inverseOnSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .widthIn(max = 320.dp)
+                        .background(MaterialTheme.colorScheme.inverseSurface, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 9.dp, vertical = 5.dp),
+                )
+            }
         }
     }
+}
+
+/**
+ * 收欄態名稱提示的位置：貼在頭貼**右邊**、與該列垂直置中（Telegram／Discord 都是這樣），
+ * 再夾進窗口內，免得最下面幾列的提示跑到窗口外面。座標用 `boundsInWindow()`，與 Popup
+ * 的 offset 同一個座標系（右鍵選單那側已證實這條路走得通，見 ContextMenuSurface）。
+ */
+private class RailTooltipPositionProvider(
+    private val anchor: Rect,
+    private val gapPx: Float,
+) : PopupPositionProvider {
+    override fun calculatePosition(
+        anchorBounds: IntRect,
+        windowSize: IntSize,
+        layoutDirection: LayoutDirection,
+        popupContentSize: IntSize,
+    ): IntOffset = IntOffset(
+        (anchor.right + gapPx).roundToInt(),
+        (anchor.center.y - popupContentSize.height / 2f).roundToInt()
+            .coerceIn(0, (windowSize.height - popupContentSize.height).coerceAtLeast(0)),
+    )
 }
 
 /**
@@ -4556,6 +4575,7 @@ private fun MessageRow(
                     body = msg.body,
                     strings = strings,
                     isOwn = isOwn,
+                    spoilerKey = msg.eventId?.full ?: msg.outboxTransactionId.orEmpty(),
                     modifier = Modifier
                         .padding(top = if (grouped) 0.dp else 2.dp)
                         .alpha(if (msg.pending && msg.sendError == null && !pendingStale) 0.55f else 1f),
@@ -4844,6 +4864,9 @@ private fun htmlToAnnotatedString(
         var pos = 0
         var currentStyle = baseStyle.toSpanStyle()
         var linkUrl: String? = null
+        // 劇透區間：開標籤進棧、`</span>` 出棧；id 只是「第幾個劇透」，給畫面那層記誰被點開過。
+        val spoilerStack = ArrayList<String>()
+        var spoilerCounter = 0
         // 樣式堆疊：開始標籤進棧、對應的結束標籤出棧。之前的寫法是「任何結束
         // 標籤一律把樣式清回 base」，於是 `<b>粗 <i>斜</i> 還粗嗎</b>` 在 </i>
         // 之後就忘了自己還在粗體裡（Matrix 橋接進來的訊息大量是巢狀標籤，
@@ -4896,29 +4919,41 @@ private fun htmlToAnnotatedString(
             if (decoded.isEmpty()) return
             wroteAny = true
             val url = linkUrl
-            if (url != null) {
-                // 連結段：可點擊 + 連結色底線（點擊走系統瀏覽器，與 URL 預覽卡一致）。
-                // 樣式**兩邊都寫**：一份交給 TextLinkStyles（框架懸停／按壓時會換成
-                // 它自己的色），一份用 withStyle 真的蓋在文字上。只靠前者的話，
-                // 框架沒套上就是「白字、點不動」——橋接進來的作者名稱與網址全部
-                // 長這樣（用戶 2026-10-09 對照電報 #73 連問「爲什麼作者名稱跟鏈接
-                // 本身都不鏈接了」）。後者保證「看起來就是連結」，與前者同色不衝突。
-                val linkStyle = currentStyle.copy(
-                    color = linkColor,
-                    textDecoration = TextDecoration.combine(
-                        listOfNotNull(currentStyle.textDecoration, TextDecoration.Underline),
-                    ),
-                )
-                withLink(
-                    LinkAnnotation.Url(
-                        url = url,
-                        styles = TextLinkStyles(style = linkStyle),
-                        linkInteractionListener = { openLink(url) },
-                    ),
-                ) { withStyle(linkStyle) { emitPangu(decoded) } }
-            } else {
-                withStyle(currentStyle) { emitPangu(decoded) }
+            val spoiler = spoilerStack.lastOrNull()
+            // 連結與劇透會**疊加**（實據：`<a href=…>H<span data-mx-spoiler>ayley Hai</span>n</a>`），
+            // 所以兩層各自包一層，不是二選一。
+            fun emitBody() {
+                if (url == null) {
+                    withStyle(currentStyle) { emitPangu(decoded) }
+                } else {
+                    // 連結段：可點擊 + 連結色底線（點擊走系統瀏覽器，與 URL 預覽卡一致）。
+                    // 樣式**兩邊都寫**：一份交給 TextLinkStyles（框架懸停／按壓時會換成
+                    // 它自己的色），一份用 withStyle 真的蓋在文字上。只靠前者的話，
+                    // 框架沒套上就是「白字、點不動」——橋接進來的作者名稱與網址全部
+                    // 長這樣（用戶 2026-10-09 對照電報 #73 連問「爲什麼作者名稱跟鏈接
+                    // 本身都不鏈接了」）。後者保證「看起來就是連結」，與前者同色不衝突。
+                    val linkStyle = currentStyle.copy(
+                        color = linkColor,
+                        textDecoration = TextDecoration.combine(
+                            listOfNotNull(currentStyle.textDecoration, TextDecoration.Underline),
+                        ),
+                    )
+                    withLink(
+                        LinkAnnotation.Url(
+                            url = url,
+                            styles = TextLinkStyles(style = linkStyle),
+                            linkInteractionListener = { openLink(url) },
+                        ),
+                    ) { withStyle(linkStyle) { emitPangu(decoded) } }
+                }
             }
+            if (spoiler != null) {
+                // push/pop 這一對是 AnnotatedString.Builder 的範圍標記 API（沒有帶區塊的
+                // 多載，反編譯 ui-text-1.12.1 核過：pushStringAnnotation(tag, annotation): Int）
+                pushStringAnnotation(SpoilerAnnotation, spoiler)
+                emitBody()
+                pop()
+            } else emitBody()
         }
 
         while (pos < html.length) {
@@ -4938,6 +4973,7 @@ private fun htmlToAnnotatedString(
             when {
                 isClosing -> {
                     if (tagName == "a") linkUrl = null
+                    if (tagName == "span" && spoilerStack.isNotEmpty()) spoilerStack.removeLast()
                     if (tagName == "mx-reply") mxReplyDepth = (mxReplyDepth - 1).coerceAtLeast(0)
                     if (tagName == "blockquote") {
                         quoteDepth = (quoteDepth - 1).coerceAtLeast(0)
@@ -4995,6 +5031,15 @@ private fun htmlToAnnotatedString(
                     styleStack.addLast(currentStyle)
                     mxColorRegex.find(attrs)?.groupValues?.get(1)?.let { hex ->
                         parseHtmlColor(hex)?.let { currentStyle = currentStyle.copy(color = it) }
+                    }
+                    // 劇透：`<span data-mx-spoiler>`（實測機器人發的就是這種**不帶值**的寫法）
+                    // 或 `data-mx-spoiler="原因">`。這裡只**標記**區間，「遮住＋點開」由畫面
+                    // 那層做——樣式要能被點擊改變，在解析階段寫死就再也改不了。
+                    // 他房間裡已有 97 則這種訊息（Telegram 入群驗證機器人把人名藏起來），
+                    // 不認的話我們照樣把名字印在臉上。
+                    if (attrs.contains(SpoilerAttribute)) {
+                        spoilerCounter++
+                        spoilerStack.add(spoilerCounter.toString())
                     }
                 }
                 // <font color="#…">：Telegram 橋（t2bot）的Hashtag、提及、引用顏色
@@ -5093,6 +5138,63 @@ sealed interface RichSegment {
     data class Code(val text: String) : RichSegment
 }
 
+/** Matrix 的劇透屬性名（`<span data-mx-spoiler>`）。 */
+internal const val SpoilerAttribute = "data-mx-spoiler"
+
+/** 解析時蓋在 AnnotatedString 上的標記：畫面那層用它決定遮哪一段、點哪一段揭開。 */
+internal const val SpoilerAnnotation = "nashira-spoiler"
+
+/** 一處劇透區間（end 是 exclusive，與 AnnotatedString 的 annotation 一致）。 */
+data class SpoilerSpan(val id: String, val start: Int, val end: Int)
+
+/** 這段文字裡的劇透區間，依出現順序編號（同一則訊息裡可能有兩處）。 */
+fun AnnotatedString.spoilerSpans(): List<SpoilerSpan> =
+    getStringAnnotations(SpoilerAnnotation, 0, length)
+        .filter { it.end > it.start }
+        .map { SpoilerSpan(it.item, it.start, it.end) }
+
+/**
+ * 訊息裡的文字段。有劇透時多蓋一層「實心色條」（字色＝底色，Telegram 那種黑條），
+ * 點到黑條上才把該區間還原；沒有劇透就是原本那顆 `Text`，一行額外程式都不跑。
+ *
+ * 狀態放 [LocalUiState]、以「訊息 id ＋ 區間編號」為鍵：滾出畫面再滾回來不會又變回
+ * 遮住。不寫進 AnnotatedString 是因為樣式要能被點擊改變，解析階段寫死就改不了。
+ */
+@Composable
+private fun MessageTextSegment(
+    annotated: AnnotatedString,
+    inlineContent: Map<String, InlineTextContent>,
+    spoilerKey: String,
+) {
+    val spans = remember(annotated) { annotated.spoilerSpans() }
+    if (spans.isEmpty()) {
+        Text(text = annotated, inlineContent = inlineContent)
+        return
+    }
+    val ui = LocalUiState.current
+    val barColor = MaterialTheme.colorScheme.onSurface
+    val hidden = spans.filter { "$spoilerKey#${it.id}" !in ui.revealedSpoilers }
+    val shown = if (hidden.isEmpty()) annotated else buildAnnotatedString {
+        append(annotated)
+        hidden.forEach { addStyle(SpanStyle(color = barColor, background = barColor), it.start, it.end) }
+    }
+    var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    Text(
+        text = shown,
+        inlineContent = inlineContent,
+        onTextLayout = { layout = it },
+        modifier = Modifier.pointerInput(shown, spans, ui.revealedSpoilers, spoilerKey) {
+            detectTapGestures { position ->
+                val result = layout ?: return@detectTapGestures
+                val caret = result.getOffsetForPosition(position)
+                spans.firstOrNull { caret in it.start until it.end }?.let { span ->
+                    ui.revealedSpoilers = ui.revealedSpoilers + "$spoilerKey#${span.id}"
+                }
+            }
+        },
+    )
+}
+
 /** 一則訊息的內容區：文字、圖片／貼圖、附件名，或解密失敗的說明。 */
 @Composable
 private fun MessageBodyContent(
@@ -5101,6 +5203,8 @@ private fun MessageBodyContent(
     strings: io.github.capricornus007.nashira.i18n.Strings,
     modifier: Modifier = Modifier,
     isOwn: Boolean = false,
+    /** 劇透「已揭開」狀態的鍵（用訊息 id）；滾出畫面再滾回來才不會又蓋回去。 */
+    spoilerKey: String = "",
     onOpenImage: ((List<MessageBody.Image>, Int) -> Unit)? = null,
 ) {
     val ui = LocalUiState.current
@@ -5134,7 +5238,11 @@ private fun MessageBodyContent(
             Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 rich.segments.forEach { segment ->
                     when (segment) {
-                        is RichSegment.Text -> Text(text = segment.annotated, inlineContent = inlineContent)
+                        is RichSegment.Text -> MessageTextSegment(
+                            annotated = segment.annotated,
+                            inlineContent = inlineContent,
+                            spoilerKey = spoilerKey,
+                        )
                         is RichSegment.Code -> CodeBlockBubble(segment.text, strings.copy)
                     }
                 }

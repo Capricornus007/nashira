@@ -166,6 +166,13 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
         stored["hiddenMedia"]?.split('\n')?.filter { it.isNotBlank() }?.toSet() ?: emptySet()
     )
 
+    /**
+     * 已被點開的劇透區間（鍵＝「訊息 id ＃ 區間編號」）。**刻意不落檔**：劇透的意義就是
+     * 「重開程式後仍然要蓋著」，Telegram／Element 也是這個行為。放記憶體裡，滾出畫面再
+     * 滾回來不會又蓋回去，就夠了。
+     */
+    var revealedSpoilers by mutableStateOf(emptySet<String>())
+
     /** 最近用過的 Unicode 表情（hexcode，最近在前）。 */
     var emojiRecents by mutableStateOf(
         stored["emojiRecents"]?.split('\n')?.filter { it.isNotBlank() } ?: emptyList()
