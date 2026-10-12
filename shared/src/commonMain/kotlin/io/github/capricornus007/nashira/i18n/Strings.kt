@@ -51,6 +51,7 @@ interface Strings {
     val formatItalics: String
     val formatStrikethrough: String
     val formatUnderline: String
+    val formatSpoiler: String
     val formatCodeBlock: String
     val formatQuote: String
     val formatLink: String

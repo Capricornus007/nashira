@@ -96,6 +96,7 @@ fun markdownToHtml(text: String): String? {
 /** 快速決斷：值不值得跑一趟完整解析。 */
 private fun containsMarkdownMarkup(text: String): Boolean =
     text.indexOf('*') >= 0 || text.indexOf('~') >= 0 || text.indexOf('`') >= 0 || text.indexOf('[') >= 0 ||
+        text.indexOf('|') >= 0 ||
         text.indexOf("<u>") >= 0 ||
         LINE_MARKUP.containsMatchIn(text) || ESCAPE_MARKUP.containsMatchIn(text)
 
@@ -190,6 +191,19 @@ private fun inlineMarkdownToHtml(raw: String): String {
                     i = end + 1
                 }
             }
+            // 劇透：`||文字||` → `<span data-mx-spoiler>文字</span>`。這是 Matrix 建議的
+            // Markdown 擴充寫法，也是輸入框那顆「劇透」鍵插的東西；收的那一側
+            // （ChatScreen 的 htmlToAnnotatedString）認同一個屬性。
+            // 只做兩段式（不帶「理由」）：`||理由||文字||` 那種三段寫法會先被這裡
+            // 當成兩對劇透，要支援得先確定各家到底怎麼發，不憑猜做。
+            c == '|' && raw.startsWith("||", i) -> {
+                val close = raw.indexOf("||", i + 2)
+                val content = if (close < 0) null else raw.substring(i + 2, close)
+                if (content == null || !content.isWrappable()) { out.append("||"); i += 2 } else {
+                    out.append("<span data-mx-spoiler>").append(emphasized(content)).append("</span>")
+                    i = close + 2
+                }
+            }
             c == '[' -> {
                 val close = raw.indexOf(']', i + 1)
                 val link = if (close >= 0 && close + 1 < raw.length && raw[close + 1] == '(') {
@@ -259,4 +273,4 @@ private fun isSafeLinkTarget(url: String): Boolean =
     url.none { it == ' ' || it == '"' || it == '<' || it == '>' || it == '`' } &&
         SAFE_LINK_PREFIXES.any { url.startsWith(it, ignoreCase = true) }
 
-private val ESCAPABLE = charArrayOf('*', '~', '`', '[', ']', '<', '>')
+private val ESCAPABLE = charArrayOf('*', '~', '`', '[', ']', '<', '>', '|')

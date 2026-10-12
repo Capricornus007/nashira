@@ -50,6 +50,9 @@ enum class ComposerShortcut(val display: String, val key: Key, val shift: Boolea
     Italics("Ctrl+I", Key.I),
     Strikethrough("Ctrl+Shift+X", Key.X, shift = true),
     Underline("Ctrl+U", Key.U),
+    // 照 tdesktop 的綁法（inputzen.com/shortcuts/telegram 那張表：Spoiler = Ctrl+Shift+P，
+    // macOS 那欄才是 N/A）。我先前說「Telegram 沒綁按鍵」是查錯，用戶 2026-10-12 抓出來。
+    Spoiler("Ctrl+Shift+P", Key.P, shift = true),
     CodeBlock("Ctrl+Shift+M", Key.M, shift = true),
     Quote("Ctrl+Shift+.", Key.Period, shift = true),
     Link("Ctrl+K", Key.K),
@@ -61,6 +64,7 @@ enum class ComposerShortcut(val display: String, val key: Key, val shift: Boolea
             ComposerFormat.Italics -> Italics
             ComposerFormat.Strikethrough -> Strikethrough
             ComposerFormat.Underline -> Underline
+            ComposerFormat.Spoiler -> Spoiler
             ComposerFormat.CodeBlock -> CodeBlock
             ComposerFormat.Quote -> Quote
             ComposerFormat.Link -> Link

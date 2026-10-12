@@ -1,6 +1,7 @@
 package io.github.capricornus007.nashira
 
 import androidx.compose.foundation.text.input.OutputTransformation
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -75,6 +76,9 @@ private val ComposerMarkers = listOf(
     MarkupMarker("**", "**", SpanStyle(fontWeight = FontWeight.Bold)),
     MarkupMarker("<u>", "</u>", SpanStyle(textDecoration = TextDecoration.Underline)),
     MarkupMarker("~~", "~~", SpanStyle(textDecoration = TextDecoration.LineThrough)),
+    // 劇透在框裡給一條淡淡的灰底（不是全黑）：他在輸入框裡還要看見自己打了什麼，
+    // 真正遮起來的是發出去之後對方看到的那一側。
+    MarkupMarker("||", "||", SpanStyle(background = Color(0x55808080))),
     MarkupMarker("*", "*", SpanStyle(fontStyle = FontStyle.Italic)),
 )
 

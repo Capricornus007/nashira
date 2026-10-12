@@ -32,6 +32,7 @@ object JaStrings : Strings by EnStrings {
     override val formatItalics = "斜体"
     override val formatStrikethrough = "取り消し線"
     override val formatUnderline = "下線"
+    override val formatSpoiler = "隠しテキスト"
     override val formatCodeBlock = "コードブロック"
     override val formatQuote = "引用"
     override val formatLink = "リンク"

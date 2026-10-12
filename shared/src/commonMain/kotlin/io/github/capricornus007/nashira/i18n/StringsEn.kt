@@ -34,6 +34,7 @@ object EnStrings : Strings {
     override val formatItalics = "Italics"
     override val formatStrikethrough = "Strikethrough"
     override val formatUnderline = "Underline"
+    override val formatSpoiler = "Spoiler"
     override val formatCodeBlock = "Code block"
     override val formatQuote = "Quote"
     override val formatLink = "Link"

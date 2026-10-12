@@ -548,10 +548,16 @@ fun ChatScreen(
                             // 列表收起來時整條 sidebar 只剩兩條直欄：那顆浮動帳號膠囊
                             // 會蓋掉頭貼列，所以縮成只剩頭貼（Telegram 收欄時也是這樣）
                             compact = listCollapsed,
-                            // 收欄時置中會剛好壓在兩條直欄的縫上，Telegram 是貼在
-                            // **左下角**（用戶 2026-10-09 #69/#70）。展開態的膠囊本來就
-                            // fillMaxWidth，置中與靠左沒有差別。
-                            modifier = Modifier.align(Alignment.BottomStart),
+                            // 收欄態：把可用寬度限成 Space 欄本身，頭貼在**那一欄**裡置中。
+                            // 先前只給 BottomStart，於是 58dp 的膠囊貼著左緣擺，而 Space 欄
+                            // 最窄只有 52dp（SpaceRailMinWidthDp）→ 膠囊比那一欄還寬、
+                            // 往右溢出到列表那條，看著就是「明顯偏右」（用戶 2026-10-12 #12-#14）。
+                            // 展開態的膠囊本來就 fillMaxWidth，限不限制都沒有差別。
+                            modifier = if (listCollapsed) {
+                                Modifier.width(railWidthDp.dp).align(Alignment.BottomStart)
+                            } else {
+                                Modifier.align(Alignment.BottomStart)
+                            },
                         )
                     }
                     Box(Modifier.weight(1f).fillMaxHeight()) {

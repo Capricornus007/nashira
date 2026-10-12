@@ -29,6 +29,7 @@ enum class ComposerFormat {
     Italics,
     Strikethrough,
     Underline,
+    Spoiler,
     CodeBlock,
     Quote,
     Link,
@@ -39,6 +40,7 @@ enum class ComposerFormat {
         Italics -> strings.formatItalics
         Strikethrough -> strings.formatStrikethrough
         Underline -> strings.formatUnderline
+        Spoiler -> strings.formatSpoiler
         CodeBlock -> strings.formatCodeBlock
         Quote -> strings.formatQuote
         Link -> strings.formatLink
@@ -77,6 +79,9 @@ fun applyComposerFormat(state: TextFieldState, format: ComposerFormat) {
         // 底線沒有 Markdown 寫法，插的是原生 `<u>`／`</u>`（與 Element WYSIWYG 同一產出）；
         // 送出時 `markdownToHtml` 原樣放行，`body` 那側會把標籤去掉（見 stripMarkupForBody）。
         ComposerFormat.Underline -> state.wrapWith("<u>", "</u>")
+        // 劇透：Matrix 建議的 Markdown 擴充寫法是 `||文字||`，送出時換成
+        // `<span data-mx-spoiler>文字</span>`（見 MarkdownToHtml）。
+        ComposerFormat.Spoiler -> state.wrapWith("||", "||")
         ComposerFormat.CodeBlock -> state.wrapWith("```\n", "\n```")
         ComposerFormat.Quote -> state.toggleQuote()
         ComposerFormat.Link -> state.wrapLink()
