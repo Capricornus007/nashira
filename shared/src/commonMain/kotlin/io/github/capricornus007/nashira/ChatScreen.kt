@@ -45,6 +45,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.LocalFocusManager
@@ -134,6 +135,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.foundation.Canvas
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
@@ -209,6 +211,7 @@ import io.github.capricornus007.nashira.matrix.SpaceSummary
 import io.github.capricornus007.nashira.matrix.SpacesSnapshot
 import io.github.capricornus007.nashira.matrix.TimelineMessage
 import io.github.capricornus007.nashira.matrix.MessageBody
+import io.github.capricornus007.nashira.matrix.MessageSearchResult
 import io.github.capricornus007.nashira.matrix.MediaIndexEntry
 import io.github.capricornus007.nashira.matrix.RoomMediaIndexStore
 import io.github.capricornus007.nashira.matrix.mediaIndexDirectoryFor
@@ -1617,6 +1620,113 @@ private fun RoomListAvatarRail(
 }
 
 /**
+ * 標題列下面的搜尋列（Telegram「在這一屋里搜全部訊息」那條路）。
+ * 結果一律限目前房間（`RoomRepository.searchMessages` 自己帶 rooms 過濾），
+ * 點一筆或按上下箭頭都走 `timeline.jumpTo` 那一條跳轉路徑。
+ *
+ * 「第幾筆 / 共幾筆」刻意用數字加斜線、不翻成各語系：那種寫法每種語言都讀得懂，
+ * 也省掉為一個計數再補五份字串（電報是「223 中的 1 個」，意思一樣）。
+ */
+@Composable
+private fun RoomSearchBar(
+    query: String,
+    onQuery: (String) -> Unit,
+    busy: Boolean,
+    error: String?,
+    results: List<MessageSearchResult>,
+    index: Int,
+    focus: FocusRequester,
+    onStep: (Int) -> Unit,
+    onPick: (Int) -> Unit,
+    onClose: () -> Unit,
+    strings: io.github.capricornus007.nashira.i18n.Strings,
+) {
+    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainerHigh)) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 10.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = onQuery,
+                placeholder = { Text(strings.searchMessagesHint, style = MaterialTheme.typography.bodyMedium) },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f).focusRequester(focus),
+            )
+            val counter = when {
+                busy -> "…"
+                query.isBlank() -> ""
+                results.isEmpty() -> "0 / 0"
+                else -> "${index + 1} / ${results.size}"
+            }
+            if (counter.isNotEmpty()) {
+                Text(
+                    counter,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            IconButton(onClick = { onStep(-1) }, enabled = results.size > 1) {
+                Icon(Icons.Filled.KeyboardArrowUp, contentDescription = null)
+            }
+            IconButton(onClick = { onStep(1) }, enabled = results.size > 1) {
+                Icon(Icons.Filled.KeyboardArrowDown, contentDescription = null)
+            }
+            IconButton(onClick = onClose) {
+                Icon(Icons.Filled.Close, contentDescription = strings.cancel)
+            }
+        }
+        when {
+            error != null -> Text(
+                error,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(start = 14.dp, bottom = 8.dp),
+            )
+            // 查無結果時不佔版位：時間線本身要留最多空間，空一块比空一行更難看
+            results.isNotEmpty() -> LazyColumn(Modifier.fillMaxWidth().heightIn(max = 220.dp)) {
+                itemsIndexed(results) { i, hit ->
+                    Row(
+                        Modifier.fillMaxWidth()
+                            .background(
+                                if (i == index) MaterialTheme.colorScheme.surfaceContainerHighest
+                                else Color.Transparent,
+                            )
+                            .clickable { onPick(i) }
+                            .padding(horizontal = 14.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                hit.senderName,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                bodyPreview(hit.body) ?: hit.senderName,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Text(
+                            formatClock(hit.timestamp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
  * 收欄態名稱提示的位置：貼在頭貼**右邊**、與該列垂直置中（Telegram／Discord 都是這樣），
  * 再夾進窗口內，免得最下面幾列的提示跑到窗口外面。座標用 `boundsInWindow()`，與 Popup
  * 的 offset 同一個座標系（右鍵選單那側已證實這條路走得通，見 ContextMenuSurface）。
@@ -2299,6 +2409,45 @@ private fun TimelinePane(
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
+    // ── 房間內訊息搜尋（Telegram 標題列那顆放大鏡）────────────────────────
+    // 後端 `/search` 早就接好了（RoomRepository.searchMessages），缺的一直是畫面。
+    // 這裡只放狀態與「查」的動作；列與跳轉在 topBar 那側。
+    var searchOpen by remember(room.roomId) { mutableStateOf(false) }
+    var searchQuery by remember(room.roomId) { mutableStateOf("") }
+    var searchResults by remember(room.roomId) { mutableStateOf<List<MessageSearchResult>>(emptyList()) }
+    var searchBusy by remember(room.roomId) { mutableStateOf(false) }
+    var searchError by remember(room.roomId) { mutableStateOf<String?>(null) }
+    var searchIndex by remember(room.roomId) { mutableStateOf(-1) }
+    val searchFocus = remember { FocusRequester() }
+    LaunchedEffect(searchOpen) {
+        // 點放大鏡＝游標直接進搜尋框（Telegram 就是這樣，不用再點一下）。
+        // runCatching：FocusRequester 還沒掛到節點上時 requestFocus() 會直接丟例外，
+        // 為了一個游標位置讓整個時間線崩掉不值得。
+        if (searchOpen) runCatching { searchFocus.requestFocus() }
+    }
+    LaunchedEffect(searchQuery, searchOpen, room.roomId) {
+        if (!searchOpen) return@LaunchedEffect
+        val term = searchQuery.trim()
+        if (term.isEmpty()) {
+            searchResults = emptyList(); searchIndex = -1; searchError = null; searchBusy = false
+            return@LaunchedEffect
+        }
+        // 每顆字元發一次 /search 會把伺服器打爆、結果也一直閃；等手停下來再查
+        delay(350)
+        searchBusy = true
+        roomRepository.searchMessages(room.roomId, term)
+            .onSuccess {
+                searchResults = it
+                searchIndex = if (it.isEmpty()) -1 else 0
+                searchError = null
+            }
+            .onFailure {
+                searchResults = emptyList(); searchIndex = -1
+                searchError = io.github.capricornus007.nashira.i18n.friendlyError(it)
+            }
+        searchBusy = false
+    }
+
     // 跳轉之後要把捲動位置對到目標那一筆。
     // 原本只呼叫 timeline.jumpTo() 就結束了，但它內部是 `timeline.init(startFrom=…)`
     // ——**整個視窗被重建**（換成目標前後那 60 則），而 listState 還停在舊 index：
@@ -2321,6 +2470,18 @@ private fun TimelinePane(
         // 否則「跳轉中」會永久壓住下面那條「跟隨最新消息」的邏輯。
         delay(JumpGiveUpMillis)
         if (pendingJumpEventId == pid) pendingJumpEventId = null
+    }
+
+    // 跳到第 index 筆搜尋命中：與「跳到原始訊息」同一條路（jumpTo 會重建整個視窗，
+    // 所以還要靠上面那個 pendingJumpEventId 把捲動位置對過去）。
+    fun jumpToSearchHit(index: Int) {
+        val hit = searchResults.getOrNull(index) ?: return
+        searchIndex = index
+        scope.launch {
+            timeline.jumpTo(hit.eventId)
+            highlightedEventId = hit.eventId.full
+            pendingJumpEventId = hit.eventId.full
+        }
     }
 
     // reverseLayout 下 index 0 就是最新訊息（畫在最底部）。新訊息到達時只在
@@ -2736,6 +2897,8 @@ private fun TimelinePane(
 
     Scaffold(
         topBar = {
+          // Column：標題列下面還要能掛搜尋列（原本只有 if/else 兩個 TopAppBar）
+          Column {
             if (selectionMode) {
                 TopAppBar(
                     navigationIcon = {
@@ -2796,6 +2959,16 @@ private fun TimelinePane(
                         }
                     },
                     actions = {
+                        // Telegram 的標題列就有搜尋（放大鏡），我們之前只有「找房間」
+                        // 沒有「找訊息」，後端 /search 接好了卻沒人叫用（用戶 2026-10-12
+                        // 拿電報兩張截圖點名：列表與時間線都有搜尋入口）。
+                        IconButton(onClick = { searchOpen = !searchOpen }) {
+                            Icon(
+                                Icons.Filled.Search,
+                                contentDescription = strings.searchMessages,
+                                tint = if (searchOpen) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+                            )
+                        }
                         if (onToggleMembers != null) {
                             IconButton(onClick = onToggleMembers) {
                                 Icon(Icons.Filled.Person, contentDescription = strings.members, tint = if (membersOpen) MaterialTheme.colorScheme.primary else LocalContentColor.current)
@@ -2804,6 +2977,29 @@ private fun TimelinePane(
                     },
                 )
             }
+            if (searchOpen) {
+                RoomSearchBar(
+                    query = searchQuery,
+                    onQuery = { searchQuery = it },
+                    busy = searchBusy,
+                    error = searchError,
+                    results = searchResults,
+                    index = searchIndex,
+                    focus = searchFocus,
+                    onStep = { delta ->
+                        if (searchResults.isEmpty()) return@RoomSearchBar
+                        val next = (searchIndex + delta).mod(searchResults.size)
+                        jumpToSearchHit(next)
+                    },
+                    onPick = { jumpToSearchHit(it) },
+                    onClose = {
+                        searchOpen = false
+                        searchQuery = ""
+                    },
+                    strings = strings,
+                )
+            }
+          }
         },
         bottomBar = {
             // 只用 imePadding：鍵盤開時 navBars 已被鍵盤視窗覆蓋（不需要再加）；
@@ -3536,6 +3732,11 @@ private fun TimelinePane(
                         replyToPreview = replyTarget?.let { bodyPreview(it.body) } ?: remoteReply?.second,
                         syncBroken = syncBroken,
                         highlighted = highlightedEventId != null && msg.eventId?.full == highlightedEventId,
+                        onHashtag = { tag ->
+                            // 點標籤＝開這一屋的搜尋並把詞填進去（電報那側就是這個行為）
+                            searchOpen = true
+                            searchQuery = tag
+                        },
                         onJumpToReply = { id ->
                             scope.launch {
                                 // 先記下現在看的位置，跳過去才回得來
@@ -4419,6 +4620,8 @@ private fun MessageRow(
     replyToPreview: String? = null,
     /** 點引用列跳到被回覆的那則（用戶 2026-09-30：「點擊原始訊息無法跳轉到那個地方，爲什麼」）。 */
     onJumpToReply: (EventId) -> Unit = {},
+    /** 訊息裡點 `#標籤`：由 TimelinePane 決定要做什麼（開本房搜尋並填入那個詞）。 */
+    onHashtag: (String) -> Unit = {},
     /** 剛跳轉過去時短暫標亮，否則使用者不知道跳到哪。 */
     highlighted: Boolean = false,
     /** 與伺服器的連線狀態異常：待送訊息要講清楚是「還在送」還是「送不出去」。 */
@@ -4582,6 +4785,7 @@ private fun MessageRow(
                     strings = strings,
                     isOwn = isOwn,
                     spoilerKey = msg.eventId?.full ?: msg.outboxTransactionId.orEmpty(),
+                    onHashtag = onHashtag,
                     modifier = Modifier
                         .padding(top = if (grouped) 0.dp else 2.dp)
                         .alpha(if (msg.pending && msg.sendError == null && !pendingStale) 0.55f else 1f),
@@ -4814,11 +5018,42 @@ private fun MessageRow(
  * 不斷重組看得見的列，這一趟字串掃描就是「翻頁不順」的來源之一
  *（用戶 2026-10-07：「聊天室列表跟訊息時間線列表的翻頁就有點不順暢」「電報的很順暢」）。
  */
+/** 點 `#標籤` 要走「在這一屋里搜這個詞」，不是開瀏覽器：用一個不會撞車的自訂 scheme。 */
+internal const val HashtagSearchScheme = "nashira:search:"
+
+private val HashtagPattern = Regex("""#[\p{L}\p{N}_]+""")
+
+/**
+ * 把一段文字切成「普通文字 / 標籤」的片段，給 appendDecoded 逐段發。
+ * `#123` 那種純數字不當標籤（Telegram 也不認）；`#クルスタ` 認——字元類別要用
+ * `\p{L}` 才吃得下中日韓文，寫成 `[A-Za-z]` 就會在他最常待的幾個房間失效。
+ */
+internal fun splitHashtagPieces(text: String): List<Pair<String, Boolean>> {
+    // 邊界規則（實測抓出來的）：`a#b` 與 `https://x/#frag` 都不是標籤，只有前面是空白
+    // 或標點起頭的那個 `#` 才算——Telegram 同一套判断。
+    val matches = HashtagPattern.findAll(text).filter { m ->
+        m.value.any { it.isLetter() } && (m.range.first == 0 || text[m.range.first - 1].let { c ->
+            c.isWhitespace() || c in "([{<，。、；：（「『【"
+        })
+    }.toList()
+    if (matches.isEmpty()) return listOf(text to false)
+    val out = ArrayList<Pair<String, Boolean>>()
+    var last = 0
+    for (m in matches) {
+        if (m.range.first > last) out += text.substring(last, m.range.first) to false
+        out += m.value to true
+        last = m.range.last + 1
+    }
+    if (last < text.length) out += text.substring(last) to false
+    return out
+}
+
 fun htmlToRichText(
     html: String,
     baseStyle: TextStyle,
     linkColor: Color,
     codeBackground: Color,
+    onHashtag: (String) -> Unit = {},
 ): FormattedRichText {
     val emoticons = ArrayList<InlineEmoticon>()
     // 切段放純函數做（local 函數不能調 @Composable），這裡只把文字段交給行內解析器
@@ -4831,7 +5066,7 @@ fun htmlToRichText(
             val text = chunk.trim('\n')
             if (text.isBlank()) null
             else {
-                val parsed = htmlToAnnotatedString(text, baseStyle, linkColor, codeBackground)
+                val parsed = htmlToAnnotatedString(text, baseStyle, linkColor, codeBackground, onHashtag)
                 emoticons += parsed.second
                 RichSegment.Text(parsed.first)
             }
@@ -4859,6 +5094,7 @@ private fun htmlToAnnotatedString(
     baseStyle: TextStyle,
     linkColor: Color,
     codeBackground: Color,
+    onHashtag: (String) -> Unit = {},
 ): Pair<AnnotatedString, List<InlineEmoticon>> {
     val emoticons = mutableListOf<InlineEmoticon>()
     val annotated = buildAnnotatedString {
@@ -4930,7 +5166,29 @@ private fun htmlToAnnotatedString(
             // 所以兩層各自包一層，不是二選一。
             fun emitBody() {
                 if (url == null) {
-                    withStyle(currentStyle) { emitPangu(decoded) }
+                    // `#標籤` 在 Telegram 那边是「點了就在這一屋里搜這個詞」，而橋站送來的
+                    // formatted_body 常常只把它上成彩色文字、根本沒包 <a>（實據：
+                    // `<font color='#3771bb'>#クルスタ</font>`）。所以這裡自己認出來、自己給
+                    // 點擊動作；已經在 <a> 裡面的文字不重複處理（url != null 那一支）。
+                    val pieces = splitHashtagPieces(decoded)
+                    if (pieces.size == 1) {
+                        withStyle(currentStyle) { emitPangu(decoded) }
+                    } else {
+                        pieces.forEach { (piece, isTag) ->
+                            if (!isTag) {
+                                withStyle(currentStyle) { emitPangu(piece) }
+                            } else {
+                                val tagStyle = currentStyle.copy(color = linkColor)
+                                withLink(
+                                    LinkAnnotation.Url(
+                                        url = HashtagSearchScheme + piece,
+                                        styles = TextLinkStyles(style = tagStyle),
+                                        linkInteractionListener = { onHashtag(piece) },
+                                    ),
+                                ) { withStyle(tagStyle) { emitPangu(piece) } }
+                            }
+                        }
+                    }
                 } else {
                     // 連結段：可點擊 + 連結色底線（點擊走系統瀏覽器，與 URL 預覽卡一致）。
                     // 樣式**兩邊都寫**：一份交給 TextLinkStyles（框架懸停／按壓時會換成
@@ -5211,6 +5469,8 @@ private fun MessageBodyContent(
     isOwn: Boolean = false,
     /** 劇透「已揭開」狀態的鍵（用訊息 id）；滾出畫面再滾回來才不會又蓋回去。 */
     spoilerKey: String = "",
+    /** 訊息裡點 `#標籤`：叫出這一屋的訊息搜尋並帶入那個詞（Telegram 的行為）。 */
+    onHashtag: (String) -> Unit = {},
     onOpenImage: ((List<MessageBody.Image>, Int) -> Unit)? = null,
 ) {
     val ui = LocalUiState.current
@@ -5233,6 +5493,7 @@ private fun MessageBodyContent(
                     baseStyle = baseStyle,
                     linkColor = linkColor,
                     codeBackground = codeBackground,
+                    onHashtag = onHashtag,
                 )
             }
             // P5-2：custom emoji 以 inline content 排進文字行
@@ -5279,7 +5540,7 @@ private fun MessageBodyContent(
             val captionCodeBg = MaterialTheme.colorScheme.surfaceContainer
             val captionText = remember(captionHtml, captionStyle, captionLinkColor, captionCodeBg) {
                 captionHtml?.let { html ->
-                    val segments = htmlToRichText(html, captionStyle, captionLinkColor, captionCodeBg).segments
+                    val segments = htmlToRichText(html, captionStyle, captionLinkColor, captionCodeBg, onHashtag).segments
                     // 說明裡出現碼塊（極少見）就退回純文字那條路，不偷偷吃掉內容
                     if (segments.isEmpty() || segments.any { it !is RichSegment.Text }) null
                     else buildAnnotatedString { segments.forEach { append((it as RichSegment.Text).annotated) } }
