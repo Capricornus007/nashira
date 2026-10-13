@@ -1641,6 +1641,20 @@ private fun RoomSearchBar(
     onClose: () -> Unit,
     strings: io.github.capricornus007.nashira.i18n.Strings,
 ) {
+    // 命中處的高亮：底色＋反差字色（Element 的 `mx_EventTile_searchHighlight` 就是
+    // `background-color: $accent; color: $accent-fg-color`，不加粗）。用 primaryContainer
+    // 這一对，是因为訊息列的「選取」與「剛跳過來」也都在 primary 色系上（:4704、:4706），
+    // 不要再引入第三種亮法。
+    val hitStyle = SpanStyle(
+        background = MaterialTheme.colorScheme.primaryContainer,
+        color = MaterialTheme.colorScheme.onPrimaryContainer,
+    )
+    val hitsListState = rememberLazyListState()
+    // 用 ↑↓／Enter 走到第 30 筆時，結果列表要跟著把那筆捲進視線範圍，
+    // 否則計數器說「30 / 214」而眼睛看到的還是第 1 筆（電報那邊是自動跟隨的）
+    LaunchedEffect(index, results.size) {
+        if (index in 1 until results.size) hitsListState.animateScrollToItem(index)
+    }
     Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainerHigh)) {
         Row(
             Modifier.fillMaxWidth().padding(start = 10.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
@@ -1653,7 +1667,27 @@ private fun RoomSearchBar(
                 placeholder = { Text(strings.searchMessagesHint, style = MaterialTheme.typography.bodyMedium) },
                 singleLine = true,
                 textStyle = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.weight(1f).focusRequester(focus),
+                modifier = Modifier
+                    .weight(1f)
+                    .focusRequester(focus)
+                    // 步進按鍵兩套都給，因為兩家真實客戶端各用一套、都不是我發明的：
+                    // 瀏覽器式（Ctrl+F 之後 Enter 找下一個、Shift+Enter 上一個）與
+                    // 桌面版電報（`history_view_compose_search.cpp:782`：F3 下一筆、Shift+F3 上一筆，
+                    // macOS 另給 Ctrl/Cmd+G；Esc 關掉搜尋）。
+                    .onPreviewKeyEvent { event ->
+                        if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                        val forward = event.key == Key.Enter || event.key == Key.F3 ||
+                            (event.key == Key.G && event.isCtrlPressed)
+                        when {
+                            forward && results.size > 1 -> {
+                                onStep(if (event.isShiftPressed) -1 else 1); true
+                            }
+                            event.key == Key.Escape -> {
+                                onClose(); true
+                            }
+                            else -> false
+                        }
+                    },
             )
             val counter = when {
                 busy -> "…"
@@ -1686,7 +1720,10 @@ private fun RoomSearchBar(
                 modifier = Modifier.padding(start = 14.dp, bottom = 8.dp),
             )
             // 查無結果時不佔版位：時間線本身要留最多空間，空一块比空一行更難看
-            results.isNotEmpty() -> LazyColumn(Modifier.fillMaxWidth().heightIn(max = 220.dp)) {
+            results.isNotEmpty() -> LazyColumn(
+                modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp),
+                state = hitsListState,
+            ) {
                 itemsIndexed(results) { i, hit ->
                     Row(
                         Modifier.fillMaxWidth()
@@ -1707,14 +1744,24 @@ private fun RoomSearchBar(
                                 overflow = TextOverflow.Ellipsis,
                             )
                             Text(
-                                bodyPreview(hit.body) ?: hit.senderName,
+                                searchResultPreview(
+                                    text = when (val body = hit.body) {
+                                        is MessageBody.Text -> body.text
+                                        else -> bodyPreview(body) ?: ""
+                                    }.ifBlank { hit.senderName },
+                                    term = query,
+                                    highlight = hitStyle,
+                                ),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1,
+                                maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
                         Text(
+                            // 一律只給時刻：桌面版電報的對話內搜尋結果清單就是聊天標準時間
+                            // （`history_view_compose_search.cpp` 全無 DaySplitter），
+                            // Element 則是「按日分組＋磚上給時間」。兩家都不在列上同時給日期。
                             formatClock(hit.timestamp),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
