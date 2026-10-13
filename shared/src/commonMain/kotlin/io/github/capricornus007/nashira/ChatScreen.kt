@@ -254,6 +254,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.isSpecified
 
 /**
  * Space 欄（最左那條）：預設就是「只剩頭貼」的窄欄，拖到 [SpaceRailNamesFromDp] 以上
@@ -4681,6 +4682,10 @@ private fun MessageRow(
     val rowKey = msg.eventId?.full ?: msg.outboxTransactionId ?: "${msg.sender.full}-${msg.timestamp}"
     var menuOpen by remember(rowKey) { mutableStateOf(false) }
     var menuAnchor by remember(rowKey) { mutableStateOf(Offset.Unspecified) }
+    // 相簿右鍵點在哪一格（-1＝不是格子：說明文字、間隙或整列其他位置）。
+    // 「下載／隱藏」要對**點的那一格**生效，這是 tdesktop 的分派方式
+    //（`history_view_context_menu.cpp:603` 的 `asGroup = pointState != GroupPart`）。
+    var albumCell by remember(rowKey) { mutableStateOf(-1) }
     // 待送訊息要有真狀態。Trixnity 對「憑證被拒／網路斷線」這類失敗**不寫 sendError**，
     // 只在背後無限重試（2026-09-30 實測：三筆待送掛了一整天、資料庫裡連錯誤都是空的），
     // 所以不能只等 sendError——超過 15 秒還沒被伺服器回音，就明講「未送達」。
@@ -4738,6 +4743,9 @@ private fun MessageRow(
                     // hover 浮條進得去（用戶回報）；多選改由菜單裡的「多選」進入。
                     onContextMenu = { offset ->
                         menuAnchor = offset
+                        // 這一路是「整列」的右鍵：格子自己會先吃掉那一下（見 MessageAlbum），
+                        // 走到這裡就代表點的不是格子，所以要清掉格子序號退回整組語意。
+                        albumCell = -1
                         menuOpen = true
                     },
                 )
@@ -4837,6 +4845,14 @@ private fun MessageRow(
                         .padding(top = if (grouped) 0.dp else 2.dp)
                         .alpha(if (msg.pending && msg.sendError == null && !pendingStale) 0.55f else 1f),
                     onOpenImage = onOpenImage,
+                    onAlbumCellContextMenu = { index, rootAt ->
+                        albumCell = index
+                        // 格子回報的是「相對視窗根」的座標，而選單是掛在這一列外層 Box 上的
+                        // Popup，所以要減掉 Box 自己在視窗裡的位置才對得準（否則選單會偏到別處）。
+                        // 觸控長按那一路是 Unspecified（沒有指標），減了會變 NaN，原樣傳回讓選單自己算位置。
+                        menuAnchor = if (rootAt.isSpecified) rootAt - boxOrigin else Offset.Unspecified
+                        menuOpen = true
+                    },
                 )
                 when {
                     msg.sendError != null -> Text(
@@ -5027,7 +5043,16 @@ private fun MessageRow(
                 ContextMenuItem(strings.actionViewSource, icon = BarIcons.Code) { menuOpen = false; onViewSource() }
                 ContextMenuItem(strings.actionForward, icon = Icons.Filled.Share) { menuOpen = false; onForward() }
                 ContextMenuItem(strings.actionSelectMessages, icon = Icons.Filled.CheckCircle) { menuOpen = false; onEnterSelection() }
-                (msg.body as? MessageBody.Image)?.let { img ->
+                // 相簿以前在這裡直接消失：`msg.body as? MessageBody.Image` 對
+                // `MessageBody.Album` 永遠是 null，於是整組圖片既不能下載也不能隱藏
+                //（用戶 2026-10-13 點名）。現在照 tdesktop 的規矩對「點的那一格」生效，
+                // 點在說明文字或格子間隙（不是任何一格）就退回整組第一則＝區塊頭。
+                val menuImage: MessageBody.Image? = when (val b = msg.body) {
+                    is MessageBody.Image -> b
+                    is MessageBody.Album -> b.items.getOrNull(albumCell) ?: b.items.firstOrNull()
+                    else -> null
+                }
+                menuImage?.let { img ->
                     ContextMenuItem(strings.actionDownload, icon = BarIcons.Download) { menuOpen = false; onDownloadImage(img) }
                     // 貼圖沒有「隱藏」——它本來就是內容本體，不是敏感縮圖
                     if (!img.isSticker) ContextMenuItem(strings.actionHideImage, icon = Icons.Filled.Lock) { menuOpen = false; onHideImage(img) }
@@ -5519,6 +5544,8 @@ private fun MessageBodyContent(
     /** 訊息裡點 `#標籤`：叫出這一屋的訊息搜尋並帶入那個詞（Telegram 的行為）。 */
     onHashtag: (String) -> Unit = {},
     onOpenImage: ((List<MessageBody.Image>, Int) -> Unit)? = null,
+    /** 相簿某一格被右鍵點到（格子的序 ＋ 相對視窗根的座標），選單由外層那一列掛。 */
+    onAlbumCellContextMenu: (Int, Offset) -> Unit = { _, _ -> },
 ) {
     val ui = LocalUiState.current
     when (body) {
@@ -5620,6 +5647,7 @@ private fun MessageBodyContent(
             strings = strings,
             modifier = modifier,
             onOpen = { at -> onOpenImage?.invoke(body.items, at) },
+            onCellContextMenu = onAlbumCellContextMenu,
         )
         is MessageBody.Voice -> VoiceBubble(
             client = client,

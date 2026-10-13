@@ -9,7 +9,15 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.isSpecified
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.unit.dp
 import de.connect2x.trixnity.client.MatrixClient
 import io.github.capricornus007.nashira.matrix.MediaSource
@@ -71,6 +79,14 @@ internal fun MessageAlbum(
     album: MessageBody.Album,
     strings: io.github.capricornus007.nashira.i18n.Strings,
     onOpen: (Int) -> Unit,
+    /**
+     * 右鍵點**某一格**時要叫出選單：Telegram 桌面（tdesktop）的分派方式是
+     * 「指針落在格子上＝那一則訊息自己的選單，落在整組其他位置＝以區塊頭那一則為準」
+     * （`history_view_list_widget.cpp:4050` 取 `_overItemExact`、
+     * `history_view_context_menu.cpp:603` 的 `asGroup = (request.pointState != PointState::GroupPart)`）。
+     * 給的座標是**相對視窗根**的，因為選單由外層那一列掛，座標要能換算到列的框架。
+     */
+    onCellContextMenu: (index: Int, rootPosition: Offset) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
 ) {
     val ui = LocalUiState.current
@@ -89,7 +105,22 @@ internal fun MessageAlbum(
                         is MediaSource.Encrypted -> s.file.url
                     }
                     val hidden = mxc != null && mxc in ui.hiddenMedia
-                    Box(Modifier.weight(item.ratioForLayout()).height(height)) {
+                    // 格子自己的右鍵要回報「相對視窗根」的座標：選單是外層那一列掛的，
+                    // 給相對本格的偏移會讓選單開在那一格的左上角。PointerInputScope 這版
+                    // 沒有 localToRoot，所以自己記格子在視窗裡的位置再加上去。
+                    val cellIndex = first + col
+                    var cellOrigin by remember(cellIndex) { mutableStateOf(Offset.Zero) }
+                    Box(
+                        Modifier
+                            .weight(item.ratioForLayout())
+                            .height(height)
+                            .onGloballyPositioned { cellOrigin = it.positionInRoot() }
+                            .contextMenuGestures { at ->
+                                // 觸控長按沒有指標位置（給的是 Offset.Unspecified），
+                                // 那種情況**不能加**格子原點——加完會變 NaN，選單直接飛掉。
+                                onCellContextMenu(cellIndex, if (at.isSpecified) cellOrigin + at else at)
+                            },
+                    ) {
                         MessageImage(
                             client = client,
                             source = item.source,
