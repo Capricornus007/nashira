@@ -9,15 +9,10 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.isSpecified
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.unit.dp
 import de.connect2x.trixnity.client.MatrixClient
 import io.github.capricornus007.nashira.matrix.MediaSource
@@ -25,7 +20,7 @@ import io.github.capricornus007.nashira.matrix.MessageBody
 
 /**
  * 相簿區塊比單張寬一點點：單張上限 264.dp 是為了不擠掉發送者名字，
- * 但三欄時 264 会让每格只剩 85dp、根本看不出內容，所以放到 320.dp；再寬就頂到同一條限制。
+ * 但三欄時 264 會讓每格只剩 85dp、根本看不出內容，所以放到 320.dp；再寬就頂到同一條限制。
  */
 private val AlbumBlockWidth = 320.dp
 private val AlbumCellGap = 2.dp
@@ -80,13 +75,19 @@ internal fun MessageAlbum(
     strings: io.github.capricornus007.nashira.i18n.Strings,
     onOpen: (Int) -> Unit,
     /**
-     * 右鍵點**某一格**時要叫出選單：Telegram 桌面（tdesktop）的分派方式是
-     * 「指針落在格子上＝那一則訊息自己的選單，落在整組其他位置＝以區塊頭那一則為準」
-     * （`history_view_list_widget.cpp:4050` 取 `_overItemExact`、
-     * `history_view_context_menu.cpp:603` 的 `asGroup = (request.pointState != PointState::GroupPart)`）。
-     * 給的座標是**相對視窗根**的，因為選單由外層那一列掛，座標要能換算到列的框架。
+     * 回報每一格在視窗裡的矩形，給外層那一列做右鍵命中測試。
+     *
+     * **為什麼不由格子自己接右鍵**：氣泡裡的圖片自己就是 `clickable`
+     *（`MessageImage.kt:196`），按下那一下一定先被它消費；上一版讓格子自己掛手勢
+     * 並在外層加「已消費就跳過」的檢查，結果格子與整列都以為對方會開 → 右鍵完全失效
+     *（用戶 2026-10-13 實測）。所以手勢只給一列一份，格子只負責報位置。
+     *
+     * 分派語意照 tdesktop：指針落在格子上＝那一格對應的那則訊息
+     *（`history_view_context_menu.cpp:603` 的 `asGroup = pointState != GroupPart`、
+     * `history_view_list_widget.cpp:4050` 取 `_overItemExact`），落在說明文字或縫隙
+     * 就退回整組第一則＝區塊頭。
      */
-    onCellContextMenu: (index: Int, rootPosition: Offset) -> Unit = { _, _ -> },
+    onCellRect: (index: Int, rectInRoot: Rect) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
 ) {
     val ui = LocalUiState.current
@@ -109,17 +110,11 @@ internal fun MessageAlbum(
                     // 給相對本格的偏移會讓選單開在那一格的左上角。PointerInputScope 這版
                     // 沒有 localToRoot，所以自己記格子在視窗裡的位置再加上去。
                     val cellIndex = first + col
-                    var cellOrigin by remember(cellIndex) { mutableStateOf(Offset.Zero) }
                     Box(
                         Modifier
                             .weight(item.ratioForLayout())
                             .height(height)
-                            .onGloballyPositioned { cellOrigin = it.positionInRoot() }
-                            .contextMenuGestures { at ->
-                                // 觸控長按沒有指標位置（給的是 Offset.Unspecified），
-                                // 那種情況**不能加**格子原點——加完會變 NaN，選單直接飛掉。
-                                onCellContextMenu(cellIndex, if (at.isSpecified) cellOrigin + at else at)
-                            },
+                            .onGloballyPositioned { onCellRect(cellIndex, it.boundsInRoot()) },
                     ) {
                         MessageImage(
                             client = client,

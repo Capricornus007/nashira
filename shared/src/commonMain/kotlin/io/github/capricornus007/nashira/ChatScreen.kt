@@ -11,6 +11,7 @@ import androidx.compose.foundation.gestures.anchoredDraggable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.animateTo
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -254,7 +255,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.geometry.isSpecified
 
 /**
  * Space 欄（最左那條）：預設就是「只剩頭貼」的窄欄，拖到 [SpaceRailNamesFromDp] 以上
@@ -1877,7 +1877,11 @@ private fun AccountBar(
             modifier = modifier.padding(6.dp).navigationBarsPadding(),
         ) {
             Box(
-                Modifier.size(46.dp).clip(CircleShape).clickable { onOpenAccount() },
+                // **必須湊成正方形**：外層給的是「那一欄的寬」這種寬度限制，內容再寫死 46.dp
+                // 就會讓整塊變成「寬 52、高 58」的長方形，而 CircleShape 在長方形上畫出來
+                // 就是一顆蛋／藥丸（用戶 2026-10-13 點名「爲什麼不是圓形」）。
+                // 改成填滿寬度、高度用 aspectRatio 跟隨，Surface 自己就成正方形。
+                Modifier.fillMaxWidth().aspectRatio(1f).clip(CircleShape).clickable { onOpenAccount() },
                 contentAlignment = Alignment.Center,
             ) {
                 AvatarImage(client, avatarUrl, displayName, Modifier.size(34.dp).clip(CircleShape))
@@ -4686,6 +4690,9 @@ private fun MessageRow(
     // 「下載／隱藏」要對**點的那一格**生效，這是 tdesktop 的分派方式
     //（`history_view_context_menu.cpp:603` 的 `asGroup = pointState != GroupPart`）。
     var albumCell by remember(rowKey) { mutableStateOf(-1) }
+    // 格子在視窗裡的矩形。**故意用普通 Map、不用 snapshot state**：它只在按下那一刻被讀一次，
+    // 寫入卻發生在每一次排版（捲動時每幀都在變），用 mutableStateMapOf 會讓這一列跟著每幀重組。
+    val albumCellRects = remember(rowKey) { mutableMapOf<Int, Rect>() }
     // 待送訊息要有真狀態。Trixnity 對「憑證被拒／網路斷線」這類失敗**不寫 sendError**，
     // 只在背後無限重試（2026-09-30 實測：三筆待送掛了一整天、資料庫裡連錯誤都是空的），
     // 所以不能只等 sendError——超過 15 秒還沒被伺服器回音，就明講「未送達」。
@@ -4742,10 +4749,11 @@ private fun MessageRow(
                     // 多選模式，結果整個動作菜單（回覆/複製/反應/轉發…）只剩桌面
                     // hover 浮條進得去（用戶回報）；多選改由菜單裡的「多選」進入。
                     onContextMenu = { offset ->
+                        // 命中測試：offset 是相對這一列的座標，加上列在視窗裡的原點換成視窗座標，
+                        // 再比對格子回報過的矩形。點在格子上就記那一格，點在說明文字／縫隙就 -1。
+                        val rootAt = boxOrigin + offset
+                        albumCell = albumCellRects.entries.firstOrNull { (_, rect) -> rect.contains(rootAt) }?.key ?: -1
                         menuAnchor = offset
-                        // 這一路是「整列」的右鍵：格子自己會先吃掉那一下（見 MessageAlbum），
-                        // 走到這裡就代表點的不是格子，所以要清掉格子序號退回整組語意。
-                        albumCell = -1
                         menuOpen = true
                     },
                 )
@@ -4845,14 +4853,7 @@ private fun MessageRow(
                         .padding(top = if (grouped) 0.dp else 2.dp)
                         .alpha(if (msg.pending && msg.sendError == null && !pendingStale) 0.55f else 1f),
                     onOpenImage = onOpenImage,
-                    onAlbumCellContextMenu = { index, rootAt ->
-                        albumCell = index
-                        // 格子回報的是「相對視窗根」的座標，而選單是掛在這一列外層 Box 上的
-                        // Popup，所以要減掉 Box 自己在視窗裡的位置才對得準（否則選單會偏到別處）。
-                        // 觸控長按那一路是 Unspecified（沒有指標），減了會變 NaN，原樣傳回讓選單自己算位置。
-                        menuAnchor = if (rootAt.isSpecified) rootAt - boxOrigin else Offset.Unspecified
-                        menuOpen = true
-                    },
+                    onAlbumCellRect = { index, rect -> albumCellRects[index] = rect },
                 )
                 when {
                     msg.sendError != null -> Text(
@@ -5544,8 +5545,8 @@ private fun MessageBodyContent(
     /** 訊息裡點 `#標籤`：叫出這一屋的訊息搜尋並帶入那個詞（Telegram 的行為）。 */
     onHashtag: (String) -> Unit = {},
     onOpenImage: ((List<MessageBody.Image>, Int) -> Unit)? = null,
-    /** 相簿某一格被右鍵點到（格子的序 ＋ 相對視窗根的座標），選單由外層那一列掛。 */
-    onAlbumCellContextMenu: (Int, Offset) -> Unit = { _, _ -> },
+    /** 相簿每一格在視窗裡的矩形（給這一列做右鍵命中測試；手勢由列獨佔）。 */
+    onAlbumCellRect: (Int, Rect) -> Unit = { _, _ -> },
 ) {
     val ui = LocalUiState.current
     when (body) {
@@ -5647,7 +5648,7 @@ private fun MessageBodyContent(
             strings = strings,
             modifier = modifier,
             onOpen = { at -> onOpenImage?.invoke(body.items, at) },
-            onCellContextMenu = onAlbumCellContextMenu,
+            onCellRect = onAlbumCellRect,
         )
         is MessageBody.Voice -> VoiceBubble(
             client = client,

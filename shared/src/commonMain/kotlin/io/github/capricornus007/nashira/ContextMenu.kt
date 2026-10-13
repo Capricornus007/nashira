@@ -69,11 +69,10 @@ fun Modifier.contextMenuGestures(
         awaitPointerEventScope {
             while (true) {
                 val event = awaitPointerEvent(PointerEventPass.Main)
-                // 已被下層吃掉的不能再算一次：Main pass 是「子先父後」，相簿的格子自己會
-                // 處理那一下右鍵，同一列的外層節點照樣收得到，不擋就會兩個選單同時彈出。
-                if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed &&
-                    !event.changes.any { it.isConsumed }
-                ) {
+                // **不要**在這裡看「事件是否已被下層消費」就跳過：氣泡裡的圖片／連結
+                // 自己就是 clickable，按下那一下一定先被它們吃掉。上一版加了這道檢查，
+                // 結果整列右鍵全部失效（用戶 2026-10-13 實測「根本沒出右鍵菜單」）。
+                if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed) {
                     // 位置要一起帶出去：桌面選單要開在指標處，不然滑鼠在右邊、選單卻從列首彈出。
                     // 這裡給的是「距本節點頂端」的局部座標，**不要再做任何修正**：
                     // 換算成視窗絕對座標、以及「放不下就往回挪」全部由 ContextMenuSurface 負責。
