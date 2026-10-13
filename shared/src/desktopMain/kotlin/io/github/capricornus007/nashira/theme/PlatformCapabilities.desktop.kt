@@ -5,6 +5,9 @@ actual val dynamicColorSupported: Boolean = false
 actual val backgroundSyncSupported: Boolean = false
 actual val keyboardLayoutSettingsSupported: Boolean = true
 
+/** 托盤只有桌面有（AWT SystemTray / XEmbed）。 */
+actual val trayIconSupported: Boolean = true
+
 actual fun applyBackgroundSync(enabled: Boolean) = Unit
 
 actual val platformDeviceDisplayName: String = "Nashira on Linux"

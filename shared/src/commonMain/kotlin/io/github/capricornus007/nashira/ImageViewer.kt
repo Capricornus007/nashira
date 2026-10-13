@@ -69,11 +69,13 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import de.connect2x.trixnity.client.MatrixClient
 import de.connect2x.trixnity.client.media.MediaService
+import de.connect2x.trixnity.clientserverapi.model.media.ThumbnailResizingMethod
 import de.connect2x.trixnity.utils.toByteArray
 import io.github.capricornus007.nashira.matrix.MediaSource
 import io.github.capricornus007.nashira.matrix.MessageBody
 import kotlin.time.Clock
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -689,12 +691,19 @@ private fun GalleryThumb(
         if (bitmap != null) return@LaunchedEffect
         val decoded = runCatching {
             val service = client.di.get<MediaService>()
-            val bytes = service.getThumbnail(
-                mxc,
-                GalleryThumbPx.toLong(),
-                GalleryThumbPx.toLong(),
-                maxSize = NoMediaLimit,
-            ).getOrNull()?.toByteArray(MediaReadScope)
+            // 併發閘門見 `ThumbnailFetchGate`：6614 格各自開一條協程會把頻寬切成 24 等分，
+            // 每格都動不了；限到 4 條之後眼前這一屏先出圖，後面的排隊。
+            val bytes = ThumbnailFetchGate.withPermit {
+                service.getThumbnail(
+                    mxc,
+                    GalleryThumbPx.toLong(),
+                    GalleryThumbPx.toLong(),
+                    // 與時間線同一個理由：`method` 不傳就走 CROP，那是 Element 沒熱過的檔，
+                    // 家伺服器要現生成（冷檔動輒二十秒）。
+                    method = ThumbnailResizingMethod.SCALE,
+                    maxSize = NoMediaLimit,
+                ).getOrNull()?.toByteArray(MediaReadScope)
+            }
             // 0 位元組在實測裡真的出現過（家伺服器對某些遠端媒體回空 body），不能當成成功
             bytes?.takeIf { it.isNotEmpty() }?.let { decodeImageBitmap(it, maxDimension = GalleryThumbPx * 2) }
         }.getOrNull()

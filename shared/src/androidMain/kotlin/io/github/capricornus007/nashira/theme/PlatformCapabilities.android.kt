@@ -7,6 +7,9 @@ actual val dynamicColorSupported: Boolean = android.os.Build.VERSION.SDK_INT >= 
 actual val backgroundSyncSupported: Boolean = true
 actual val keyboardLayoutSettingsSupported: Boolean = false
 
+/** 托盤只有桌面有（AWT SystemTray / XEmbed）。 */
+actual val trayIconSupported: Boolean = false
+
 /**
  * 啟動／停止背景同步。服務類別在 androidApp 模組（shared 看不到它），
  * 所以用 Intent 的 component 名稱指定，避免把 app 模組反向依賴進 shared。

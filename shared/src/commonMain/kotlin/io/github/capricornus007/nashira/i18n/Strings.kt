@@ -126,6 +126,10 @@ interface Strings {
     val personalization: String
     val appearanceHint: String
     val chatListHint: String
+    /** 桌面：系統整合那一組（Telegram 的「System integration」對位）。 */
+    val systemIntegration: String
+    val showTrayIcon: String
+    val showTrayIconHint: String
     val unreadIndicators: String
     val unreadIndicatorsHint: String
     val messagePreview: String

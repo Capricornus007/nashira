@@ -213,7 +213,8 @@ fun main(args: Array<String>) {
         // 要不吃架只能讓「搬行動作發生在 XIM 回調之內」——那是 JBR 內建的
         // ClientComponentCaretPositionTracker 的位置，外面模擬不出來。
 
-        if (traySource != null) {
+        // 「系統整合 → 顯示托盤圖示」關掉時整塊不建（用戶 2026-10-13 拿 Telegram 的開關點名）。
+        if (traySource != null && ui.showTrayIcon) {
             // 選單用 Compose 視窗，不用 AWT PopupMenu：後者在 Linux 上不走系統字體渲染
             // 管線（FreeType），中文缺筆畫、抗鋸齒差（2026-09-14 用戶對比 fcitx5 截圖）。
             var trayMenuOpen by remember { mutableStateOf(false) }
@@ -275,74 +276,87 @@ fun main(args: Array<String>) {
                 // remember：TrayIcon 必須全程同一個實例——下面只 add 一次，若每次重組都 new
                 // 一顆，托盤就會被疊成一排（用戶 2026-09-25 照片：右鍵一次多一顆）。
                 val trayIconAwt = remember(traySource) {
-                    java.awt.TrayIcon(awtTrayImage(traySource, TRAY_ICON_FALLBACK_PX)).apply {
-                        isImageAutoSize = true
-                    }
+                    // **構造本身就會拋**：X 那邊沒有托盤擁有者（bar 沒起來、或根本沒 WM）時，
+                    // `java.awt.TrayIcon` 直接丟 UnsupportedOperationException，而這行從前寫在
+                    // composition 裡 → 整個 app 一啟動就死（2026-10-13 在 Xvfb 上實測抓到：
+                    // 「Error was captured in composition」＋堆疊停在 Main.kt:278）。用戶的 i3 bar
+                    // 是 `mode hide`，同一條路在他機器上踩得到。
+                    // 拿不到圖示就整個托盤功能跳過：關閉行為看的是 `trayAttached`（見 hideOrExit），
+                    // 本來就會退回「直接離開進程」，不會把視窗藏進不存在的托盤。
+                    runCatching {
+                        java.awt.TrayIcon(awtTrayImage(traySource, TRAY_ICON_FALLBACK_PX)).apply {
+                            isImageAutoSize = true
+                        }
+                    }.onFailure {
+                        println("NASHIRA_TRAY: AWT 托盤不可用（${it.javaClass.simpleName}），這輪不掛托盤")
+                    }.getOrNull()
                 }
                 // AWT 字體渲染：系統屬性在 JVM 啟動時設定（main() 最前面），
                 // 這裡只設字體本身。抗鋸齒/LCD 子像素由 awt.useSystemAAFontSettings 控制。
                 // 監聽器與托盤註冊都收進 DisposableEffect：原本兩行直接寫在 Composable 本體，
                 // **每次重組就再 add 一次**——托盤被右鍵疊成一排、一次右鍵同時觸發好幾個監聽器
                 // （用戶 2026-09-25 照片）。一進一出，離開時也把圖示拿掉，不留孤兒。
-                DisposableEffect(trayIconAwt) {
-                    val listener = object : java.awt.event.MouseAdapter() {
-                        override fun mousePressed(e: java.awt.event.MouseEvent) {
-                            when (e.button) {
-                                java.awt.event.MouseEvent.BUTTON3 -> {
-                                    trayMenuScreenPos = java.awt.MouseInfo.getPointerInfo().location
-                                    trayMenuOpen = true
-                                }
-                                java.awt.event.MouseEvent.BUTTON1 -> showMainWindow()
-                            }
-                        }
-                    }
-                    val tray = java.awt.SystemTray.getSystemTray()
-                    trayIconAwt.addMouseListener(listener)
-                    onDispose {
-                        if (trayAttached) runCatching { tray.remove(trayIconAwt) }
-                        runCatching { trayIconAwt.removeMouseListener(listener) }
-                        trayAttached = false
-                    }
-                }
-                // 挂托盤＋自癒：
-                // 1) add 失敗（bar 正在重建、那一瞬間沒人擁有托盤）就每 2 秒重試。原本這裡是
-                //    `runCatching { tray.add(...) }` 把例外吞掉，結果行程活著、X 那邊卻完全沒有
-                //    圖示視窗，而且程式還以為自己有托盤——關窗就藏進不存在的托盤，叫不回來。
-                // 2) bar 被重建時（i3-msg restart / bar mode toggle / 換 WM），X 會把掛在舊 bar 下的
-                //    圖示視窗一併銷掉，而 AWT 永遠不會重新嵌入。所以自己盯 `_NET_SYSTEM_TRAY_S0`
-                //    的擁有者，換人就重掛。
-                LaunchedEffect(trayIconAwt) {
-                    val tray = java.awt.SystemTray.getSystemTray()
-                    val watch = TrayOwnerWatch()
-                    var owner = watch.owner()
-                    // 診斷：JNA 拿不到 X 連線時 owner() 回 -1，自癒條件永遠不成立，
-                    // 必須看得見才發現（用戶 2026-09-29：圖示不見、log 卻一聲不響）。
-                        try {
-                        while (true) {
-                            if (!trayAttached) {
-                                val attached = runCatching {
-                                    tray.add(trayIconAwt)
-                                    true
-                                }.getOrDefault(false)
-                                    if (attached) {
-                                    trayAttached = true
-                                    owner = watch.owner()
-                                    // 掛上去之後才問得到那一格多大（socket 這時才存在）
-                                    fitTrayIcon(trayIconAwt, traySource)
-                                }
-                            } else {
-                                val now = watch.owner()
-                                if (now > 0L && owner > 0L && now != owner) {
-                                    println("NASHIRA_TRAY: 托盤擁有者換了 $owner -> $now，重新嵌入")
-                                    runCatching { tray.remove(trayIconAwt) }
-                                    trayAttached = false
-                                    owner = now
+                if (trayIconAwt != null) {
+                    DisposableEffect(trayIconAwt) {
+                        val listener = object : java.awt.event.MouseAdapter() {
+                            override fun mousePressed(e: java.awt.event.MouseEvent) {
+                                when (e.button) {
+                                    java.awt.event.MouseEvent.BUTTON3 -> {
+                                        trayMenuScreenPos = java.awt.MouseInfo.getPointerInfo().location
+                                        trayMenuOpen = true
+                                    }
+                                    java.awt.event.MouseEvent.BUTTON1 -> showMainWindow()
                                 }
                             }
-                            delay(2_000L)
                         }
-                    } finally {
-                        watch.close()
+                        val tray = java.awt.SystemTray.getSystemTray()
+                        trayIconAwt.addMouseListener(listener)
+                        onDispose {
+                            if (trayAttached) runCatching { tray.remove(trayIconAwt) }
+                            runCatching { trayIconAwt.removeMouseListener(listener) }
+                            trayAttached = false
+                        }
+                    }
+                    // 挂托盤＋自癒：
+                    // 1) add 失敗（bar 正在重建、那一瞬間沒人擁有托盤）就每 2 秒重試。原本這裡是
+                    //    `runCatching { tray.add(...) }` 把例外吞掉，結果行程活著、X 那邊卻完全沒有
+                    //    圖示視窗，而且程式還以為自己有托盤——關窗就藏進不存在的托盤，叫不回來。
+                    // 2) bar 被重建時（i3-msg restart / bar mode toggle / 換 WM），X 會把掛在舊 bar 下的
+                    //    圖示視窗一併銷掉，而 AWT 永遠不會重新嵌入。所以自己盯 `_NET_SYSTEM_TRAY_S0`
+                    //    的擁有者，換人就重掛。
+                    LaunchedEffect(trayIconAwt) {
+                        val tray = java.awt.SystemTray.getSystemTray()
+                        val watch = TrayOwnerWatch()
+                        var owner = watch.owner()
+                        // 診斷：JNA 拿不到 X 連線時 owner() 回 -1，自癒條件永遠不成立，
+                        // 必須看得見才發現（用戶 2026-09-29：圖示不見、log 卻一聲不響）。
+                            try {
+                            while (true) {
+                                if (!trayAttached) {
+                                    val attached = runCatching {
+                                        tray.add(trayIconAwt)
+                                        true
+                                    }.getOrDefault(false)
+                                        if (attached) {
+                                        trayAttached = true
+                                        owner = watch.owner()
+                                        // 掛上去之後才問得到那一格多大（socket 這時才存在）
+                                        fitTrayIcon(trayIconAwt, traySource)
+                                    }
+                                } else {
+                                    val now = watch.owner()
+                                    if (now > 0L && owner > 0L && now != owner) {
+                                        println("NASHIRA_TRAY: 托盤擁有者換了 $owner -> $now，重新嵌入")
+                                        runCatching { tray.remove(trayIconAwt) }
+                                        trayAttached = false
+                                        owner = now
+                                    }
+                                }
+                                delay(2_000L)
+                            }
+                        } finally {
+                            watch.close()
+                        }
                     }
                 }
             }

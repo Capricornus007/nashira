@@ -65,6 +65,7 @@ import io.github.capricornus007.nashira.settings.SettingsSwitchItem
 import io.github.capricornus007.nashira.theme.ThemeMode
 import io.github.capricornus007.nashira.theme.dynamicColorSupported
 import io.github.capricornus007.nashira.theme.backgroundSyncSupported
+import io.github.capricornus007.nashira.theme.trayIconSupported
 import io.github.capricornus007.nashira.theme.keyboardLayoutSettingsSupported
 import io.github.capricornus007.nashira.theme.audioDeviceSettingsSupported
 import io.github.capricornus007.nashira.AudioDevices
@@ -292,6 +293,21 @@ private fun SettingsRoot(
                             }
                         }
                     }
+                }
+            }
+        }
+        // 系統整合（僅桌面）。關掉托盤時關閉行為會跟著變：`hideOrExit` 看的是 `trayAttached`，
+        // 沒有托盤就變成「直接離開程式」，不會把視窗藏進一個不存在的托盤再也叫不回來。
+        if (trayIconSupported) {
+            SettingsGroup(title = strings.systemIntegration) {
+                item { shape ->
+                    SettingsSwitchItem(
+                        shape = shape,
+                        title = strings.showTrayIcon,
+                        description = strings.showTrayIconHint,
+                        checked = ui.showTrayIcon,
+                        onCheckedChange = { ui.showTrayIcon = it },
+                    )
                 }
             }
         }

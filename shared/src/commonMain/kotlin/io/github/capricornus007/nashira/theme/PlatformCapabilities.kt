@@ -17,6 +17,9 @@ expect val backgroundSyncSupported: Boolean
  */
 expect val keyboardLayoutSettingsSupported: Boolean
 
+/** 桌面才有系統托盤；手機端不顯示「系統整合」那一組（Telegram 也是桌面才有）。 */
+expect val trayIconSupported: Boolean
+
 /** 「拖拽調高」那條邊界該用的滑鼠游標（上下雙箭頭）。 */
 expect val verticalResizeIcon: PointerIcon
 

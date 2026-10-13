@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import de.connect2x.trixnity.client.MatrixClient
 import de.connect2x.trixnity.core.MatrixServerException
 import de.connect2x.trixnity.client.media.MediaService
+import de.connect2x.trixnity.clientserverapi.model.media.ThumbnailResizingMethod
 import de.connect2x.trixnity.utils.toByteArray
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -356,7 +357,10 @@ internal object MediaBitmapCache {
 
     private fun sizeOf(bitmap: ImageBitmap): Long = bitmap.width.toLong() * bitmap.height * 4
 
-    fun get(key: String): ImageBitmap? = entries[key]
+    // 讀取要算「最近用過」：原本是純插入順序（最先存的先被丟），對 6614 格的附件面板
+    // 等於邊滾邊丟、滾回去全部重抓（用戶 2026-10-13「縮圖依舊加載的太慢」）。
+    // LinkedHashMap 沒有 commonMain 版的 accessOrder 建構子，用「移除再放回」湊出同一個語意。
+    fun get(key: String): ImageBitmap? = entries.remove(key)?.also { entries[key] = it }
 
     fun put(key: String, bitmap: ImageBitmap) {
         entries.remove(key)?.let { bytes -= sizeOf(it) }
@@ -451,6 +455,20 @@ private const val MediaTotalBudgetMs = 20_000L
  * scope 裡完成讀取，所以**不能**把「正在 await 結果的那個協程」交給它，否則自己等自己。
  */
 internal val MediaReadScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
+
+/**
+ * 附件面板縮圖抓取的併發閘門。
+ *
+ * 那面「所有照片」的格子是**一格一條協程**、全打同一個 host，最後擠在 HTTP 連線池
+ * 「每主機 24 條」那個數上（`HttpEngine.desktop.kt:22-23`）；他這條鏈路實測 150–280KB/s，
+ * 24 條同時跑就是每條 10KB/s 級——「6614 格全在轉圈、只有零星幾張出來」是這麼來的
+ *（用戶 2026-10-13 點名）。限到 4 條：單張 256px 縮圖幾十 KB，4 條同時剛好把頻寬吃滿，
+ * 也不會讓排在後面的格子把眼前這一屏擠死。
+ *
+ * **時間線那條刻意不套這個閘門**：它外面有 `mediaCallResultWithin` 的逾時預算，
+ * 等許可的時間會一起算進去，實測會把好圖判成「來源伺服器沒回應」。
+ */
+internal val ThumbnailFetchGate = kotlinx.coroutines.sync.Semaphore(permits = 4)
 
 private val MediaIoScope = kotlinx.coroutines.CoroutineScope(
     // ⚠️ 必須是 IO，**不能是 Default**。用戶 2026-10-07 反問「爲什麼頭像正常圖片不行」，
@@ -655,6 +673,11 @@ private suspend fun loadMediaBitmap(
                                 source.mxcUrl,
                                 ThumbnailWidth,
                                 ThumbnailHeight,
+                                // 上面那段註解講的是「跟 Element 一模一样的 800×600 scale」，
+                                // 但 `method` 從前**根本沒傳**，走 Trixnity 的預設 CROP——
+                                // 等於每個請求都是 Element 沒熱過的那一檔，冷檔要家伺服器現生成，
+                                // 正是「別人秒開、我們轉圈」的另一半原因。
+                                method = ThumbnailResizingMethod.SCALE,
                                 maxSize = NoMediaLimit,
                             )
                         }

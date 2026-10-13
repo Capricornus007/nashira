@@ -89,6 +89,9 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
     /** 聊天室列表第二行的最後一則訊息預覽 */
     var showMessagePreview by mutableStateOf(stored["showMessagePreview"]?.toBooleanStrictOrNull() ?: true)
 
+    /** 桌面：托盤圖示開關（預設開）。關掉之後關視窗就是直接離開，不會藏進托盤。 */
+    var showTrayIcon by mutableStateOf(stored["showTrayIcon"]?.toBooleanStrictOrNull() ?: true)
+
     /** 貼圖面板貼在輸入列上方（Discord/Telegram 慣例）或下方（面板不推走輸入列） */
 
     /**
@@ -259,6 +262,7 @@ class UiState(private val storage: SettingsStorage = SettingsStorage()) {
             "spaceIconMode" to spaceIconMode.name,
             "showUnreadIndicators" to showUnreadIndicators.toString(),
             "showMessagePreview" to showMessagePreview.toString(),
+            "showTrayIcon" to showTrayIcon.toString(),
             "membersPanelOpen" to membersPanelOpen.toString(),
             "backgroundSync" to backgroundSync.toString(),
             "sendShortcut" to sendShortcut.name,
