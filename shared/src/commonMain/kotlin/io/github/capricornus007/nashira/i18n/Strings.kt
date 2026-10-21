@@ -271,6 +271,8 @@ interface Strings {
     val sessionCurrent: String
     val verifySession: String
     val logoutSession: String
+    val logoutOtherDevices: String
+    val logoutOtherDevicesHint: String
     val cancel: String
     val loginUsername: String
     val loginMethodPassword: String

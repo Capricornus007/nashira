@@ -222,6 +222,24 @@ class VerificationRepository(private val session: MatrixSession) {
         SessionLogout.Done
     }
 
+    /**
+     * 一鍵登出其他所有工作階段：一次 deleteDevices（矩陣的批量端點），不是逐台迴圈。
+     * 目前這台永遠保留；沒有其他裝置時直接算成功。
+     */
+    suspend fun logoutOtherDevices(): Result<SessionLogout> = runCatching {
+        val others = sessions().getOrThrow()
+            .filterNot { it.isCurrent }
+            .map { it.deviceId }
+        if (others.isEmpty()) {
+            return@runCatching SessionLogout.Done
+        }
+        val uia = session.client.api.device.deleteDevices(others).getOrThrow()
+        if (uia !is de.connect2x.trixnity.clientserverapi.client.UIA.Success) {
+            error("需要密碼再次確認才能登出其他工作階段")
+        }
+        SessionLogout.Done
+    }
+
     /** 只有「端點不存在」才轉帳戶管理頁；其他錯誤（權限、網路）照原樣回報。 */
     private suspend fun accountManagementUrl(deviceId: String, error: Throwable): String? {
         val unrecognized = error is MatrixServerException && error.errorResponse is ErrorResponse.Unrecognized

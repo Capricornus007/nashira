@@ -234,6 +234,8 @@ object KoStrings : Strings by EnStrings {
     override val sessionCurrent = "이 기기"
     override val verifySession = "인증"
     override val logoutSession = "로그아웃"
+    override val logoutOtherDevices = "다른 세션에서 로그아웃"
+    override val logoutOtherDevicesHint = "이 기기를 제외한 모든 기기에서 로그아웃합니다."
     override val cancel = "취소"
     override val loginUsername = "사용자 이름"
     override val loginMethodPassword = "사용자 이름 및 비밀번호"

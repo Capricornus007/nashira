@@ -227,6 +227,8 @@ object JaStrings : Strings by EnStrings {
     override val sessionCurrent = "このデバイス"
     override val verifySession = "認証"
     override val logoutSession = "サインアウト"
+    override val logoutOtherDevices = "他のセッションからサインアウト"
+    override val logoutOtherDevicesHint = "この端末以外のすべての端末からサインアウトします。"
     override val cancel = "キャンセル"
     override val loginUsername = "ユーザー名"
     override val loginMethodPassword = "ユーザー名とパスワード"

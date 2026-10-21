@@ -157,6 +157,8 @@ object EnStrings : Strings {
     override val sessionCurrent = "This device"
     override val verifySession = "Verify"
     override val logoutSession = "Sign out"
+    override val logoutOtherDevices = "Sign out other sessions"
+    override val logoutOtherDevicesHint = "Sign out every device except this one."
     override val cancel = "Cancel"
     override val loginUsername = "Username"
     override val loginMethodPassword = "Username and password"

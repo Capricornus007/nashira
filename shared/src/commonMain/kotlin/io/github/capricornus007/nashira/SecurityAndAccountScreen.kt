@@ -302,6 +302,27 @@ fun SecurityAndAccountScreen(
                     if (busyMessage == strings.verificationInProgressShort) busyMessage = null
                 }
             },
+            onLogoutOtherDevices = {
+                if (busyMessage != null) return@SessionsSection
+                scope.launch {
+                    busyMessage = strings.logoutOtherDevices
+                    repository.logoutOtherDevices()
+                        .onSuccess { outcome ->
+                            when (outcome) {
+                                SessionLogout.Done -> reloadSessions()
+                                is SessionLogout.OpenAccountManagement -> {
+                                    if (!accountPageOpened) {
+                                        accountPageOpened = true
+                                        openLink(outcome.url)
+                                    }
+                                    busyMessage = strings.sessionLogoutViaAccountPage
+                                }
+                            }
+                        }
+                        .onFailure { actionError = it.message ?: strings.sessionLogoutFailed }
+                    if (busyMessage == strings.logoutOtherDevices) busyMessage = null
+                }
+            },
         )
 
         busyMessage?.let {
@@ -510,6 +531,7 @@ private fun SessionsSection(
     onRefresh: () -> Unit,
     onVerify: (String) -> Unit,
     onLogoutSession: (String) -> Unit,
+    onLogoutOtherDevices: () -> Unit,
 ) {
     SettingsGroup(title = strings.sessions) {
         item { shape ->
@@ -522,6 +544,16 @@ private fun SessionsSection(
             ) {
                 if (refreshing) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
             }
+        }
+        item { shape ->
+            SettingsItem(
+                shape = shape,
+                icon = Icons.AutoMirrored.Filled.ExitToApp,
+                title = strings.logoutOtherDevices,
+                description = strings.logoutOtherDevicesHint,
+                enabled = !refreshing && sessions.any { !it.isCurrent },
+                onClick = onLogoutOtherDevices,
+            )
         }
         if (error != null) {
             item { shape ->
