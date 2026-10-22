@@ -15,6 +15,7 @@ import io.github.capricornus007.nashira.App
 import io.github.capricornus007.nashira.AndroidNotifications
 import io.github.capricornus007.nashira.AppNotifications
 import io.github.capricornus007.nashira.NashiraUri
+import io.github.capricornus007.nashira.PendingRoomOpen
 import io.github.capricornus007.nashira.SettingsStorage
 import io.github.capricornus007.nashira.appContext
 import io.github.capricornus007.nashira.matrix.MatrixEngine
@@ -49,6 +50,7 @@ class MainActivity : ComponentActivity() {
         }.getOrNull() ?: true
         if (backgroundSync && TokenStorage().load() != null) SyncService.start(this)
         handleSsoIntent(intent)
+        handleRoomIntent(intent)
         setContent {
             App()
         }
@@ -58,6 +60,14 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleSsoIntent(intent)
+        handleRoomIntent(intent)
+    }
+
+    /** 點通知進來：`AndroidNotifications.show()` 帶的 `roomId` 交給 UI 側消費（見 PendingRoomOpen）。 */
+    private fun handleRoomIntent(intent: Intent) {
+        val room = intent.getStringExtra("roomId") ?: return
+        PendingRoomOpen.roomId = room
+        intent.removeExtra("roomId")
     }
 
     private fun handleSsoIntent(intent: Intent) {

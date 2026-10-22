@@ -358,6 +358,16 @@ fun ChatScreen(
                 }
             }
     }
+    // 點系統通知進來的房間：等摘要裡真的出現那一間再跳（冷啟動時通知比列表先到位）。
+    // 手機態還要順帶把頁面推成「聊天開著」，否則設了 selected 仍停在房間列表。
+    LaunchedEffect(summaries) {
+        val want = PendingRoomOpen.roomId ?: return@LaunchedEffect
+        val hit = summaries.firstOrNull { it.roomId.full == want } ?: return@LaunchedEffect
+        selected = hit
+        selectedSpace = null
+        mobileRoomOpen = true
+        PendingRoomOpen.roomId = null
+    }
     val channelTitle = selectedSpace?.name ?: strings.allRooms
     val spaceRooms = remember(snapshot) {
         snapshot.spaces.associate { space ->

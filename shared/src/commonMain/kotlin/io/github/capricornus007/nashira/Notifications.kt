@@ -18,8 +18,7 @@ import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flatMapLatest
 
 /** 平台通知能力接口；Android 在 MainActivity 注入實現，桌面用 notify-send。 */
-interface NotificationPlatform {
-    /** 應用是否在前台：前台時不發系統通知（使用者正在看 app）。 */
+interface NotificationPlatform {    /** 應用是否在前台：前台時不發系統通知（使用者正在看 app）。 */
     val foreground: StateFlow<Boolean>
 
     fun ensureChannels() = Unit
@@ -39,6 +38,24 @@ object AppNotifications {
         platform.show(roomKey, title, body, mentionCount)
 
     val foreground: StateFlow<Boolean> get() = platform.foreground
+}
+
+/**
+ * 點系統通知帶進來的房間 id：`MainActivity` 寫、`ChatScreen` 消費。
+ *
+ * 為什麼不直接把 intent 塞進 UI：Compose 那側拿不到 Activity 的 intent；而且冷啟動時
+ * 通知比房間摘要流先到位，得等 `summaries` 裡真的出現那一間才跳得過去——所以留成
+ * 可觀察的全域值，讓消費端「等到了才清」，而不是讀一次沒有就丟掉。
+ * （舊行為：`AndroidNotifications.show()` 一直有 `putExtra("roomId", …)`，但
+ *  `MainActivity` 只處理 SSO 回調、全倉無人讀這條 extra ⇒ 點通知只會開 app、不進房間。）
+ */
+object PendingRoomOpen {
+    // 不用 `by mutableStateOf(...)`：那要 `getValue`／`setValue` 兩個委派運算子的 import，
+    // 少一個就是「編譯過但觀察不到」的那種坑（本倉 i18n 那邊踩過）。
+    private val state = androidx.compose.runtime.mutableStateOf<String?>(null)
+    var roomId: String?
+        get() = state.value
+        set(value) { state.value = value }
 }
 
 /**
