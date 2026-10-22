@@ -84,7 +84,7 @@ import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.Image
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.text.font.FontWeight
@@ -1532,14 +1532,13 @@ private fun RoomListAvatarRail(
     onSelect: (RoomSummary) -> Unit,
     onSearchClick: () -> Unit,
 ) {
-    // 懸停說明畫在 LazyColumn **外面**。畫在格子裡有兩個必死的後果：
-    // 一、寬度被 44dp 的格子夾死，房間名稱折成「#a / lin / ux」那種亂碼
-    //    （用戶 2026-10-12 截圖：「這個名稱預覽完全不應該這個樣子吧？」）；
-    // 二、就算搬到欄的層級，還是會被側欄右緣截掉（同一輪 #10 的「？？？？」）。
-    // 所以用 Popup（獨立窗口）＋自己量的視窗座標。
-    var tipAnchor by remember { mutableStateOf<Pair<String, Rect>?>(null) }
-    // remember 的 lambda 不是 @Composable，`.current` 要在外面讀好再帶進去
+    // 懸停說明一律用 Popup（獨立窗口）：畫在欄裡會被外層裁掉——
+    // 第一版畫在 44dp 的格子裡折成亂碼，第二版搬到欄的 Box 裡還是被側欄右緣
+    // 截成「#ar」（用戶 2026-10-12 #10「？？？？」）。
+    // 位置不再自己量：`remember 的 lambda 不是 @Composable`，`LocalDensity.current`
+    // 要在外面讀好再帶進去（只用来換算那 6dp 的間隙）。
     val railDensity = LocalDensity.current
+    val railGapPx = with(railDensity) { 6.dp.toPx() }
     Box(
         Modifier.fillMaxHeight().background(MaterialTheme.colorScheme.surfaceContainerHigh),
     ) {
@@ -1564,15 +1563,9 @@ private fun RoomListAvatarRail(
                     val unread = unreadByRoom[room.roomId] ?: UnreadState()
                     val hoverSource = remember(room.roomId) { MutableInteractionSource() }
                     val hovered by hoverSource.collectIsHoveredAsState()
-                    LaunchedEffect(hovered, room.roomId) {
-                        if (!hovered && tipAnchor?.first == room.name) tipAnchor = null
-                    }
                     Box(
                         Modifier
                             .hoverable(hoverSource)
-                            .onGloballyPositioned { coords ->
-                                if (hovered) tipAnchor = room.name to coords.boundsInWindow()
-                            }
                             .padding(horizontal = 8.dp),
                         contentAlignment = Alignment.Center,
                     ) {
@@ -1587,6 +1580,49 @@ private fun RoomListAvatarRail(
                             contentAlignment = Alignment.Center,
                         ) {
                             RoomAvatar(roomRepository, room, Modifier.size(40.dp).clip(CircleShape))
+                            // 名稱提示掛在**這一列自己**的窗口上（#118）。
+                            // 原本是在 `onGloballyPositioned` 裡把 `boundsInWindow()` 存進
+                            // 一個共用的 `tipAnchor`，再由欄的最外層開 Popup——兩個毛病：
+                            // 一、每次排版都寫 state（捲動時每幀都寫），提示的位置因此會
+                            //    一直抖、還可能寫到別人那一列（同名房間更會互相蓋掉）；
+                            // 二、自己量的座標與 Popup 窗口那套座標系不一致，實測就是「歪」。
+                            //    右鍵選單（ContextMenuSurface）早就改成**用框架給的
+                            //    anchorBounds**、一條錯都沒出過，這裡照同一條路走：
+                            //    Popup 放進頭貼那個 Box，anchorBounds 就是這顆 44dp 格子，
+                            //    框架要我們回報什麼座標系，它就是什麼座標系。
+                            if (hovered) {
+                                Popup(
+                                    popupPositionProvider = remember(railGapPx) {
+                                        RailTooltipPositionProvider(railGapPx)
+                                    },
+                                    onDismissRequest = {},
+                                    properties = PopupProperties(
+                                        focusable = false,
+                                        dismissOnClickOutside = false,
+                                        usePlatformDefaultWidth = false,
+                                    ),
+                                ) {
+                                    Text(
+                                        text = room.name,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.inverseOnSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier
+                                            // widthUnbounded：Popup 是獨立窗口，視窗尺寸會變成
+                                            // 內容的**最小約束**（托盤選單 #79 那條同一件事）——
+                                            // 照窗口去量，長名字就被夾回一豎條亂碼。
+                                            // 先讓它按自己想要的寬度量，再用 320dp 上限截長名。
+                                            .widthUnbounded()
+                                            .widthIn(max = 320.dp)
+                                            .background(
+                                                MaterialTheme.colorScheme.inverseSurface,
+                                                RoundedCornerShape(8.dp),
+                                            )
+                                            .padding(horizontal = 9.dp, vertical = 5.dp),
+                                    )
+                                }
+                            }
                         }
                         if (unread.count > 0 || unread.unread) {
                             UnreadBadge(
@@ -1599,37 +1635,9 @@ private fun RoomListAvatarRail(
                 }
             }
         }
-        tipAnchor?.let { (name, rect) ->
-            // 用 Popup（獨立窗口）而不是畫在欄裡：畫在欄裡會被外層裁掉——
-            // 第一版畫在 44dp 的格子裡折成亂碼，第二版搬到欄的 Box 裡仍然被側欄右緣
-            // 截成「#ar」（用戶 2026-10-12 #10「？？？？」）。獨立窗口不受任何祖先裁切。
-            Popup(
-                popupPositionProvider = remember(rect) {
-                    RailTooltipPositionProvider(rect, with(railDensity) { 6.dp.toPx() })
-                },
-                onDismissRequest = {},
-                properties = PopupProperties(
-                    focusable = false,
-                    dismissOnClickOutside = false,
-                    usePlatformDefaultWidth = false,
-                ),
-            ) {
-                Text(
-                    text = name,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.inverseOnSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .widthIn(max = 320.dp)
-                        .background(MaterialTheme.colorScheme.inverseSurface, RoundedCornerShape(8.dp))
-                        .padding(horizontal = 9.dp, vertical = 5.dp),
-                )
-            }
-        }
+        // 名稱提示不再畫在欄的層級：它現在掛在每一列自己的頭貼 Box 上（見上面 #118 的註解）。
     }
 }
-
 /**
  * 標題列下面的搜尋列（Telegram「在這一屋里搜全部訊息」那條路）。
  * 結果一律限目前房間（`RoomRepository.searchMessages` 自己帶 rooms 過濾），
@@ -1785,12 +1793,16 @@ private fun RoomSearchBar(
 }
 
 /**
- * 收欄態名稱提示的位置：貼在頭貼**右邊**、與該列垂直置中（Telegram／Discord 都是這樣），
- * 再夾進窗口內，免得最下面幾列的提示跑到窗口外面。座標用 `boundsInWindow()`，與 Popup
- * 的 offset 同一個座標系（右鍵選單那側已證實這條路走得通，見 ContextMenuSurface）。
+ * 收欄態名稱提示的位置（#118）：貼在頭貼**右邊**、與該列垂直置中
+ * （Telegram／Discord 都是這樣），再整塊夾進窗口內，免得最下面幾列的提示跑到窗口外面。
+ *
+ * ⚠️ 只准用框架給的 `anchorBounds`／`windowSize`／`popupContentSize`——這三個同一套座標系，
+ * 上一版自己拿 `boundsInWindow()` 換算，座標系對不上就是「歪」的由來
+ * （右鍵選單改成用 anchorBounds 之後再也沒歪過，同一條教訓見 HANDOFF #80：
+ * 「桌面端 Popup 的 anchorBounds／windowSize 語意未確認，別再憑猜改」——
+ * 所以现在也不猜，全部用框架給的值）。
  */
 private class RailTooltipPositionProvider(
-    private val anchor: Rect,
     private val gapPx: Float,
 ) : PopupPositionProvider {
     override fun calculatePosition(
@@ -1798,11 +1810,15 @@ private class RailTooltipPositionProvider(
         windowSize: IntSize,
         layoutDirection: LayoutDirection,
         popupContentSize: IntSize,
-    ): IntOffset = IntOffset(
-        (anchor.right + gapPx).roundToInt(),
-        (anchor.center.y - popupContentSize.height / 2f).roundToInt()
-            .coerceIn(0, (windowSize.height - popupContentSize.height).coerceAtLeast(0)),
-    )
+    ): IntOffset {
+        // 先夾右下界再夾 0：提示比窗口還寬時（收欄態被拉到最窄）退回左緣，不會跑到負座標
+        val maxX = (windowSize.width - popupContentSize.width).coerceAtLeast(0)
+        val maxY = (windowSize.height - popupContentSize.height).coerceAtLeast(0)
+        return IntOffset(
+            (anchorBounds.right + gapPx.roundToInt()).coerceIn(0, maxX),
+            (anchorBounds.center.y - popupContentSize.height / 2).coerceIn(0, maxY),
+        )
+    }
 }
 
 /**
