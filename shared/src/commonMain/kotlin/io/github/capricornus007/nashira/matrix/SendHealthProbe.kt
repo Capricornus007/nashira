@@ -15,7 +15,7 @@ import kotlin.time.Clock
  * ——這三種都**不會**寫 `sendError`，例外一路冒到 `retryLoop` 只留一行 warn
  * （2026-09-30 實測：三筆待送掛了一整天，資料庫裡連錯誤欄位都是空的）。
  * 所以畫面只能靠「超過 15 秒沒被回音」判斷卡住，判斷不出**原因**；
- * 而「網路一會兒就好」跟「你要重新登入」是两件完全不同的事，用戶得知道是哪一件（#75）。
+ * 而「網路一會兒就好」跟「你要重新登入」是兩件完全不同的事，用戶得知道是哪一件（#75）。
  *
  * 兩段式探測：
  * 1. `/versions` 不帶憑證也該有回應 → 這關就測**傳輸層＋憑證層**
@@ -35,11 +35,17 @@ private var probeAtMillis = 0L
 /** 卡住的原因，翻成人話；查不出來回 null（呼叫端退回「未送達·仍在自動重試」）。 */
 suspend fun diagnoseSendFailure(client: MatrixClient): String? = probeLock.withLock {
     val now = Clock.System.now().toEpochMilliseconds()
-    if (probeAtMillis > 0 && now - probeAtMillis < ProbeCacheMillis) return probeReason
-    val reason = runCatching { probeOnce(client) }.getOrElse { friendlyError(it) }
-    probeReason = reason
-    probeAtMillis = now
-    reason
+    val fresh = probeAtMillis > 0 && now - probeAtMillis < ProbeCacheMillis
+    if (fresh) {
+        probeReason
+    } else {
+        // 探測本身炸掉（例如 client 已經登出、DI 拿不到 service）也不能把例外丟回 UI：
+        // 那一列的狀態文字要是空的，用戶就什麼都不知道；拿例外翻成人話至少講得出話。
+        val reason = runCatching { probeOnce(client) }.getOrElse { friendlyError(it) }
+        probeReason = reason
+        probeAtMillis = now
+        reason
+    }
 }
 
 private suspend fun probeOnce(client: MatrixClient): String? {

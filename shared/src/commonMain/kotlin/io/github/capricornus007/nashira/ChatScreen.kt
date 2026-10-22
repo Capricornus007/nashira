@@ -151,6 +151,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MailOutline
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.MoreVert
@@ -1536,7 +1537,7 @@ private fun RoomListAvatarRail(
     // 第一版畫在 44dp 的格子裡折成亂碼，第二版搬到欄的 Box 裡還是被側欄右緣
     // 截成「#ar」（用戶 2026-10-12 #10「？？？？」）。
     // 位置不再自己量：`remember 的 lambda 不是 @Composable`，`LocalDensity.current`
-    // 要在外面讀好再帶進去（只用来換算那 6dp 的間隙）。
+    // 要在外面讀好再帶進去（只用來換算那 6dp 的間隙）。
     val railDensity = LocalDensity.current
     val railGapPx = with(railDensity) { 6.dp.toPx() }
     Box(
@@ -1800,7 +1801,7 @@ private fun RoomSearchBar(
  * 上一版自己拿 `boundsInWindow()` 換算，座標系對不上就是「歪」的由來
  * （右鍵選單改成用 anchorBounds 之後再也沒歪過，同一條教訓見 HANDOFF #80：
  * 「桌面端 Popup 的 anchorBounds／windowSize 語意未確認，別再憑猜改」——
- * 所以现在也不猜，全部用框架給的值）。
+ * 所以現在也不猜，全部用框架給的值）。
  */
 private class RailTooltipPositionProvider(
     private val gapPx: Float,
@@ -1814,10 +1815,9 @@ private class RailTooltipPositionProvider(
         // 先夾右下界再夾 0：提示比窗口還寬時（收欄態被拉到最窄）退回左緣，不會跑到負座標
         val maxX = (windowSize.width - popupContentSize.width).coerceAtLeast(0)
         val maxY = (windowSize.height - popupContentSize.height).coerceAtLeast(0)
-        return IntOffset(
-            (anchorBounds.right + gapPx.roundToInt()).coerceIn(0, maxX),
-            (anchorBounds.center.y - popupContentSize.height / 2).coerceIn(0, maxY),
-        )
+        val x = (anchorBounds.right + gapPx).roundToInt().coerceIn(0, maxX)
+        val y = (anchorBounds.center.y - popupContentSize.height / 2f).roundToInt().coerceIn(0, maxY)
+        return IntOffset(x, y)
     }
 }
 
@@ -4756,7 +4756,7 @@ private fun MessageRow(
         }
         pendingReason = io.github.capricornus007.nashira.matrix.diagnoseSendFailure(client)
     }
-    // 「發送中／失敗可重試」兩種狀態都要看得见：只有透明度不等於有狀態
+    // 「發送中／失敗可重試」兩種狀態都要看得見：只有透明度不等於有狀態
     val pendingFailed = msg.pending && (msg.sendError != null || pendingStale)
     val pendingInFlight = msg.pending && !pendingFailed
     val canRetryPending = msg.pending && msg.body is MessageBody.Text && msg.outboxTransactionId != null
