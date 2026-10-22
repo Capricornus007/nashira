@@ -21,6 +21,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Person
@@ -614,8 +616,21 @@ private fun SessionRow(
             description = subtitle,
             onClick = { expanded = !expanded },
         ) {
-            if (device.trust == SessionTrust.VERIFIED) {
-                Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            // trailing 槽不是 RowScope（SettingsWidgets.kt:114 `trailing: @Composable () -> Unit`），
+            // 兩個 Icon 直接並排要自己包一層 Row，否則會堆到下一行。
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (device.trust == SessionTrust.VERIFIED) {
+                    Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                }
+                if (!device.isCurrent) {
+                    // 展開提示：點這列會開出「驗證／登出」兩個按鈕，但原本除了已驗證那顆勾
+                    // 以外全列沒有一絲線索（用戶 2026-09-29：「列上沒有任何展開提示…等於沒有」）。
+                    Icon(
+                        if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
         if (expanded && !device.isCurrent) {
