@@ -139,6 +139,10 @@ interface Strings {
     val messageNotDelivered: String
     val messageNotDeliveredOffline: String
     val dropPendingFailed: String
+    /** 待送列的狀態標記：還沒拿到伺服器回音（#75，原本只有半透明、沒有任何文字）。 */
+    val messageSending: String
+    /** 失敗那側的一顆重試鈕；短到不會被通知欄／氣泡擠掉（`actionResendPending` 是選單用的長版）。 */
+    val retrySend: String
     val mediaFetchTimeout: String
     val mediaNoFile: String
     val jumpToOriginal: String

@@ -178,6 +178,8 @@ object EnStrings : Strings {
     override val messageNotDelivered = "Not delivered — still retrying"
     override val messageNotDeliveredOffline = "Not delivered: the connection to the server is down; it retries automatically once back"
     override val dropPendingFailed = "Could not remove this queued message"
+    override val messageSending = "Sending"
+    override val retrySend = "Retry"
     override val mediaFetchTimeout = "No response within 30 seconds (the connection or the origin server is too slow)"
     override val mediaNoFile = "The server returned no file"
     override val jumpToOriginal = "Jump to the original message"

@@ -3829,13 +3829,17 @@ private fun TimelinePane(
                             val text = msg.body as? MessageBody.Text ?: return@MessageRow
                             val tx = msg.outboxTransactionId
                             scope.launch {
-                                roomRepository.sendText(msg.roomId, text.text, text.formattedBody)
-                                    .onFailure { sendError = io.github.capricornus007.nashira.i18n.friendlyError(it) }
-                                // 重發成功後把卡住的那筆清掉，否則時間線會同時出現兩則
+                                // 先刪掉卡住的那筆、再發新的。順序反過來會撞車：
+                                // Trixnity 的 retryLoop 可能還在背後重試舊的那筆，
+                                // 新的又送一次 → 同一句話在房間裡出現兩遍（#75 的「可重試」要走這條）。
+                                // 刪除是**本機資料庫**的動作，斷網也做得動；真刪不掉會報出來，
+                                // 這時照樣發新的（寧可重複也不能連發都發不出去）。
                                 tx?.let { id ->
                                     roomRepository.dropPendingMessage(msg.roomId, id)
                                         .onFailure { sendError = strings.dropPendingFailed + "：" + (it.message ?: "") }
                                 }
+                                roomRepository.sendText(msg.roomId, text.text, text.formattedBody)
+                                    .onFailure { sendError = io.github.capricornus007.nashira.i18n.friendlyError(it) }
                             }
                         },
                         onDropPending = {
@@ -4714,6 +4718,23 @@ private fun MessageRow(
         }
     }
     val pendingStale = msg.pending && msg.sendError == null && nowMs - msg.timestamp > 15_000
+    // 卡住的原因要**當場問**（#75）：Trixnity 對 TLS 憑證失效／斷網／401 刷 token 失敗
+    // 一律不寫 sendError，所以光等資料庫那個欄位永遠是空的。
+    // `diagnoseSendFailure` 內建 30 秒快取與互斥鎖，一屏掛著好幾則也不會各打一次伺服器。
+    // 桌面端**沒有 Dispatchers.Main**：這裡只在 LaunchedEffect（compose 上下文）裡跑，
+    // 結果直接寫回 snapshot state，不做任何手動切執行緒。
+    var pendingReason by remember(rowKey) { mutableStateOf<String?>(null) }
+    LaunchedEffect(rowKey, pendingStale) {
+        if (!pendingStale) {
+            pendingReason = null
+            return@LaunchedEffect
+        }
+        pendingReason = io.github.capricornus007.nashira.matrix.diagnoseSendFailure(client)
+    }
+    // 「發送中／失敗可重試」兩種狀態都要看得见：只有透明度不等於有狀態
+    val pendingFailed = msg.pending && (msg.sendError != null || pendingStale)
+    val pendingInFlight = msg.pending && !pendingFailed
+    val canRetryPending = msg.pending && msg.body is MessageBody.Text && msg.outboxTransactionId != null
     // 反應選擇器：跟 action 選單分開兩個彈窗，從 hover 列的笑臉鈕或選單裡那列開
     var reactOpen by remember { mutableStateOf(false) }
     var reactAnchor by remember { mutableStateOf(Offset.Unspecified) }
@@ -4722,6 +4743,7 @@ private fun MessageRow(
     var boxOrigin by remember { mutableStateOf(Offset.Zero) }
     // drawBehind 的 lambda 不是 @Composable，MaterialTheme 只能在外面取好帶進去
     val highlightBarColor = MaterialTheme.colorScheme.primary
+    val pendingFailBarColor = MaterialTheme.colorScheme.error
     Box(
         Modifier
             .fillMaxWidth()
@@ -4744,6 +4766,14 @@ private fun MessageRow(
                 if (highlighted) {
                     drawRect(
                         color = highlightBarColor,
+                        size = Size(4.dp.toPx(), size.height),
+                    )
+                }
+                // 失敗／卡住的待送：左緣一道錯誤色。掃一眼就知道是哪一則出問題
+                // （只有狀態文字的話，長訊息裡要捲到那則才看得到）。
+                if (pendingFailed) {
+                    drawRect(
+                        color = pendingFailBarColor,
                         size = Size(4.dp.toPx(), size.height),
                     )
                 }
@@ -4861,26 +4891,73 @@ private fun MessageRow(
                     onHashtag = onHashtag,
                     modifier = Modifier
                         .padding(top = if (grouped) 0.dp else 2.dp)
-                        .alpha(if (msg.pending && msg.sendError == null && !pendingStale) 0.55f else 1f),
+                        .alpha(if (pendingInFlight) 0.55f else 1f),
                     onOpenImage = onOpenImage,
                     onAlbumCellRect = { index, rect -> albumCellRects[index] = rect },
                     selectionMode = selectionMode,
                     onToggleSelection = onToggleSelection,
                 )
-                when {
-                    msg.sendError != null -> Text(
-                        // 原因要一起講：只知道「沒送達」決定不了下一步
-                        // （是該重傳、該換小一點的圖、還是該等網路回來）
-                        "${strings.messageSendFailed}：${msg.sendError}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                    // 沒有 sendError 不代表送得出去：超過 15 秒還沒被伺服器回音就照實講
-                    pendingStale -> Text(
-                        if (syncBroken) strings.messageNotDeliveredOffline else strings.messageNotDelivered,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
+                // 待送狀態列（#75）。三個狀態要分開講，之前只有「半透明」這一個：
+                // ① 發送中：時鐘＋「發送中…」（還在等伺服器回音）
+                // ② 失敗（可重試）：感嘆號＋**一句短原因**＋一顆重試鈕。
+                //    原因優先順序：Trixnity 寫進資料庫的 sendError（權限、檔案過大那種）
+                //    → 當場探測到的（憑證失效／斷網／要重新登入）→ 探測也講不出來的
+                //    就老實說「未送達·仍在自動重試」，**不編一個原因**。
+                // ③ 非自己的待送不存在（outbox 只有自己的），所以這列只在 isOwn 才會出現，
+                //    但判別用 msg.pending 就夠了：Trixnity 只給自己的訊息入 outbox。
+                if (msg.pending) {
+                    Row(
+                        Modifier.padding(top = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    ) {
+                        if (pendingFailed) {
+                            Icon(
+                                Icons.Filled.Warning,
+                                contentDescription = null,
+                                modifier = Modifier.size(13.dp),
+                                tint = MaterialTheme.colorScheme.error,
+                            )
+                        } else {
+                            Icon(
+                                BarIcons.Clock,
+                                contentDescription = null,
+                                modifier = Modifier.size(13.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        val label = when {
+                            msg.sendError != null -> "${strings.messageSendFailed}：${msg.sendError}"
+                            pendingStale -> {
+                                val reason = pendingReason
+                                val head = if (syncBroken) strings.messageNotDeliveredOffline else strings.messageNotDelivered
+                                if (reason != null) "$head：$reason" else head
+                            }
+                            else -> strings.messageSending
+                        }
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (pendingFailed) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        // 重試鈕直接掛在失敗那列上：原本只能開右鍵選單找「重新發送」，
+                        // 用戶點完錯不知道自己有什麼選項（#75 要的「失敗（可重試）」）。
+                        if (pendingFailed && canRetryPending) {
+                            Text(
+                                strings.retrySend,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(5.dp))
+                                    .clickable { onResendPending() }
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                            )
+                        }
+                    }
                 }
                 // 反應：自己按過的用 primaryContainer 標出來，再點一下就撤回自己那則
                 if (msg.reactions.isNotEmpty()) {

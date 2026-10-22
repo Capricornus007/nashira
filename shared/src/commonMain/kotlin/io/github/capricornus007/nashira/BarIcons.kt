@@ -327,6 +327,25 @@ object BarIcons {
         }.build()
     }
     /**
+     * 時鐘（待送訊息的「發送中」標記）。material-icons-core 沒有 `AccessTime`/`Schedule`，
+     * 照本檔模式手繪：空心圓環＋兩根指針。
+     *
+     * 為什麼不能用 even-odd 挖空：`path` DSL 這一版沒有 `pathFillType` 參數可填，
+     * 所以圓環走 `stroke`（跟 [Contrast]、[Language] 同一種画法），指針走實心 `fill`。
+     */
+    val Clock: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "Clock", defaultWidth = 24.dp, defaultHeight = 24.dp,
+            viewportWidth = 24f, viewportHeight = 24f,
+        ).apply {
+            path(stroke = SolidColor(Color.Black), strokeLineWidth = 1.9f) { circle(12f, 12f, 8.6f) }
+            // 分針（往上）與時針（往右下）：粗細靠矩形寬度，實心比较好控
+            path(fill = SolidColor(Color.Black)) { rect(11.2f, 6.6f, 12.8f, 12.6f) }
+            path(fill = SolidColor(Color.Black)) { rect(11.4f, 11.2f, 16.2f, 12.8f) }
+        }.build()
+    }
+
+    /**
      * 「ID 徽章」：圓角牌＋裡面的 I 與 D。
      * 給「複製 Matrix ID」用——那顆通用「兩張紙」的複製圖示在Discord對照下被點名
      * （用戶 2026-09-29：「discord 那邊的圖標好像比起單純的複製圖標更合適」），

@@ -301,6 +301,8 @@ object JaStrings : Strings by EnStrings {
     override val messageNotDelivered = "未送信・再試行中"
     override val messageNotDeliveredOffline = "未送信：サーバーとの接続が切れています。回復後に自動で再試行します"
     override val dropPendingFailed = "この未送信メッセージを削除できませんでした"
+    override val messageSending = "送信中…"
+    override val retrySend = "再試行"
     override val mediaFetchTimeout = "30 秒以内に応答なし（接続または配信元サーバーが遅すぎます）"
     override val mediaNoFile = "サーバーからファイルが返されませんでした"
     override val jumpToOriginal = "元のメッセージへ移動"

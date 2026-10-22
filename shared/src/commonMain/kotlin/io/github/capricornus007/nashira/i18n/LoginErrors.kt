@@ -12,14 +12,32 @@ fun friendlyError(t: Throwable): String {
             "跟伺服器的連線中斷了，請再試一次（若反覆出現請檢查網路）"
         msg.contains("Unexpected JSON token") || msg.contains("JsonDecodingException") ->
             "伺服器回傳了看不懂的資料，請回報這個問題"
-        t is java.net.UnknownHostException ->
+        t is java.net.UnknownHostException || msg.contains("Unable to resolve host") ->
             "找不到伺服器：檢查 Homeserver 網址與網路"
-        t is java.net.ConnectException ->
+        t is java.net.ConnectException || msg.contains("Failed to connect to") ->
             "連不上伺服器：檢查網路，或伺服器暫時離線"
         t is java.net.SocketTimeoutException || msg.contains("timeout", ignoreCase = true) ->
             "伺服器回應逾時，請再試一次"
-        msg.contains("SSL", ignoreCase = true) || msg.contains("certificate", ignoreCase = true) ->
-            "加密連線失敗：伺服器憑證可能有問題"
+        // 登入憑證失效這一路**必須排在「伺服器憑證可能有問題」之前**（#75 的診斷就靠這兩條分開講）：
+        // 伺服器那句 "The access token has expired" 同時含 token 與 expired，
+        // 排在後面會被憑證那條的 "expired" 搶走，把「你要重新登入」報成「對方伺服器憑證壞了」。
+        isCredentialMessage(msg) ->
+            "登入憑證已失效，請重新登入"
+        // 憑證這一路要放寬：#75 要拿它判斷「待送卡住是不是伺服器憑證的問題」，
+        // 而各家 JVM／ktor 丟出來的字串差很多——
+        // `SSLHandshakeException`、`CertificateExpiredException`（…not valid yet／has expired）、
+        // `SunMSCAPI`／PKIX 的「unable to find valid certification path」、自簽憑證的
+        // `CERT_PATH_BUILT_IN_UNTRUSTED_ROOT` 都可能。只配 "SSL"／"certificate" 會漏掉
+        // 「PKIX」「validity」這幾個純大寫術語，回落到最後那條把原始英文丟給用戶。
+        msg.contains("SSL", ignoreCase = true) ||
+            msg.contains("certificate", ignoreCase = true) ||
+            msg.contains("PKIX", ignoreCase = true) ||
+            msg.contains("CertPath", ignoreCase = true) ||
+            msg.contains("TrustAnchor", ignoreCase = true) ||
+            msg.contains("handshake", ignoreCase = true) ||
+            msg.contains("expired", ignoreCase = true) ||
+            msg.contains("not yet valid", ignoreCase = true) ->
+            "加密連線失敗：伺服器憑證可能有問題（過期或不受信任）"
         msg.contains("M_TOO_LARGE") ->
             "檔案太大，伺服器拒收"
         // matrix.org 實測回應：403 {"errcode":"M_USER_LIMIT_EXCEEDED",
@@ -46,8 +64,6 @@ fun friendlyError(t: Throwable): String {
         }
         msg.contains("M_LIMIT_EXCEEDED") ->
             "嘗試次數太多，請稍後再試"
-        msg.contains("M_UNKNOWN_TOKEN") || msg.contains("M_UNAUTHORIZED") ->
-            "登入已過期，請重新登入"
         msg.contains("M_UNSUPPORTED_ROOM_VERSION") ->
             "這個房間的版本不支援"
         // 桌面 SSO 的 nashira:// 接收端缺席（SsoLogin.desktop.kt 丟的代碼）。
@@ -60,6 +76,26 @@ fun friendlyError(t: Throwable): String {
 
 /** 獨立的 403（前後不是數字），避免命中事件 ID／位元組數裡的「403」。 */
 private val HTTP_403 = Regex("""(^|[^0-9])403([^0-9]|$)""")
+
+/** 獨立的 401，理由同 HTTP_403：光配「401 這三個連號」會誤傷事件 ID 與位元組數。 */
+private val HTTP_401 = Regex("""(^|[^0-9])401([^0-9]|$)""")
+
+/**
+ * 「這是**登入憑證**的問題，不是網路、也不是對方伺服器的 TLS 憑證」的判定。
+ * [friendlyError] 與 #75 的待送診斷共用這一份：兩邊說法不能各講各的
+ * （一邊說「連線逾時」、一邊說「你要重新登入」是最壞的那種）。
+ */
+private fun isCredentialMessage(msg: String): Boolean =
+    msg.contains("M_UNKNOWN_TOKEN") || msg.contains("M_UNAUTHORIZED") ||
+        msg.contains("soft_logout", ignoreCase = true) ||
+        msg.contains("invalid token", ignoreCase = true) ||
+        msg.contains("access token", ignoreCase = true) ||
+        // 只有「401」這個數不夠：得連著 unauthorized 字樣才算，否則訊息裡隨便一個
+        // 位元組數／事件 ID 含 401 就會把用戶趕去重新登入。
+        (HTTP_401.containsMatchIn(msg) && msg.contains("unauthorized", ignoreCase = true))
+
+/** [isCredentialMessage] 的例外版：待送診斷（SendHealthProbe）拿它決定要不要叫用戶重登。 */
+fun isCredentialFailure(t: Throwable): Boolean = isCredentialMessage(t.message.orEmpty())
 
 /**
  * 從伺服器的原始回應裡摳出它**自己寫的那句原因**（JSON 的 `"error"` 欄）。
