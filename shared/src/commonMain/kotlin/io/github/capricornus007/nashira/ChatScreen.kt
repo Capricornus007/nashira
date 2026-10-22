@@ -2633,9 +2633,13 @@ private fun TimelinePane(
 
     // 送出動作由按鈕與 Enter 鍵共用，兩邊行為必須一致
     val sendDraft: () -> Unit = {
-        val text = draft.text.toString().trim()
+        val rawText = draft.text.toString().trim()
         val emotes = pendingEmoticons
         val images = pendingImages
+        // 空殼標記在送出前一定要清掉（#114）：選了字按粗體再把手動刪光，草稿會變成
+        // `****` 或 `hi ****` 這種零內容的殼。那不是合法 markdown，`markdownToHtml`
+        // 回 null → 原樣發出去，時間線上就是一串字面星號（他點名的「上屏後星號殘留」）。
+        val text = stripEmptyMarkupShells(rawText)
         if ((text.isNotEmpty() || emotes.isNotEmpty() || images.isNotEmpty()) && !sending) {
             draft.clearText()
             sending = true
@@ -2717,6 +2721,11 @@ private fun TimelinePane(
                 }
                 sending = false
             }
+        } else if (rawText.isNotEmpty() && text.isEmpty()) {
+            // 整段只有空殼標記（`****`、`<u></u>`）：把殼清掉、不發一則空訊息。
+            // 按了送出卻「什麼都沒發生」最讓人困惑，所以這裡一定要動草稿，
+            // 讓他看見那幾顆星號自己不見了（#114）。
+            draft.clearText()
         }
     }
 

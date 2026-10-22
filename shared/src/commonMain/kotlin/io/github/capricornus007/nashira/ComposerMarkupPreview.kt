@@ -107,6 +107,55 @@ internal fun markupResidueRanges(text: String, withShells: Boolean = true): List
     )
 }
 
+/**
+ * **送出前**的空殼清道夫（#114「標記進去了但內容為空／上屏後星號殘留」）。
+ *
+ * 為什麼輸入框那個即時打掃（[markupResidueRanges]）不夠：它刻意**只管整段都是空殼**的情形，
+ * 免得把手打 `**粗**` 的中間態（先敲四顆星、再回頭補字）當場刪掉。但「按下送出」的當下
+ * 不存在「回頭補字」，所以這裡可以比打字時嚴格：零內容的標記對**在哪个位置都拿掉**。
+ * 不拿掉的後果是實測過的——`hi ****` 這種草稿 `markdownToHtml` 回 null（沒有合法標記），
+ * 於是原樣發出去，時間線上一串字面星號。
+ *
+ * 只收**兩格以上**的標記對（`****`、`~~ ~~` 那類空殼、`<u></u>`），單字元的 `*`／`~`
+ * 不参与：`2*3*4` 這種寫法裡那對星號是真字元，刪掉就是吃字（同一條理由見
+ * [shellResidueRanges]）。`****` 之類會一次拿掉四顆；剩下的孤零零一顆星照字面留著，
+ * 那是他自己打的，不是我們疊出來的殼。
+ * 迴圈到不再變動為止：`<u>****</u>` 這種先收內層才會露出外層的空殼。
+ */
+internal fun stripEmptyMarkupShells(text: String): String {
+    if (text.isEmpty()) return text
+    var current = text
+    while (true) {
+        val ranges = ArrayList<IntRange>()
+        for (marker in ComposerMarkers) {
+            if (marker.open.length < 2 && !marker.open.startsWith("<")) continue
+            var i = 0
+            while (i < current.length) {
+                if (current.startsWith(marker.open, i) &&
+                    current.startsWith(marker.close, i + marker.open.length)
+                ) {
+                    ranges += IntRange(i, i + marker.open.length + marker.close.length - 1)
+                    i += marker.open.length + marker.close.length
+                    continue
+                }
+                i++
+            }
+        }
+        // 孤兒的 `</u>` 也算垃圾（跟打字時同一條規則，它在送出這關一樣不可能變合法）
+        ranges += orphanClosingTagRanges(current)
+        if (ranges.isEmpty()) return current
+        val merged = mergeRanges(ranges)
+        current = buildString(current.length) {
+            var cursor = 0
+            for (range in merged) {
+                append(current, cursor, range.first)
+                cursor = range.last + 1
+            }
+            append(current, cursor, current.length)
+        }
+    }
+}
+
 /** 孤兒的 `</u>`：前面沒有配對的 `<u>`，這種東西永遠不可能因為「接著打字」變合法。 */
 private fun orphanClosingTagRanges(text: String): List<IntRange> {
     if (!text.contains(CloseUnderline)) return emptyList()
@@ -176,9 +225,21 @@ private fun shellResidueRanges(text: String): List<IntRange> {
  * 同一行內、成對閉合、內層非空且頭尾不是空白；**未閉合一律當普通文字**
  *（否則會變成「編輯時看得到格式、發出去卻是標籤字」）。
  * 圍欄／行首引用／連結是多行或行級結構，這裡刻意不碰。
+ *
+ * **一顆標記只能被一對用**（#114「三顆星互相吃掉」的根因）。上一版只有「左標記不能落在
+ * 別人已經用掉的格子上」這半條都不檢查，於是 `**a*b*c**`（在已加粗的 `**abc**` 裡選 `b`
+ * 按斜體就是這個形狀）會讓那顆收尾的 `*` 又開了一對斜體、拿去配**粗體的右半顆 `**`**，
+ * 結果：框裡 `c` 也變斜體、而發出去的 HTML 只有 `b` 斜——兩邊看到的不一樣。
+ * 更糟的是 `***a*b***`：內層那對 `*` 把外層 `***` 的右半顆吃掉，刪標記時**連真字元一起少**，
+ * 框裡變成「ab」、上屏卻是「a*b」。
+ * 所以現在：候選的左標記區間或右標記區間只要碰到「已經用掉的格子」就整對丟掉，
+ * 那個星號就照字面留在框裡——這正是送出端 `inlineMarkdownToHtml` 對同一串的做法。
  */
 private fun findMarkupRuns(source: String): List<MarkupRun> {
     val out = ArrayList<MarkupRun>()
+    // 已被某一對標記用掉的原文格子（左標記與右標記本身，不含內層）
+    val used = ArrayList<IntRange>()
+    fun overlaps(range: IntRange) = used.any { range.first <= it.last && it.first <= range.last }
     var i = 0
     while (i < source.length) {
         val marker = ComposerMarkers.firstOrNull { source.startsWith(it.open, i) }
@@ -187,21 +248,27 @@ private fun findMarkupRuns(source: String): List<MarkupRun> {
             val closeAt = indexOfWithin(source, marker.close, innerStart)
             val inner = if (closeAt >= 0) source.substring(innerStart, closeAt) else null
             if (inner != null && inner.canBeFormatted()) {
-                out += MarkupRun(
-                    openStart = i,
-                    openEnd = innerStart,
-                    closeStart = closeAt,
-                    closeEnd = closeAt + marker.close.length,
-                    innerStart = innerStart,
-                    innerEnd = closeAt,
-                    style = marker.style,
-                )
-                // 從**內層開頭**繼續掃，不是跳到這一對的結尾之後：
-                // `<u>**111**</u>` 這種巢狀，跳外層結尾會讓內層的 `**` 留在畫面上
-                //（用戶 2026-10-09 #49：「我一疊加就又現原形了，但確實不丟字了」）。
-                // 不會無限迴圈：canBeFormatted 要求內層非空，i 至少前進一格。
-                i = innerStart
-                continue
+                val openRange = IntRange(i, innerStart - 1)
+                val closeRange = IntRange(closeAt, closeAt + marker.close.length - 1)
+                if (!overlaps(openRange) && !overlaps(closeRange)) {
+                    out += MarkupRun(
+                        openStart = i,
+                        openEnd = innerStart,
+                        closeStart = closeAt,
+                        closeEnd = closeAt + marker.close.length,
+                        innerStart = innerStart,
+                        innerEnd = closeAt,
+                        style = marker.style,
+                    )
+                    used += openRange
+                    used += closeRange
+                    // 從**內層開頭**繼續掃，不是跳到這一對的結尾之後：
+                    // `<u>**111**</u>` 這種巢狀，跳外層結尾會讓內層的 `**` 留在畫面上
+                    //（用戶 2026-10-09 #49：「我一疊加就又現原形了，但確實不丟字了」）。
+                    // 不會無限迴圈：canBeFormatted 要求內層非空，i 至少前進一格。
+                    i = innerStart
+                    continue
+                }
             }
         }
         i++
