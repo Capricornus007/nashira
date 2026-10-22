@@ -5713,6 +5713,10 @@ private fun MessageBodyContent(
 @Composable
 private fun CodeBlockBubble(code: String, copyLabel: String) {
     val clipboard = LocalClipboardManager.current
+    // 用戶 2026-10-22 裁定「默認完全 pangu 化」：程式碼塊不再豁免（對照 Nagram，
+    // 它的 pangu 套在訊息層，碼塊照插）。顯示與複製用同一個值——分開就會出現
+    // 「看起來有、貼出去沒有」那種兩套文字。
+    val shown = remember(code) { pangu(code) }
     val hoverSource = remember { MutableInteractionSource() }
     val hovered by hoverSource.collectIsHoveredAsState()
     Surface(
@@ -5728,7 +5732,7 @@ private fun CodeBlockBubble(code: String, copyLabel: String) {
                 .hoverable(hoverSource),
         ) {
             Text(
-                code,
+                shown,
                 style = TextStyle(
                     fontFamily = FontFamily.Monospace,
                     fontSize = 13.sp,
@@ -5739,7 +5743,7 @@ private fun CodeBlockBubble(code: String, copyLabel: String) {
             )
             if (hovered) {
                 IconButton(
-                    onClick = { clipboard.setText(AnnotatedString(code)) },
+                    onClick = { clipboard.setText(AnnotatedString(shown)) },
                     modifier = Modifier
                         // 放右下而不是右上：懸停時那顆「表情／回覆／更多」膠囊錨在整則訊息的
                         // 右上角，複製鈕若也釘右上就會被它整個蓋住（用戶 2026-09-29 截圖）。
