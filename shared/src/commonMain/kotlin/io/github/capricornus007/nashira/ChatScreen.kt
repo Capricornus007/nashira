@@ -4854,6 +4854,8 @@ private fun MessageRow(
                         .alpha(if (msg.pending && msg.sendError == null && !pendingStale) 0.55f else 1f),
                     onOpenImage = onOpenImage,
                     onAlbumCellRect = { index, rect -> albumCellRects[index] = rect },
+                    selectionMode = selectionMode,
+                    onToggleSelection = onToggleSelection,
                 )
                 when {
                     msg.sendError != null -> Text(
@@ -5547,6 +5549,11 @@ private fun MessageBodyContent(
     onOpenImage: ((List<MessageBody.Image>, Int) -> Unit)? = null,
     /** 相簿每一格在視窗裡的矩形（給這一列做右鍵命中測試；手勢由列獨佔）。 */
     onAlbumCellRect: (Int, Rect) -> Unit = { _, _ -> },
+    /** 多選模式下點媒體是「勾選這一則」，不是開檢視器（Telegram／Element 都是這個行為）。
+     *  媒體的 clickable 掛在子節點上、會先把點擊吃掉，外層那一列的 onClick 永遠收不到，
+     *  所以得一路傳進 onOpen 本身，不能只靠外層攔（#123）。 */
+    selectionMode: Boolean = false,
+    onToggleSelection: () -> Unit = {},
 ) {
     val ui = LocalUiState.current
     when (body) {
@@ -5636,6 +5643,9 @@ private fun MessageBodyContent(
                 onOpen = if (hidden) {
                     // 佔位點一下直接取消隱藏，不用再進選單
                     { if (mxc != null) ui.hiddenMedia = ui.hiddenMedia - mxc }
+                } else if (selectionMode) {
+                    // 多選中：點圖＝勾選這一則（別把全螢幕檢視器蓋上來）
+                    onToggleSelection
                 } else {
                     onOpenImage?.let { open -> { open(listOf(body), 0) } }
                 },
@@ -5647,7 +5657,11 @@ private fun MessageBodyContent(
             album = body,
             strings = strings,
             modifier = modifier,
-            onOpen = { at -> onOpenImage?.invoke(body.items, at) },
+            onOpen = { at ->
+                // 多選中點相簿任一格＝勾選這一則；隱藏佔位那條路在 MessageAlbum 內部
+                // 先攔（點它是取消隱藏），所以不會被這裡擋掉。
+                if (selectionMode) onToggleSelection() else onOpenImage?.invoke(body.items, at)
+            },
             onCellRect = onAlbumCellRect,
         )
         is MessageBody.Voice -> VoiceBubble(
