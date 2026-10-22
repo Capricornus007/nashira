@@ -21,8 +21,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Person
@@ -625,8 +625,11 @@ private fun SessionRow(
                 if (!device.isCurrent) {
                     // 展開提示：點這列會開出「驗證／登出」兩個按鈕，但原本除了已驗證那顆勾
                     // 以外全列沒有一絲線索（用戶 2026-09-29：「列上沒有任何展開提示…等於沒有」）。
+                    // 用 KeyboardArrowUp/Down 而不是 ExpandLess/More：本倉只依賴
+                    // material-icons-core（shared/build.gradle.kts:79），Expand* 那兩顆在
+                    // extended 裡，CI 實測 Unresolved reference（run 39725175944）。
                     Icon(
-                        if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                        if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
