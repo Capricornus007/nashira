@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Set up JDK 25
         # JetBrains Runtime，不是 temurin：只有 JBR 會在 XIM 回調之內上報光標矩形
@@ -156,7 +156,7 @@ jobs:
           echo "TAG=$REF" >> "$GITHUB_ENV"
 
       - name: Upload distributable artifact (for the Arch package job)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: main-dist
           path: desktopApp/build/compose/binaries/main/app/nashira
@@ -196,10 +196,10 @@ jobs:
     container: archlinux:base-devel
     steps:
       - name: Checkout (PKGBUILD)
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Download distributable
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: main-dist
           path: dist
@@ -240,7 +240,7 @@ jobs:
           ls -la packaging/*.pkg.tar.zst
 
       - name: Upload package artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: arch-package
           path: packaging/*.pkg.tar.zst
@@ -252,10 +252,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout (for version detection)
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Download Arch package
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: arch-package
           path: assets
