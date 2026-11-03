@@ -7,7 +7,7 @@ plugins {
 }
 
 kotlin {
-    jvmToolchain(27)
+    jvmToolchain(25)
 }
 
 dependencies {
@@ -15,7 +15,6 @@ dependencies {
     implementation("org.slf4j:slf4j-simple:2.0.16")
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
-    testImplementation(kotlin("test"))
     // 讓 Trixnity 的 lognity/SLF4J 日誌真正輸出（否則 desktop 端 NOP 看不到任何錯誤）
     runtimeOnly("org.slf4j:slf4j-simple:2.0.16")
     // 全域快捷鍵（XGrabKey）：JNA 直連 Xlib，不依賴 WM/sxhkd 配置——
@@ -24,20 +23,19 @@ dependencies {
     implementation("net.java.dev.jna:jna-platform:5.16.0")
 }
 
-configurations.configureEach {
-    // The desktop artifacts declare this optional fallback API, but Nashira uses only stock AWT.
-    exclude(group = "org.jetbrains.runtime", module = "jbr-api")
-}
-
 compose.desktop {
     application {
         mainClass = "io.github.capricornus007.nashira.desktop.MainKt"
-        // X11Platform and the stock-OpenJDK XIM bridge access OpenJDK's stable X11/AWT internals.
-        // Gradle run and packaged launchers need the same opens so behavior cannot diverge.
+        // X11Platform 需要反射 sun.awt.X11.XWM 修正非重親 WM（bspwm/dwm/i3…）下
+        // AWT 假邊框造成的「視窗被平鋪、內容卻停在左上角小方塊」。
+        // gradle run 與打包產物都要帶，否則只在其中一種情況生效。
+        //
+        // jb.awt.newXimClient.enabled 是 JBR 的「新 XIM 客戶端」開關：它才會在 XIM 回調之內
+        // 把游標矩形報給 fcitx5（配合上面的 --add-opens 才拿得到 sun.awt.X11）。
+        // 在非 JBR 的執行期上這個屬性只是個沒人讀的字串，無害，所以不必條件加。
         jvmArgs += listOf(
             "--add-opens=java.desktop/sun.awt.X11=ALL-UNNAMED",
-            "--add-opens=java.desktop/sun.awt=ALL-UNNAMED",
-            "--add-opens=java.desktop/sun.awt.im=ALL-UNNAMED",
+            "-Djb.awt.newXimClient.enabled=true",
             // ── 執行期記憶體 ────────────────────────────────────────────────
             // jpackage 出廠**一個記憶體參數都沒有**，於是最大堆＝實體記憶體的 1/4
             //（13GB 機器＝3.3GB），GC 又是 G1，會先把地盤圈起來。
@@ -75,10 +73,11 @@ compose.desktop {
             //    plugin 內部接給那個 jlink task 的輸出，手動覆蓋會繞過它的 task 圖、
             //    而且管不到 distributable 那條路（1.12.0 反編譯 ConfigureJvmApplicationKt 查實）。
             //
-            // The image is linked from the stock JDK selected by the Gradle toolchain. Candidate
-            // positioning is supplied by XimCandidatePosition through standard Xlib XIM calls,
-            // not by a vendor runtime patch, so this module list is runtime-vendor independent.
-            // CI and the Arch recipe both assert that the bundled image is OpenJDK 27.
+            // 執行期本身必須是 JetBrains Runtime：只有 JBR 會在 XIM 回調之內上報光標矩形
+            // （sun.awt.X11.XInputMethod$ClientComponentCaretPositionTracker；OpenJDK 沒這個類，
+            // 實測 ClassNotFoundException）→ 少了它 fcitx5 的候選窗只能退回「焦點窗口幾何」，
+            // 永遠釘在視窗左下角。JBR 由 CI 的 setup-java `distribution: jetbrains` 提供，
+            // 所以這裡只列模組、不指定 JDK。
             modules(
                 "java.base",
                 "java.datatransfer",

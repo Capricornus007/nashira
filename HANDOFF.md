@@ -84,10 +84,9 @@
 - **托盤**：改原生 XEmbed 自繪 33×33 實體像素（AWT 的 `XTrayIconPeer` 在 uiScale=2 時只有 16px、
   且 bar 重建後永不重嵌）；`TrayOwnerWatch` 監看 `_NET_SYSTEM_TRAY_S0` 擁有者變化自動重掛。
 - **開連結**：`openLink` 先走 `xdg-open`、失敗才退回 `Desktop.browse`（AWT 那條會靜默失敗）。
-- **#62 已結案**：桌面建置／jlink 改用 stock OpenJDK 27；`XimCandidatePosition`
-  以同一個 OpenJDK XIC 的 `XIMPreeditPosition`＋`XNSpotLocation` 回報 Compose caret，
-  fcitx5／IBus 候選窗不再依賴 vendor runtime patch；座標契約涵蓋捲動／移窗／HiDPI。
-- **其他已知項**：#57 縮圖照實體像素要圖；#64 presence；#65 一鍵登出其他裝置；#66 發送前圖片確認框；#67 介面縮放。
+- **未結案的已知項**：#62 打包改用 JBR 執行期＋`-Djb.awt.newXimClient.enabled=true`
+  （候選框跟光標**只有 JBR 做得到**，OpenJDK 不報光標位置；jlink 後 90MiB 已實啟動成功）；
+  #57 縮圖照實體像素要圖；#64 presence；#65 一鍵登出其他裝置；#66 發送前圖片確認框；#67 介面縮放。
 
 ---
 

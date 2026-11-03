@@ -207,8 +207,11 @@ fun main(args: Array<String>) {
         // 之後若要提供這種熱鍵，條件是：設定頁預設關閉＋用戶自己按一個組合＋
         // 可一鍵解除註冊（見待辦 #85）。
 
-        // Candidate placement is handled inside the application's XIC by XimCandidatePosition.
-        // It sends XNSpotLocation to fcitx5/IBus; it never searches for or moves an IME window.
+        // 候選窗口「從外面搬 fcitx 的窗口」這條試過並**撤掉**了（ImCandidateMover 先留檔不啟動）：
+        // fcitx5 每按一個鍵就自己擺一次位置，我們 40ms 後再拖一次，實測就是
+        // 「打一個字閃一下、越打越不停地閃」（用戶 2026-09-29 點名）。
+        // 要不吃架只能讓「搬行動作發生在 XIM 回調之內」——那是 JBR 內建的
+        // ClientComponentCaretPositionTracker 的位置，外面模擬不出來。
 
         // 「系統整合 → 顯示托盤圖示」關掉時整塊不建（用戶 2026-10-13 拿 Telegram 的開關點名）。
         if (traySource != null && ui.showTrayIcon) {
@@ -577,13 +580,6 @@ fun main(args: Array<String>) {
             state = windowState,
         ) {
             LaunchedEffect(window) { mainWindow = window }
-            // Stock OpenJDK does not turn Compose's InputMethodRequests caret rectangle into an
-            // XIM spot. Install our Xlib bridge for this window and remove only its event tracker
-            // if Compose disposes the window; the XIC itself remains owned by OpenJDK.
-            DisposableEffect(window) {
-                val ximTracker = XimCandidatePosition.install(window)
-                onDispose { ximTracker.close() }
-            }
             // window.isFocused 只在 WindowScope 內拿得到；焦點變化即時反映到通知抑制
             LaunchedEffect(window) {
                 snapshotFlow { window.isFocused }.collect { DesktopNotifications.setForeground(it) }
