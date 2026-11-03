@@ -21,38 +21,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Set up JDK 25
-        # JetBrains Runtime，不是 temurin：只有 JBR 會在 XIM 回調之內上報光標矩形
-        # （sun.awt.X11.XInputMethod$ClientComponentCaretPositionTracker；OpenJDK 那個類
-        # 根本不存在，實測 ClassNotFoundException）→ 少了它 fcitx5 候選窗永遠釘在視窗左下角。
-        #
-        # 21 → 25（規則 15 吃最新）：抬到 25 之前先在本機把 JBR 25.0.4.1 驗過兩件事——
-        # (a) `jimage list lib/modules` 找得到 ClientComponentCaretPositionTracker（OpenJDK 25/27 都找不到）、
-        # (b) jmods 目錄有 72 個模組（jlink 才生得出執行期）。兩件都成立才敢換。
-        # 上限停在 25 不是沒抬：JetBrainsRuntime 只發 LTS 軌（最新 release tag
-        # jbr-release-25.0.4.1b635.70，沒有 26/27），所以 jetbrains 這個 distribution 最高就是 25。
-        #
-        # 這一條就足夠改變安裝包裡捆的執行期：打包用的 runtime 由「跑 gradle 的那個 JDK 的
-        # jmods」jlink 出來（desktopApp 的 nativeDistributions.modules(...) 只決定模組清單），
-        # 所以不需要另外下載 JBR、也不需要碰 jpackage 的 runtimeImage。
+      - name: Set up stock OpenJDK 27
+        # The same stock toolchain compiles the JVM target and supplies jmods to Compose's jlink
+        # task. Linux candidate placement lives in Nashira's Xlib XIM bridge, not in the runtime.
         uses: actions/setup-java@v6
         with:
-          distribution: jetbrains
-          java-version: "25"
-          # ⚠️ 一定要給 token：沒有它，setup-java 是用**匿名**請求去查 JetBrains 的版號目錄，
-          # 匿名配額 60 次/小時、而且是整個 runner 網段共用（實測 release #124 就是這樣紅的：
-          # `API rate limit exceeded for 20.64.182.20`，12 秒就掛，跟程式碼無關）。
-          # 帶 GITHUB_TOKEN 走認證配額（5000 次/小時）就不會再被別人用光。
-          token: ${{ secrets.GITHUB_TOKEN }}
+          distribution: temurin
+          java-version: "27"
 
       - name: Show which runtime will be bundled
         run: |
           set -euo pipefail
           "$JAVA_HOME/bin/java" -version 2>&1 | head -3
           echo "jmods 數量：$(ls "$JAVA_HOME/jmods" 2>/dev/null | wc -l)"
-          # runtime-only 的 JBR 有 0 個 jmods，那樣 jlink 生不出東西、包會退回沒執行期。
+          # A full stock JDK is required: jlink cannot build the bundled runtime from a JRE.
           if [ ! -d "$JAVA_HOME/jmods" ] || [ -z "$(ls -A "$JAVA_HOME/jmods" 2>/dev/null)" ]; then
-            echo "::error::JAVA_HOME 裡沒有 jmods（$JAVA_HOME）——換成含 jmods 的 JBR 變體，別讓它靜默降级"
+            echo "::error::JAVA_HOME 裡沒有 jmods（$JAVA_HOME）——需要完整 OpenJDK 27"
             exit 1
           fi
 
@@ -70,23 +54,14 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           ./gradlew :androidApp:assembleRelease :desktopApp:packageDistributionForCurrentOS :desktopApp:createDistributable --no-daemon
-          # 驗產物、不驗配置：DSL 寫了不等於套得上（moregramX 的簽名就是配置在、產物卻沒簽，
-          # 還連紅一個月的 CI）。兩條路都要驗，因為 .deb/.rpm 走 jpackage、
-          # 而 Arch 包吃的是 createDistributable 的產物，兩者的 runtime 不一定是同一份。
-          # ⚠️ 判「是不是 JBR」不能 grep release 檔裡的 "JetBrains"：jlink 產物的 release 檔
-          #    只有 JAVA_VERSION 與 MODULES 兩行、**沒有 implementor 那類字串**，
-          #    那樣寫在 CI 上必然紅（實測踩過）。改查**目的本身**：
-          #    那個上報光標的類有沒有被砍掉。
+          # Verify both packaged paths. They must contain the stock OpenJDK 27 image and must not
+          # regain the optional vendor API fallback jar.
           check_runtime() { # $1=runtime 目錄, $2=說明
             local R="$1" W="$2"
             if [ ! -d "$R" ]; then echo "::error::$W 找不到 $R"; exit 1; fi
             head -2 "$R/release" | sed 's/^/    /'
-            local N
-            N="$("$JAVA_HOME/bin/jimage" list "$R/lib/modules" 2>/dev/null \
-                 | grep -ci 'ClientComponentCaretPositionTracker' || true)"
-            echo "    ClientComponentCaretPositionTracker 命中 $N 筆"
-            if [ "${N:-0}" -lt 1 ]; then
-              echo "::error::$W 的 runtime 沒有 JBR 的光標上報類（換執行期白做，見 #62）"
+            if ! grep -q '^JAVA_VERSION="27\.' "$R/release"; then
+              echo "::error::$W 沒有捆入 OpenJDK 27 runtime"
               exit 1
             fi
           }
@@ -96,9 +71,12 @@ jobs:
           dpkg-deb -x "$DEB" "$RUNNER_TEMP/debchk"
           check_runtime "$(find "$RUNNER_TEMP/debchk" -type d -name runtime | head -1)" ".deb"
           echo "--- createDistributable 內捆的執行期（Arch 包吃這個）---"
-          # 注意路徑裡有 lib/：實測是 app/nashira/lib/runtime，漏一層會直接紅（本地踩過）。
           check_runtime desktopApp/build/compose/binaries/main/app/nashira/lib/runtime "distributable"
-          echo "確認：兩條路捆的 runtime 都帶 JBR 的光標上報類"
+          if find desktopApp/build/compose/binaries/main/app/nashira/lib/app -iname 'jbr-api*.jar' | grep -q .; then
+            echo "::error::distributable 仍含 vendor runtime API classes"
+            exit 1
+          fi
+          echo "確認：兩條路都捆 stock OpenJDK 27，且候選窗由 app 內 XIM bridge 提供"
           echo "APK built:"
           ls -la androidApp/build/outputs/apk/release/*.apk
           echo "Packages:"

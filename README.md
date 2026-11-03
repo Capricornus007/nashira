@@ -26,7 +26,10 @@ Multiplatform and a **Material 3 Expressive (MD3E)**, Discord-style interface.
 
 ## Other distros: build it yourself
 
-You need **JDK 21+** (Android additionally needs the Android SDK; desktop does not).
+You need a full **stock OpenJDK 27 JDK** with `jlink`/`jmods` (Android additionally
+needs the Android SDK; desktop does not). JetBrains Runtime is neither a build nor
+runtime dependency. On X11, Nashira reports the Compose caret to fcitx5/IBus through
+standard XIM `XNSpotLocation`, including scrolling, window movement and HiDPI scaling.
 
 ```bash
 git clone https://github.com/Capricornus007/nashira

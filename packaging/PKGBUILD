@@ -64,4 +64,13 @@ package() {
 
     install -dm755 "${pkgdir}/usr/bin"
     ln -s /opt/nashira/bin/nashira "${pkgdir}/usr/bin/nashira"
+
+    # This recipe consumes the already-linked app image. Refuse an old vendor-runtime artifact:
+    # candidate placement now comes from Nashira's Xlib XIM bridge and the image is OpenJDK 27.
+    grep -q '^JAVA_VERSION="27\.' "${pkgdir}/opt/nashira/lib/runtime/release" \
+        || { echo "::error::app image 不是 OpenJDK 27 runtime" >&2; return 1; }
+    if find "${pkgdir}/opt/nashira/lib/app" -iname 'jbr-api*.jar' | grep -q .; then
+        echo "::error::app image 混入 vendor runtime API classes" >&2
+        return 1
+    fi
 }

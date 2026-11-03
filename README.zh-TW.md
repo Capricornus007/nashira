@@ -25,7 +25,10 @@ Kotlin / Compose Multiplatform 的 Matrix 客戶端（Android + Linux 桌面）�
 
 ## 其他發行版：自行構建
 
-需要 **JDK 21+**（Android 另需 Android SDK；桌面端不需要）。
+需要帶 `jlink`／`jmods` 的完整 **stock OpenJDK 27 JDK**（Android 另需 Android
+SDK；桌面端不需要）。建置與執行都不依賴 JetBrains Runtime。X11 下由 Nashira
+直接用標準 XIM `XNSpotLocation` 把 Compose caret 回報給 fcitx5／IBus，捲動、
+移動視窗與 HiDPI 縮放後都會重算。
 
 ```bash
 git clone https://github.com/Capricornus007/nashira
