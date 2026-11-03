@@ -1,3 +1,5 @@
+import org.gradle.jvm.toolchain.JavaLanguageVersion
+import org.gradle.jvm.toolchain.JvmVendorSpec
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
 plugins {
@@ -7,7 +9,13 @@ plugins {
 }
 
 kotlin {
-    jvmToolchain(25)
+    // Current newest official JBR is still JDK 25. Vendor matching prevents Gradle from silently
+    // compiling with stock OpenJDK; the exact 25.0.4.1+1-b635.79 archive is pinned in
+    // gradle.properties and supplied by both workflows; downstream packaging must use the same pin.
+    jvmToolchain {
+        languageVersion.set(JavaLanguageVersion.of(25))
+        vendor.set(JvmVendorSpec.matching("JetBrains"))
+    }
 }
 
 dependencies {
@@ -73,11 +81,11 @@ compose.desktop {
             //    plugin 內部接給那個 jlink task 的輸出，手動覆蓋會繞過它的 task 圖、
             //    而且管不到 distributable 那條路（1.12.0 反編譯 ConfigureJvmApplicationKt 查實）。
             //
-            // 執行期本身必須是 JetBrains Runtime：只有 JBR 會在 XIM 回調之內上報光標矩形
-            // （sun.awt.X11.XInputMethod$ClientComponentCaretPositionTracker；OpenJDK 沒這個類，
-            // 實測 ClassNotFoundException）→ 少了它 fcitx5 的候選窗只能退回「焦點窗口幾何」，
-            // 永遠釘在視窗左下角。JBR 由 CI 的 setup-java `distribution: jetbrains` 提供，
-            // 所以這裡只列模組、不指定 JDK。
+            // 執行期固定為 gradle.properties 指定的官方 JBRSDK 25.0.4.1+1-b635.79。
+            // 該 release tag 的 Java tracker 與 native XIM 實作仍有
+            // ClientComponentCaretPositionTracker、XIMPreeditPosition 與 XNSpotLocation；
+            // release.yml 下載後與 jlink 產物都會再驗 tracker，避免版本字串更新了、
+            // 必要功能卻退化。這裡只維護 jlink 模組清單，不另指定 runtimeImage。
             modules(
                 "java.base",
                 "java.datatransfer",

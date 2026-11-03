@@ -84,9 +84,11 @@
 - **托盤**：改原生 XEmbed 自繪 33×33 實體像素（AWT 的 `XTrayIconPeer` 在 uiScale=2 時只有 16px、
   且 bar 重建後永不重嵌）；`TrayOwnerWatch` 監看 `_NET_SYSTEM_TRAY_S0` 擁有者變化自動重掛。
 - **開連結**：`openLink` 先走 `xdg-open`、失敗才退回 `Desktop.browse`（AWT 那條會靜默失敗）。
-- **未結案的已知項**：#62 打包改用 JBR 執行期＋`-Djb.awt.newXimClient.enabled=true`
-  （候選框跟光標**只有 JBR 做得到**，OpenJDK 不報光標位置；jlink 後 90MiB 已實啟動成功）；
-  #57 縮圖照實體像素要圖；#64 presence；#65 一鍵登出其他裝置；#66 發送前圖片確認框；#67 介面縮放。
+- **#62 已固定版本**：桌面建置／jlink 使用官方 JBRSDK 25.0.4.1+1-b635.79
+  （tag `jbr-release-25.0.4.1b635.79`，URL 與 SHA-512 在 `gradle.properties`）。該 tag
+  仍含 Java caret tracker 與 native `XIMPreeditPosition`／`XNSpotLocation`；workflow
+  同時驗下載檔 checksum、SDK tracker、兩種成品 runtime 的版本與 tracker。
+- **其他已知項**：#57 縮圖照實體像素要圖；#64 presence；#65 一鍵登出其他裝置；#66 發送前圖片確認框；#67 介面縮放。
 
 ---
 

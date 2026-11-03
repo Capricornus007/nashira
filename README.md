@@ -26,7 +26,11 @@ Multiplatform and a **Material 3 Expressive (MD3E)**, Discord-style interface.
 
 ## Other distros: build it yourself
 
-You need **JDK 21+** (Android additionally needs the Android SDK; desktop does not).
+Desktop builds require the official **JBRSDK 25.0.4.1+1-b635.79** pinned in
+`gradle.properties`; a stock OpenJDK build loses the X11 fcitx5/IBus caret-tracking
+path. Download `jbrLinuxX64Url` at the official `jbrTag`, verify `jbrLinuxX64Sha512`,
+and set `JAVA_HOME` to its extracted directory. Android additionally needs the Android
+SDK; desktop does not.
 
 ```bash
 git clone https://github.com/Capricornus007/nashira

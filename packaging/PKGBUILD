@@ -64,4 +64,15 @@ package() {
 
     install -dm755 "${pkgdir}/usr/bin"
     ln -s /opt/nashira/bin/nashira "${pkgdir}/usr/bin/nashira"
+
+    # release job已在下載的 JBRSDK 與 app image 上驗過 XIM tracker；這裡再驗 Arch
+    # 真正裝入的 runtime 版本與 launcher 開關，避免拿到舊 artifact 仍照樣出包。
+    local expected_jbr
+    expected_jbr=$(grep -m1 '^jbrVersion=' "${startdir}/../gradle.properties" | cut -d= -f2-)
+    grep -qx "JAVA_VERSION=\"${expected_jbr}\"" \
+        "${pkgdir}/opt/nashira/lib/runtime/release" \
+        || { echo "::error::app image 不是 pin 的 JBR ${expected_jbr}" >&2; return 1; }
+    grep -q '^java-options=-Djb.awt.newXimClient.enabled=true$' \
+        "${pkgdir}/opt/nashira/lib/app/nashira.cfg" \
+        || { echo "::error::app image 沒開 JBR XIM client" >&2; return 1; }
 }

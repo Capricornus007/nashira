@@ -21,29 +21,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Set up JDK 25
-        # JetBrains Runtime，不是 temurin：只有 JBR 會在 XIM 回調之內上報光標矩形
-        # （sun.awt.X11.XInputMethod$ClientComponentCaretPositionTracker；OpenJDK 那個類
-        # 根本不存在，實測 ClassNotFoundException）→ 少了它 fcitx5 候選窗永遠釘在視窗左下角。
-        #
-        # 21 → 25（規則 15 吃最新）：抬到 25 之前先在本機把 JBR 25.0.4.1 驗過兩件事——
-        # (a) `jimage list lib/modules` 找得到 ClientComponentCaretPositionTracker（OpenJDK 25/27 都找不到）、
-        # (b) jmods 目錄有 72 個模組（jlink 才生得出執行期）。兩件都成立才敢換。
-        # 上限停在 25 不是沒抬：JetBrainsRuntime 只發 LTS 軌（最新 release tag
-        # jbr-release-25.0.4.1b635.70，沒有 26/27），所以 jetbrains 這個 distribution 最高就是 25。
-        #
-        # 這一條就足夠改變安裝包裡捆的執行期：打包用的 runtime 由「跑 gradle 的那個 JDK 的
-        # jmods」jlink 出來（desktopApp 的 nativeDistributions.modules(...) 只決定模組清單），
-        # 所以不需要另外下載 JBR、也不需要碰 jpackage 的 runtimeImage。
-        uses: actions/setup-java@v6
-        with:
-          distribution: jetbrains
-          java-version: "25"
-          # ⚠️ 一定要給 token：沒有它，setup-java 是用**匿名**請求去查 JetBrains 的版號目錄，
-          # 匿名配額 60 次/小時、而且是整個 runner 網段共用（實測 release #124 就是這樣紅的：
-          # `API rate limit exceeded for 20.64.182.20`，12 秒就掛，跟程式碼無關）。
-          # 帶 GITHUB_TOKEN 走認證配額（5000 次/小時）就不會再被別人用光。
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download pinned JetBrains Runtime SDK
+        # Uses the exact official URL/SHA-512 in gradle.properties, verifies jmods plus the XIM
+        # caret tracker, then exports JAVA_HOME for Gradle and Compose jlink.
+        run: tools/setup-jbr.sh
 
       - name: Show which runtime will be bundled
         run: |
@@ -69,6 +50,8 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
+          EXPECTED_JBR_VERSION="$(grep -m1 '^jbrVersion=' gradle.properties | cut -d= -f2-)"
+          EXPECTED_JBR_BUILD="$(grep -m1 '^jbrBuild=' gradle.properties | cut -d= -f2-)"
           ./gradlew :androidApp:assembleRelease :desktopApp:packageDistributionForCurrentOS :desktopApp:createDistributable --no-daemon
           # 驗產物、不驗配置：DSL 寫了不等於套得上（moregramX 的簽名就是配置在、產物卻沒簽，
           # 還連紅一個月的 CI）。兩條路都要驗，因為 .deb/.rpm 走 jpackage、
@@ -81,12 +64,16 @@ jobs:
             local R="$1" W="$2"
             if [ ! -d "$R" ]; then echo "::error::$W 找不到 $R"; exit 1; fi
             head -2 "$R/release" | sed 's/^/    /'
+            if ! grep -qx "JAVA_VERSION=\"$EXPECTED_JBR_VERSION\"" "$R/release"; then
+              echo "::error::$W 不是 pin 的 JBR $EXPECTED_JBR_VERSION runtime"
+              exit 1
+            fi
             local N
             N="$("$JAVA_HOME/bin/jimage" list "$R/lib/modules" 2>/dev/null \
                  | grep -ci 'ClientComponentCaretPositionTracker' || true)"
             echo "    ClientComponentCaretPositionTracker 命中 $N 筆"
             if [ "${N:-0}" -lt 1 ]; then
-              echo "::error::$W 的 runtime 沒有 JBR 的光標上報類（換執行期白做，見 #62）"
+              echo "::error::$W 缺 JBR XIM caret tracker（見 #62）"
               exit 1
             fi
           }
@@ -98,7 +85,8 @@ jobs:
           echo "--- createDistributable 內捆的執行期（Arch 包吃這個）---"
           # 注意路徑裡有 lib/：實測是 app/nashira/lib/runtime，漏一層會直接紅（本地踩過）。
           check_runtime desktopApp/build/compose/binaries/main/app/nashira/lib/runtime "distributable"
-          echo "確認：兩條路捆的 runtime 都帶 JBR 的光標上報類"
+          grep -q '^java-options=-Djb.awt.newXimClient.enabled=true$' desktopApp/build/compose/binaries/main/app/nashira/lib/app/nashira.cfg
+          echo "確認：兩條路都捆 JBR ${EXPECTED_JBR_VERSION}+1-b${EXPECTED_JBR_BUILD} 的版本／XIM 功能"
           echo "APK built:"
           ls -la androidApp/build/outputs/apk/release/*.apk
           echo "Packages:"

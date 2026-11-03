@@ -25,7 +25,10 @@ Kotlin / Compose Multiplatform 的 Matrix 客戶端（Android + Linux 桌面）�
 
 ## 其他發行版：自行構建
 
-需要 **JDK 21+**（Android 另需 Android SDK；桌面端不需要）。
+桌面端必須使用 `gradle.properties` 固定的官方 **JBRSDK 25.0.4.1+1-b635.79**；
+stock OpenJDK 會失去 X11 fcitx5／IBus 候選窗跟隨 caret 的路徑。請從
+`jbrLinuxX64Url` 下載 `jbrTag` 對應的 SDK，以 `jbrLinuxX64Sha512` 驗檔，解壓後
+把 `JAVA_HOME` 指向該目錄。Android 另需 Android SDK；桌面端不需要。
 
 ```bash
 git clone https://github.com/Capricornus007/nashira
