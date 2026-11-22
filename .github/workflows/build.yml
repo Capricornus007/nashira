@@ -16,7 +16,7 @@ jobs:
         run: tools/setup-jbr.sh
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
 
       - name: Check translations coverage
         # 放在 Build 之前：這是純文字檢查、幾毫秒，而建置要幾分鐘。
